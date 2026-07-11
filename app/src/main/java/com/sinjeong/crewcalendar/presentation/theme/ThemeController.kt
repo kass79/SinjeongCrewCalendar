@@ -17,8 +17,9 @@ class ThemeController @Inject constructor(
     private val prefs = context.getSharedPreferences("theme", Context.MODE_PRIVATE)
 
     private val _mode = MutableStateFlow(
-        runCatching { ThemeMode.valueOf(prefs.getString("mode", null) ?: "SYSTEM") }
-            .getOrDefault(ThemeMode.SYSTEM)
+        // 기본 라이트모드 (확정) — 달 아이콘/설정에서 다크·시스템 전환
+        runCatching { ThemeMode.valueOf(prefs.getString("mode", null) ?: "LIGHT") }
+            .getOrDefault(ThemeMode.LIGHT)
     )
     val mode: StateFlow<ThemeMode> = _mode
 

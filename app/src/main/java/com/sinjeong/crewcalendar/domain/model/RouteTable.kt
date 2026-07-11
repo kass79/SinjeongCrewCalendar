@@ -2,8 +2,7 @@ package com.sinjeong.crewcalendar.domain.model
 
 /**
  * 행로표(신정승무사업소 근무표, 확인일 2023.10.04 — 시각과 대조해 현행본 확인됨) 열번·근무시간 데이터.
- * 본선(1~29 주간, 33~51 야간)만 확보됨 — 지선 행로표는 미입수.
- * 야간은 평평/휴휴/휴평만 확보 (평휴 파일 미입수).
+ * 본선(1~29 주간, 33~51 야간 4종 조합 전체) 확보 — 지선 행로표만 미입수.
  *
  * firstHalf/secondHalf: 열번을 "·"로 구분해 순서대로 나열 (회송·편승 등 특기사항 포함).
  * totalWorkTime: 근무표의 "계" 값 (운전+준비+대기+편승+정리+야간 합산) 그대로.
@@ -78,100 +77,119 @@ object RouteTable {
         25 to TrainAssignment("2175·2211·2249", "2307·2341", "8:48"),
     )
 
-    /** 본선 야간 4종 조합별 [전반, 후반, 총근무시간] — 평휴(PH)는 자료 미입수 */
+    /** 본선 야간 4종 조합별 [전반, 후반, 총근무시간] */
     val MAIN_NIGHT: Map<Int, Map<NightCombo, TrainAssignment>> = mapOf(
         33 to mapOf(
             NightCombo.PP to TrainAssignment("2343·2391·2439·5944·5925(2015열차연결)", "6:00~6:30 회송", "10:56"),
+            NightCombo.PH to TrainAssignment("2343·2391·2439·5944", "6927·(2018열차 승무원교대)", "11:01"),
             NightCombo.HH to TrainAssignment("운휴대기(33·34·35 공통)", "-", "10:30"),
             NightCombo.HP to TrainAssignment("2259·2295·2329·5932", "2015열차교대·5925", "10:55"),
         ),
         34 to mapOf(
             NightCombo.PP to TrainAssignment("2355·2403·2449", "5923·2011·2049", "11:14"),
+            NightCombo.PH to TrainAssignment("2355·2403·2449", "6923·2012·2042", "11:17"),
             NightCombo.HH to TrainAssignment("운휴대기(33·34·35 공통)", "-", "10:30"),
             NightCombo.HP to TrainAssignment("2269·2303·2339", "5923·2011·2049", "11:11"),
         ),
         35 to mapOf(
             NightCombo.PP to TrainAssignment("2336·2390·2440", "군자편승·군자출고·1936·2101", "11:14"),
+            NightCombo.PH to TrainAssignment("2336·2390·2440", "출고열차#6927교대·2018·2050", "10:36"),
             NightCombo.HH to TrainAssignment("운휴대기(33·34·35 공통)", "-", "10:30"),
             NightCombo.HP to TrainAssignment("2286·2326·2358", "6925·2014·2052", "11:18"),
         ),
         36 to mapOf(
             NightCombo.PP to TrainAssignment("2383·2431·2465", "6927·2018·2060", "11:21"),
+            NightCombo.PH to TrainAssignment("2383·2431·2465", "출고열차#5929교대·2021·2051", "10:35"),
             NightCombo.HH to TrainAssignment("2259·2295·2329·5932", "2032·2064", "11:30"),
             NightCombo.HP to TrainAssignment("2287·2321·2355", "6927·2018·2060", "11:20"),
         ),
         37 to mapOf(
             NightCombo.PP to TrainAssignment("2385·2433·2467·5948", "2032·2082", "11:38"),
+            NightCombo.PH to TrainAssignment("2385·2433·2467·5948", "6931·(2024열차 승무원교대)", "11:03"),
             NightCombo.HH to TrainAssignment("2269·2303·2339", "5923·2011·2041", "11:10"),
             NightCombo.HP to TrainAssignment("2310·2344·2376·6932", "출고열차#5925교대·2015·2057", "11:25"),
         ),
         38 to mapOf(
             NightCombo.PP to TrainAssignment("2398·2446·6942", "5925·2014·2052", "10:41"),
+            NightCombo.PH to TrainAssignment("2398·2446·6942", "5923·2011·2041", "10:33"),
             NightCombo.HH to TrainAssignment("2286·2326·2358", "6923·2012·2042", "11:14"),
             NightCombo.HP to TrainAssignment("2339·2369·2399", "6929·2020·2064", "11:20"),
         ),
         39 to mapOf(
             NightCombo.PP to TrainAssignment("2429·2463·2493·5952", "33DIA#5925출고교대·2015·2057", "11:34"),
+            NightCombo.PH to TrainAssignment("2429·2463·2493·5952", "5929·(2021열차 승무원교대)", "10:57"),
             NightCombo.HH to TrainAssignment("2287·2321·2355", "6931·2024·2056", "11:16"),
             NightCombo.HP to TrainAssignment("2341·2371·2401", "5929·2023·2075", "11:12"),
         ),
         40 to mapOf(
             NightCombo.PP to TrainAssignment("2414·2458·2488", "6929·2020·2064", "11:23"),
+            NightCombo.PH to TrainAssignment("2414·2458·2488", "출고열차#6931교대·2024·2056", "10:34"),
             NightCombo.HH to TrainAssignment("2310·2344·2376·6932", "2036·2068", "11:23"),
             NightCombo.HP to TrainAssignment("2334·2366", "5931·2027·2083", "9:44"),
         ),
         41 to mapOf(
             NightCombo.PP to TrainAssignment("2420·2462·2492", "5929·2023·2075", "11:14"),
+            NightCombo.PH to TrainAssignment("2420·2462·2492", "2032·2064", "10:34"),
             NightCombo.HH to TrainAssignment("2339·2369·2399", "6927·2018·2050", "11:17"),
             NightCombo.HP to TrainAssignment("2340·2372·2404", "2032·2082", "10:39"),
         ),
         42 to mapOf(
             NightCombo.PP to TrainAssignment("2443·2475·2501", "5931·2027·2083", "11:15"),
+            NightCombo.PH to TrainAssignment("2443·2475·2501", "2036·2068", "10:34"),
             NightCombo.HH to TrainAssignment("2341·2371·2401", "5929·2021·2051", "11:12"),
             NightCombo.HP to TrainAssignment("2342·2374·2406", "2038·2090", "10:42"),
         ),
         43 to mapOf(
             NightCombo.PP to TrainAssignment("2447·2479·2505", "5937·2043·2107", "11:18"),
+            NightCombo.PH to TrainAssignment("2447·2479·2505", "2035·2067", "10:37"),
             NightCombo.HH to TrainAssignment("2334·2366·2398·6936", "2035·2067", "11:28"),
             NightCombo.HP to TrainAssignment("신도림교대후 군자기지편승·후반군자출고·2390·2418", "1936·2101", "9:43"),
         ),
         44 to mapOf(
             NightCombo.PP to TrainAssignment("2449·2481·2507·5956", "2052·2106", "11:22"),
+            NightCombo.PH to TrainAssignment("2449·2481·2507·5956", "2042·2074", "11:31"),
             NightCombo.HH to TrainAssignment("2340·2372·2404", "2042·2074", "10:33"),
             NightCombo.HP to TrainAssignment("2355·2385", "5937·2043·2107", "9:44"),
         ),
         45 to mapOf(
             NightCombo.PP to TrainAssignment("대림승무원교대·2453·2485·2511·5958", "2038·2090", "11:41"),
+            NightCombo.PH to TrainAssignment("2453·2485·2511·5958", "2041·2075", "11:37"),
             NightCombo.HH to TrainAssignment("2342·2374·2406", "2041·2075", "10:38"),
             NightCombo.HP to TrainAssignment("2366·2398·6936", "2039·2103", "10:01"),
         ),
         46 to mapOf(
             NightCombo.PP to TrainAssignment("2440·2474·2504·6952", "2039·2103", "11:31"),
+            NightCombo.PH to TrainAssignment("2440·2474·2504·6952", "2050·2082", "11:09"),
             NightCombo.HH to TrainAssignment("2358·2390·2418·6942", "2050·2082", "11:05"),
             NightCombo.HP to TrainAssignment("2390·2418·6942", "2064·2118", "9:43"),
         ),
         47 to mapOf(
             NightCombo.PP to TrainAssignment("2465·2495·2519·5962", "2064·2118", "11:21"),
+            NightCombo.PH to TrainAssignment("2465·2495·2519·5962", "2051·2087", "11:18"),
             NightCombo.HH to TrainAssignment("2355·2385·2413·5938", "2051·2087", "11:13"),
             NightCombo.HP to TrainAssignment("2385·2413·5938", "2052·2106", "9:49"),
         ),
         48 to mapOf(
             NightCombo.PP to TrainAssignment("2488·2514·홍대입구역주박·2004", "2032", "9:05"),
+            NightCombo.PH to TrainAssignment("2488·2514·홍대입구역주박·2004", "2032", "9:03"),
             NightCombo.HH to TrainAssignment("2404·2430·홍대입구역주박·2004", "2032", "9:59"),
             NightCombo.HP to TrainAssignment("2404·2430·홍대입구역주박·2004", "2032", "10:01"),
         ),
         49 to mapOf(
             NightCombo.PP to TrainAssignment("2492·2516·신도림역주박·2006", "2038", "8:51"),
+            NightCombo.PH to TrainAssignment("2492·2516·신도림역주박·2006", "2036", "9:03"),
             NightCombo.HH to TrainAssignment("2406·2432·신도림역주박·2006", "2036", "10:03"),
             NightCombo.HP to TrainAssignment("2406·2432·신도림역주박·2006", "2038", "9:51"),
         ),
         50 to mapOf(
             NightCombo.PP to TrainAssignment("2501·2523·신도림역주박·2005", "2039", "8:52"),
+            NightCombo.PH to TrainAssignment("2501·2523·신도림역주박·2005", "2035", "9:03"),
             NightCombo.HH to TrainAssignment("2399·2423·신도림역주박·2005", "2035", "9:59"),
             NightCombo.HP to TrainAssignment("2399·2423·신도림역주박·2005", "2039", "9:48"),
         ),
         51 to mapOf(
             NightCombo.PP to TrainAssignment("2505·2525·홍대입구역주박·2009", "2045", "8:50"),
+            NightCombo.PH to TrainAssignment("2505·2525·홍대입구역주박·2009", "2039", "8:48"),
             NightCombo.HH to TrainAssignment("2401·2425·홍대입구역주박·2009", "2039", "9:48"),
             NightCombo.HP to TrainAssignment("2401·2425·홍대입구역주박·2009", "2045", "9:50"),
         ),
