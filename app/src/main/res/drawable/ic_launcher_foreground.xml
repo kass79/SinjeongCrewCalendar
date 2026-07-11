@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 전동차 앞모습 (흰색) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.5" android:scaleY="0.5" android:translateX="27" android:translateY="27">
+        <path
+            android:fillColor="#FFFFFF"
+            android:pathData="M54,9C36,9 18,11.25 18,27v42.75C18,78.44 25.06,85.5 33.75,85.5L27,92.25v2.25h10.04l9,-9h16.97l9,9H82v-2.25l-6.75,-6.75c8.69,0 15.75,-7.06 15.75,-15.75V27c0,-15.75 -18,-18 -36,-18zM33.75,76.5c-3.73,0 -6.75,-3.02 -6.75,-6.75s3.02,-6.75 6.75,-6.75 6.75,3.02 6.75,6.75 -3.02,6.75 -6.75,6.75zM49.5,45H27V27h22.5v18zM74.25,76.5c-3.73,0 -6.75,-3.02 -6.75,-6.75s3.02,-6.75 6.75,-6.75 6.75,3.02 6.75,6.75 -3.02,6.75 -6.75,6.75zM81,45H58.5V27H81v18z"/>
+    </group>
+</vector>

@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">신정승무 캘린더</string>
+    <string name="widget_label">오늘/내일 근무</string>
+</resources>

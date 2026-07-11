@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+build/
+app/build/
+
+# Android Studio / IDE
+.idea/
+*.iml
+.kotlin/
+captures/
+
+# 로컬 환경 (SDK 경로 — PC마다 다름)
+local.properties
+
+# 서명/비밀 (절대 커밋 금지)
+*.jks
+*.keystore
+keystore.properties
+google-services.json
+
+# 기타
+.DS_Store
+*.log

@@ -1,0 +1,701 @@
+package com.sinjeong.crewcalendar.presentation.calendar
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Today
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.CrewGroup
+import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.model.DutyCode
+import com.sinjeong.crewcalendar.domain.model.DutyType
+import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
+import com.sinjeong.crewcalendar.presentation.theme.DutyColors
+import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
+import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
+import java.time.DayOfWeek
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.time.format.TextStyle
+import java.time.temporal.ChronoUnit
+import java.util.Locale
+
+/**
+ * 메인 달력 화면 (시안 v10).
+ * 앱바: ‹월› · 휴N개 칩 · 근무선택 칩 · 테마 토글 · 오늘
+ * 셀: 근무 칩 + 출근시각 + 메모 (근무변경 시 원래근무/새근무 2줄)
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainCalendarScreen(
+    viewModel: MainCalendarViewModel = hiltViewModel(),
+) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val themeMode by viewModel.themeController.mode.collectAsStateWithLifecycle()
+    val systemDark = isSystemInDarkTheme()
+    val isDark = when (themeMode) {
+        ThemeMode.DARK -> true
+        ThemeMode.LIGHT -> false
+        ThemeMode.SYSTEM -> systemDark
+    }
+    val snackbar = remember { SnackbarHostState() }
+
+    LaunchedEffect(state.error) {
+        state.error?.let { snackbar.showSnackbar(it); viewModel.dismissError() }
+    }
+
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { viewModel.moveMonth(-1) }) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "이전 달")
+                        }
+                        Text(
+                            state.month.format(DateTimeFormatter.ofPattern("yyyy년 M월")),
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.ExtraBold,
+                        )
+                        IconButton(onClick = { viewModel.moveMonth(1) }) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 달")
+                        }
+                    }
+                },
+                actions = {
+                    RestCountChip(state.restDayCount)
+                    Spacer(Modifier.width(6.dp))
+                    FilledTonalButton(
+                        onClick = { viewModel.openDutyPicker(LocalDate.now()) },
+                        contentPadding = PaddingValues(horizontal = 13.dp),
+                        modifier = Modifier.height(36.dp),
+                    ) { Text("근무선택", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
+                    IconButton(onClick = { viewModel.toggleTheme(isDark) }) {
+                        Icon(
+                            if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
+                            "다크/라이트 전환",
+                        )
+                    }
+                    IconButton(onClick = viewModel::goToday) { Icon(Icons.Default.Today, "오늘로") }
+                },
+            )
+        },
+    ) { padding ->
+        Column(Modifier.padding(padding).fillMaxSize()) {
+            state.today?.let {
+                TodaySummaryCard(it, groupLabel = state.currentGroup?.label,
+                    onClick = { viewModel.selectDate(it.date) })
+            }
+
+            WeekdayHeader()
+
+            if (state.isLoading) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+            } else {
+                CalendarGrid(
+                    month = state.month,
+                    days = state.days,
+                    selected = state.selectedDate,
+                    onSelect = viewModel::selectDate,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+    }
+
+    // 날짜 탭 → 상세 시트 (출근시간·전반/후반사업·근무시간·메모·근무변경)
+    state.selectedDate?.let { date ->
+        state.days.firstOrNull { it.date == date }?.let { day ->
+            DayDetailSheet(
+                day = day,
+                onDismiss = { viewModel.selectDate(null) },
+                onSaveMemo = { viewModel.saveMemo(date, it) },
+                onPickDuty = { viewModel.openDutyPicker(date) },
+                onChangeDuty = { viewModel.openDutyChange(date) },
+                onRevert = { viewModel.changeDuty(date, null) },
+            )
+        }
+    }
+
+    // 근무선택: ① 소속 → ② 근무
+    state.picker?.let { picker ->
+        DutyPickerSheet(
+            picker = picker,
+            currentGroup = state.currentGroup,
+            currentOffset = state.user?.patternOffset ?: 0,
+            onPickGroup = viewModel::pickGroup,
+            onBack = viewModel::backToGroupStep,
+            onPick = viewModel::confirmDutyPosition,
+            onDismiss = viewModel::closeDutyPicker,
+        )
+    }
+
+    // 근무변경: 이 날짜 하루만
+    state.changeDate?.let { date ->
+        state.days.firstOrNull { it.date == date }?.let { day ->
+            DutyChangeSheet(
+                day = day,
+                onChange = { viewModel.changeDuty(date, it) },
+                onRevert = { viewModel.changeDuty(date, null) },
+                onDismiss = viewModel::closeDutyChange,
+            )
+        }
+    }
+}
+
+/* ── 앱바 휴일갯수 칩 (작고 옅게) ─────────────────────── */
+@Composable
+private fun RestCountChip(count: Int) {
+    val duty = LocalDutyColors.current
+    Surface(
+        color = duty.rest.copy(alpha = 0.45f),
+        contentColor = duty.onRest.copy(alpha = 0.8f),
+        shape = RoundedCornerShape(999.dp),
+    ) {
+        Text(
+            "휴 ${count}개",
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+            fontSize = 10.5.sp, fontWeight = FontWeight.Bold,
+        )
+    }
+}
+
+/* ── 근무 종별 색 (공용) ──────────────────────────────── */
+private fun dutyChipColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Color, Color> =
+    when (type) {
+        DutyType.MAIN_DAY, DutyType.OFFICE -> duty.main to duty.onMain
+        DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> duty.night to duty.onNight
+        DutyType.POST_NIGHT -> duty.off to duty.onOff
+        DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
+        DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
+        DutyType.BRANCH -> duty.branch to duty.onBranch
+        DutyType.ETC -> Color.Transparent to fallback
+    }
+
+/* ── 오늘 요약 카드 ───────────────────────────────────── */
+@Composable
+private fun TodaySummaryCard(today: TodayDuty, groupLabel: String?, onClick: () -> Unit) {
+    val duty = LocalDutyColors.current
+    Card(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer,
+            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+        ),
+        shape = RoundedCornerShape(18.dp),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Column {
+                Text(
+                    "오늘 · ${today.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)}",
+                    style = MaterialTheme.typography.labelSmall,
+                )
+                Text(
+                    "${today.date.dayOfMonth}",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                )
+            }
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "${today.duty.display.ifBlank { "근무 없음" }} 근무",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    groupLabel?.let {
+                        Surface(color = duty.branch, contentColor = duty.onBranch, shape = RoundedCornerShape(5.dp)) {
+                            Text(it, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                        }
+                    }
+                }
+                val sub = buildString {
+                    today.signOn?.let { append("출근 $it") }
+                    if (today.memo.isNotBlank()) {
+                        if (isNotEmpty()) append(" · ")
+                        append(today.memo)
+                    }
+                }
+                if (sub.isNotBlank()) Text(
+                    sub, style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+    }
+}
+
+/* ── 요일 헤더 ────────────────────────────────────────── */
+@Composable
+private fun WeekdayHeader() {
+    val duty = LocalDutyColors.current
+    Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
+        listOf(DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
+            DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY).forEach { dow ->
+            Text(
+                dow.getDisplayName(TextStyle.SHORT, Locale.KOREAN),
+                modifier = Modifier.weight(1f),
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = FontWeight.Bold,
+                color = when (dow) {
+                    DayOfWeek.SUNDAY -> duty.sunday
+                    DayOfWeek.SATURDAY -> duty.saturday
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
+}
+
+/* ── 달력 그리드 ──────────────────────────────────────── */
+@Composable
+private fun CalendarGrid(
+    month: YearMonth,
+    days: List<DaySchedule>,
+    selected: LocalDate?,
+    onSelect: (LocalDate) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val leading = month.atDay(1).dayOfWeek.value % 7
+    val cells: List<DaySchedule?> = List(leading) { null } + days
+
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(7),
+        modifier = modifier.padding(horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(3.dp),
+        userScrollEnabled = false,
+    ) {
+        items(cells.size, key = { it }) { i ->
+            val day = cells[i]
+            if (day == null) Spacer(Modifier.height(92.dp))
+            else DayCell(day, isSelected = day.date == selected, onClick = { onSelect(day.date) })
+        }
+    }
+}
+
+@Composable
+private fun DayCell(day: DaySchedule, isSelected: Boolean, onClick: () -> Unit) {
+    val duty = LocalDutyColors.current
+    val isToday = day.date == LocalDate.now()
+    val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+
+    Column(
+        Modifier
+            .height(92.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .then(
+                when {
+                    isToday -> Modifier
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                    isSelected -> Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    // 칸 구분: 희미한 라운드 사각형
+                    else -> Modifier
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .border(
+                            1.dp,
+                            MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
+                            RoundedCornerShape(10.dp),
+                        )
+                }
+            )
+            .clickable(onClick = onClick)
+            .padding(vertical = 3.dp, horizontal = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        // 날짜 줄: 공휴일이면 숫자 빨강, 이름 표시 (기념일은 이름만 빨강)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "${day.date.dayOfMonth}",
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.SemiBold,
+                color = when {
+                    isToday -> MaterialTheme.colorScheme.primary
+                    day.holidayName != null || day.date.dayOfWeek == DayOfWeek.SUNDAY -> duty.sunday
+                    day.date.dayOfWeek == DayOfWeek.SATURDAY -> duty.saturday
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(start = 3.dp),
+            )
+            val nameTag = day.holidayName ?: day.memorialName ?: day.seasonalTerm
+            nameTag?.let {
+                Spacer(Modifier.weight(1f))
+                Text(
+                    it, fontSize = 8.sp, maxLines = 1,
+                    color = if (day.holidayName != null || day.memorialName != null) duty.sunday else duty.onStandby,
+                )
+            }
+        }
+        // 근무변경된 날: 원래 근무 작게(취소선) + 새 근무 2줄
+        if (day.isOverridden && day.originalDutyRaw != null) {
+            Text(
+                DutyCode.parse(day.originalDutyRaw).display,
+                fontSize = 8.5.sp, fontWeight = FontWeight.Bold,
+                textDecoration = TextDecoration.LineThrough,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                maxLines = 1,
+            )
+        }
+        if (day.duty.raw.isNotBlank()) {
+            Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
+                Text(
+                    day.duty.display,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
+                )
+            }
+        }
+        day.signOn?.let {
+            Text(
+                it, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        if (day.memo.isNotBlank()) {
+            Text(
+                day.memo, fontSize = 8.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/* ── 날짜 상세 시트 (기존 앱 형식: 출근시간/전반사업/후반사업/근무시간) ── */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DayDetailSheet(
+    day: DaySchedule,
+    onDismiss: () -> Unit,
+    onSaveMemo: (String) -> Unit,
+    onPickDuty: () -> Unit,
+    onChangeDuty: () -> Unit,
+    onRevert: () -> Unit,
+) {
+    val duty = LocalDutyColors.current
+    var memo by remember(day.date) { mutableStateOf(day.memo) }
+    val row = Bundled.timeRowFor(day.duty, day.date)
+    val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
+    val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    val isDia = day.duty.type in setOf(DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT)
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+                )
+                (day.holidayName ?: day.memorialName)?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold, color = duty.sunday)
+                }
+                day.seasonalTerm?.let {
+                    Text(it, style = MaterialTheme.typography.labelSmall, color = duty.onStandby)
+                }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(10.dp)) {
+                    Text(
+                        buildString {
+                            append(day.duty.display.ifBlank { "근무 없음" })
+                            if (isDia) append(" Dia")
+                            combo?.let { append(" (${it.label})") }
+                        },
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        fontWeight = FontWeight.ExtraBold, fontSize = 15.sp,
+                    )
+                }
+                if (day.duty.isBranch) Surface(color = duty.branch, contentColor = duty.onBranch, shape = RoundedCornerShape(6.dp)) {
+                    Text("지선", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                Surface(
+                    onClick = onChangeDuty,
+                    color = duty.standby, contentColor = duty.onStandby,
+                    shape = RoundedCornerShape(999.dp),
+                ) {
+                    Text("근무변경", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+                }
+            }
+            if (day.isOverridden && day.originalDutyRaw != null) {
+                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(10.dp)) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            "✱ 수동변경됨 · 패턴값: ${DutyCode.parse(day.originalDutyRaw).display}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        Spacer(Modifier.weight(1f))
+                        TextButton(onClick = onRevert) { Text("되돌리기", fontSize = 12.sp) }
+                    }
+                }
+            }
+            row?.let { r ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    KvRow("출근시간", r.signOn)
+                    r.firstLeg?.let { KvRow("전반사업", it) }
+                    r.secondLeg?.let { KvRow("후반사업", it) }
+                    r.workTimeLabel?.let { KvRow("근무시간", it) }
+                    if (r.overnight && r.firstLeg == null) KvRow("종료", "익일 ${r.signOff}")
+                    else if (r.firstLeg == null) KvRow("종료", r.signOff)
+                }
+            }
+            OutlinedTextField(
+                value = memo, onValueChange = { memo = it },
+                label = { Text("메모") }, modifier = Modifier.fillMaxWidth(),
+                minLines = 2,
+            )
+            Row(Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = onPickDuty) { Text("근무선택") }
+                Spacer(Modifier.weight(1f))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = { onSaveMemo(""); onDismiss() }) { Text("삭제") }
+                    TextButton(onClick = onDismiss) { Text("취소") }
+                    Button(onClick = { onSaveMemo(memo); onDismiss() }) { Text("저장") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun KvRow(key: String, value: String) {
+    Row {
+        Text(
+            key, modifier = Modifier.width(82.dp),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.ExtraBold)
+    }
+}
+
+/* ── 근무선택 시트: ① 소속 → ② 근무 그리드 ─────────────── */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DutyPickerSheet(
+    picker: DutyPickerState,
+    currentGroup: CrewGroup?,
+    currentOffset: Int,
+    onPickGroup: (CrewGroup) -> Unit,
+    onBack: () -> Unit,
+    onPick: (Int) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val duty = LocalDutyColors.current
+    val dateLabel = picker.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (picker.group == null) {
+                // 1단계: 소속
+                Text(
+                    "근무선택  1/2 · 소속",
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+                )
+                Text("먼저 소속을 고르세요.", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                CrewGroup.entries.forEach { g ->
+                    val isCurrent = g == currentGroup
+                    OutlinedCard(
+                        onClick = { onPickGroup(g) },
+                        border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                        else CardDefaults.outlinedCardBorder(),
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                            Text(g.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                            Text(
+                                "${Bundled.patternFor(g).length}칸 교번 순환" + if (isCurrent) " · 현재 선택" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            } else {
+                // 2단계: 근무 그리드
+                val pattern = Bundled.patternFor(picker.group)
+                val days = ChronoUnit.DAYS.between(pattern.anchorDate, picker.date).toInt()
+                val currentIndex = if (picker.group == currentGroup)
+                    Math.floorMod(days + currentOffset, pattern.length) else -1
+
+                Text(
+                    "근무선택  2/2 · ${picker.group.label}",
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+                )
+                TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
+                Text(
+                    "$dateLabel 내 근무를 고르세요. 앞뒤 모든 날짜가 교번 순서대로 자동 입력됩니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(6),
+                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    modifier = Modifier.heightIn(max = 340.dp),
+                ) {
+                    items(pattern.sequence.size) { i ->
+                        val code = DutyCode.parse(pattern.sequence[i])
+                        val (bg, fg) = dutyChipColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                        Surface(
+                            onClick = { onPick(i) },
+                            color = bg, contentColor = fg,
+                            shape = RoundedCornerShape(9.dp),
+                            border = if (i == currentIndex) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                        ) {
+                            Text(
+                                code.display,
+                                modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth(),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "※ 언제든 다시 선택 가능 — 근무가 밀렸을 때 그 날짜 기준으로 다시 찍으면 됩니다.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/* ── 근무변경 시트: 직접입력 / 변경없음 / 25종 목록 ─────── */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DutyChangeSheet(
+    day: DaySchedule,
+    onChange: (String) -> Unit,
+    onRevert: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val duty = LocalDutyColors.current
+    var manualMode by remember { mutableStateOf(false) }
+    var manualText by remember { mutableStateOf("") }
+    val dateLabel = day.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
+    val originalLabel = DutyCode.parse(day.originalDutyRaw ?: day.duty.raw).display
+
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Text(
+                "근무변경  $dateLabel 하루만 · 패턴 유지",
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+            )
+            OutlinedCard(onClick = { manualMode = !manualMode }) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("직접입력", fontWeight = FontWeight.ExtraBold)
+                    Text("교번·다이아 등 자유 입력 (예: 지7, 45)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            if (manualMode) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = manualText, onValueChange = { manualText = it },
+                        placeholder = { Text("예: 지7, 45, 대2, 회의") },
+                        modifier = Modifier.weight(1f), singleLine = true,
+                    )
+                    Button(onClick = { if (manualText.isNotBlank()) onChange(manualText.trim()) }) { Text("적용") }
+                }
+            }
+            OutlinedCard(onClick = onRevert) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("변경없음 (원래 근무)", fontWeight = FontWeight.ExtraBold)
+                    Text("패턴값 ${originalLabel}(으)로 되돌리기",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(3),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier.heightIn(max = 300.dp),
+                userScrollEnabled = true,
+            ) {
+                items(DutyCode.CHANGE_OPTIONS.size) { i ->
+                    val code = DutyCode.CHANGE_OPTIONS[i]
+                    val parsed = DutyCode.parse(code)
+                    val (bg, fg) = dutyChipColors(parsed.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    Surface(
+                        onClick = { onChange(code) },
+                        color = bg, contentColor = fg,
+                        shape = RoundedCornerShape(9.dp),
+                        border = if (code == day.duty.raw) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                    ) {
+                        Text(
+                            code,
+                            modifier = Modifier.padding(vertical = 10.dp).fillMaxWidth(),
+                            textAlign = TextAlign.Center,
+                            fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+                        )
+                    }
+                }
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }
+        }
+    }
+}
