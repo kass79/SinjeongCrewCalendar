@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -24,14 +26,26 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // 플레이스토어 업로드용 서명 (keystore.properties는 git 제외 — 분실 주의!)
+    val ksProps = rootProject.file("keystore.properties")
+    if (ksProps.exists()) {
+        val p = Properties().apply { ksProps.inputStream().use { load(it) } }
+        signingConfigs {
+            create("release") {
+                storeFile = rootProject.file(p.getProperty("storeFile"))
+                storePassword = p.getProperty("storePassword")
+                keyAlias = p.getProperty("keyAlias")
+                keyPassword = p.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            // ponytail: 미니파이 끔 — R8 규칙 검증 전엔 안정성 우선, 용량 줄일 때 다시 켜기
+            isMinifyEnabled = false
+            isShrinkResources = false
+            if (ksProps.exists()) signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
