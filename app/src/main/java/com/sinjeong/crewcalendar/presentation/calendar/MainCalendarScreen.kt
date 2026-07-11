@@ -4,6 +4,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -20,6 +21,7 @@ import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -36,6 +38,8 @@ import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
+import com.sinjeong.crewcalendar.domain.model.MainLegs
+import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
@@ -128,6 +132,7 @@ fun MainCalendarScreen(
                     days = state.days,
                     selected = state.selectedDate,
                     onSelect = viewModel::selectDate,
+                    onSwipeMonth = viewModel::moveMonth,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -292,14 +297,28 @@ private fun CalendarGrid(
     days: List<DaySchedule>,
     selected: LocalDate?,
     onSelect: (LocalDate) -> Unit,
+    onSwipeMonth: (Long) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val leading = month.atDay(1).dayOfWeek.value % 7
     val cells: List<DaySchedule?> = List(leading) { null } + days
+    var dragX by remember { mutableFloatStateOf(0f) }
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(7),
-        modifier = modifier.padding(horizontal = 8.dp),
+        modifier = modifier
+            .padding(horizontal = 8.dp)
+            // 손가락 스와이프로 월 이동 (좌←다음달, 우→이전달)
+            .pointerInput(month) {
+                detectHorizontalDragGestures(
+                    onDragStart = { dragX = 0f },
+                    onHorizontalDrag = { _, delta -> dragX += delta },
+                    onDragEnd = {
+                        if (dragX < -120f) onSwipeMonth(1)
+                        else if (dragX > 120f) onSwipeMonth(-1)
+                    },
+                )
+            },
         verticalArrangement = Arrangement.spacedBy(3.dp),
         horizontalArrangement = Arrangement.spacedBy(3.dp),
         userScrollEnabled = false,
@@ -480,14 +499,43 @@ private fun DayDetailSheet(
                     }
                 }
             }
+            // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
+            val holiday = Bundled.isHolidayTimetable(day.date)
+            val isNight = day.duty.type == DutyType.MAIN_NIGHT
+            val mainLegs = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
+                if (isNight) combo?.let { MainLegs.forNight(n, it) } else MainLegs.forDay(n, holiday)
+            }
+            val trains = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
+                if (isNight) combo?.let { RouteTable.forMainNight(n, it) }
+                else RouteTable.forMainDay(n, holiday)
+            }
+            val branchLegs = if (day.duty.isBranch) row?.let { r ->
+                r.firstLeg?.let { f -> r.secondLeg?.let { s -> f to s } }
+            } else null
+            fun fmtLeg(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", " ▼")
+
             row?.let { r ->
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    KvRow("출근시간", r.signOn)
-                    r.firstLeg?.let { KvRow("전반사업", it) }
-                    r.secondLeg?.let { KvRow("후반사업", it) }
-                    r.workTimeLabel?.let { KvRow("근무시간", it) }
-                    if (r.overnight && r.firstLeg == null) KvRow("종료", "익일 ${r.signOff}")
-                    else if (r.firstLeg == null) KvRow("종료", r.signOff)
+                    when {
+                        mainLegs != null -> {
+                            KvRow("전반사업", "${mainLegs[0]}~${mainLegs[1]}")
+                            KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
+                            KvRow("후반사업", "${mainLegs[2]}~${mainLegs[3]}" + if (isNight) " (익일)" else "")
+                            KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
+                            trains?.let { KvRow("총근무시간", it.totalWorkTime) }
+                        }
+                        branchLegs != null -> {
+                            KvRow("전반사업", fmtLeg(branchLegs.first))
+                            KvRow("└ 열번", "지선 행로표 입수 전", sub = true)
+                            KvRow("후반사업", fmtLeg(branchLegs.second))
+                            KvRow("└ 열번", "지선 행로표 입수 전", sub = true)
+                            r.workTimeLabel?.let { KvRow("총근무시간", it) }
+                        }
+                        else -> {
+                            KvRow("출근", r.signOn)
+                            KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
+                        }
+                    }
                 }
             }
             OutlinedTextField(
@@ -509,14 +557,19 @@ private fun DayDetailSheet(
 }
 
 @Composable
-private fun KvRow(key: String, value: String) {
+private fun KvRow(key: String, value: String, sub: Boolean = false) {
     Row {
         Text(
             key, modifier = Modifier.width(82.dp),
-            style = MaterialTheme.typography.labelMedium,
+            style = if (sub) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.ExtraBold)
+        Text(
+            value,
+            style = if (sub) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
+            fontWeight = if (sub) FontWeight.Bold else FontWeight.ExtraBold,
+            color = if (sub) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

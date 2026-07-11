@@ -24,8 +24,14 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinjeong.crewcalendar.presentation.auth.AuthViewModel
+import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.diaboard.DiaBoardScreen
+import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
+import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
@@ -63,6 +69,14 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
 
 @Composable
 private fun AppRoot() {
+    // 이름+사번 로그인 게이트
+    val authVm: AuthViewModel = hiltViewModel()
+    val user by authVm.user.collectAsStateWithLifecycle()
+    if (user == null) {
+        LoginScreen(onLogin = authVm::login)
+        return
+    }
+
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val currentDest = backStack?.destination
@@ -94,8 +108,8 @@ private fun AppRoot() {
         ) {
             composable(Tab.Calendar.route) { MainCalendarScreen() }
             composable(Tab.DiaBoard.route) { DiaBoardScreen() }
-            composable(Tab.Mates.route) { PlaceholderScreen("동료 근무 — 다음 단계 구현") }
-            composable(Tab.Settings.route) { PlaceholderScreen("설정 — 다음 단계 구현") }
+            composable(Tab.Mates.route) { MatesScreen() }
+            composable(Tab.Settings.route) { SettingsScreen() }
         }
     }
 }

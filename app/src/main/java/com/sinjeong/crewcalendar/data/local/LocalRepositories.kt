@@ -25,32 +25,44 @@ class LocalUserRepository @Inject constructor(
 ) : UserRepository {
     private val prefs = context.getSharedPreferences("local_user", Context.MODE_PRIVATE)
 
-    private fun load(): User = User(
-        uid = "local",
-        name = prefs.getString("name", "게스트") ?: "게스트",
-        role = runCatching { CrewRole.valueOf(prefs.getString("role", null) ?: "") }
-            .getOrDefault(CrewRole.DRIVER_BRANCH),
-        // 첫 실행 기본값: 지선 패턴 (2026-07-01 = 지3 라인)
-        patternId = prefs.getString("patternId", Bundled.BRANCH_PATTERN.id),
-        patternOffset = prefs.getInt("patternOffset", 0),
-        visibleToOthers = prefs.getBoolean("visible", true),
-    )
+    /** 이름+사번 로그인 전에는 null → 로그인 화면 게이트 */
+    private fun load(): User? {
+        val name = prefs.getString("name", "") ?: ""
+        val empNo = prefs.getString("empNo", "") ?: ""
+        if (name.isBlank() || empNo.isBlank()) return null
+        return User(
+            uid = empNo,
+            name = name,
+            role = runCatching { CrewRole.valueOf(prefs.getString("role", null) ?: "") }
+                .getOrDefault(CrewRole.DRIVER_BRANCH),
+            patternId = prefs.getString("patternId", Bundled.BRANCH_PATTERN.id),
+            patternOffset = prefs.getInt("patternOffset", 0),
+            visibleToOthers = prefs.getBoolean("visible", true),
+        )
+    }
 
     private val state = MutableStateFlow<User?>(load())
 
-    override val currentUid: String get() = "local"
+    override val currentUid: String get() = state.value?.uid ?: "local"
 
     override fun observeMe(): Flow<User?> = state
 
     override suspend fun upsert(user: User) {
         prefs.edit()
             .putString("name", user.name)
+            .putString("empNo", user.uid)
             .putString("role", user.role.name)
             .putString("patternId", user.patternId)
             .putInt("patternOffset", user.patternOffset)
             .putBoolean("visible", user.visibleToOthers)
             .apply()
-        state.value = user.copy(uid = "local")
+        state.value = user
+    }
+
+    /** 로그아웃: 로그인 정보만 지우고 근무기록(스냅샷·메모)은 남긴다 */
+    suspend fun logout() {
+        prefs.edit().remove("name").remove("empNo").apply()
+        state.value = null
     }
 
     override suspend fun searchByName(query: String): List<User> = emptyList()
@@ -58,7 +70,7 @@ class LocalUserRepository @Inject constructor(
     override suspend fun updateFcmToken(token: String) = Unit
 
     override suspend fun updatePatternPosition(patternId: String, offset: Int) {
-        val cur = state.value ?: load()
+        val cur = state.value ?: return // 로그인 전에는 근무선택 불가
         upsert(cur.copy(patternId = patternId, patternOffset = offset))
     }
 }
@@ -138,4 +150,74 @@ class LocalHolidayRepository @Inject constructor() : HolidayRepository {
             .mapValues { it.value to true } +
             Bundled.MEMORIAL_DAYS.filterKeys { YearMonth.from(it) == month }
                 .mapValues { it.value to false }
+}
+
+/** 월별 근무기록: 지난 달을 처음 계산할 때 동결 저장 → 이후 근무선택이 바뀌어도 불변 */
+@Singleton
+class LocalSnapshotRepository @Inject constructor(
+    @ApplicationContext context: Context,
+) : SnapshotRepository {
+    private val prefs = context.getSharedPreferences("month_snapshots", Context.MODE_PRIVATE)
+
+    private fun key(uid: String, month: YearMonth) = "$uid|$month"
+
+    override suspend fun load(uid: String, month: YearMonth): Map<LocalDate, String>? {
+        val raw = prefs.getString(key(uid, month), null) ?: return null
+        return runCatching {
+            val o = JSONObject(raw)
+            o.keys().asSequence().associate { d -> LocalDate.parse(d) to o.getString(d) }
+        }.getOrNull()
+    }
+
+    override suspend fun save(uid: String, month: YearMonth, duties: Map<LocalDate, String>) {
+        val o = JSONObject()
+        duties.forEach { (d, duty) -> o.put(d.toString(), duty) }
+        prefs.edit().putString(key(uid, month), o.toString()).apply()
+    }
+
+    override suspend fun savedMonths(uid: String): List<YearMonth> =
+        prefs.all.keys.filter { it.startsWith("$uid|") }
+            .mapNotNull { runCatching { YearMonth.parse(it.substringAfter("|")) }.getOrNull() }
+            .sortedDescending()
+}
+
+/** 동료 로컬 저장 (Firebase 연동 시 자동 공유로 교체) */
+@Singleton
+class LocalMateRepository @Inject constructor(
+    @ApplicationContext context: Context,
+) : MateRepository {
+    private val prefs = context.getSharedPreferences("mates", Context.MODE_PRIVATE)
+
+    private fun loadAll(): List<Mate> =
+        prefs.all.mapNotNull { (name, value) ->
+            runCatching {
+                val o = JSONObject(value as String)
+                Mate(
+                    name = name,
+                    group = runCatching { CrewGroup.valueOf(o.optString("group")) }
+                        .getOrDefault(CrewGroup.BRANCH),
+                    patternOffset = o.optInt("offset"),
+                    favGroup = o.optString("fav").takeIf { it.isNotBlank() }
+                        ?.let { runCatching { FavGroup.valueOf(it) }.getOrNull() },
+                )
+            }.getOrNull()
+        }.sortedBy { it.name }
+
+    private val state = MutableStateFlow(loadAll())
+
+    override fun observeMates(): Flow<List<Mate>> = state
+
+    override suspend fun upsert(mate: Mate) {
+        val o = JSONObject()
+            .put("group", mate.group.name)
+            .put("offset", mate.patternOffset)
+            .put("fav", mate.favGroup?.name ?: "")
+        prefs.edit().putString(mate.name, o.toString()).apply()
+        state.value = loadAll()
+    }
+
+    override suspend fun remove(name: String) {
+        prefs.edit().remove(name).apply()
+        state.value = loadAll()
+    }
 }

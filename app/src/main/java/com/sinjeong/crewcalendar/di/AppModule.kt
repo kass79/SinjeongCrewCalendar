@@ -25,4 +25,6 @@ abstract class RepositoryModule {
     @Binds abstract fun bindDiaRepo(impl: LocalDiaRepository): DiaRepository
     @Binds abstract fun bindScheduleRepo(impl: LocalScheduleRepository): ScheduleRepository
     @Binds abstract fun bindHolidayRepo(impl: LocalHolidayRepository): HolidayRepository
+    @Binds abstract fun bindSnapshotRepo(impl: LocalSnapshotRepository): SnapshotRepository
+    @Binds abstract fun bindMateRepo(impl: LocalMateRepository): MateRepository
 }

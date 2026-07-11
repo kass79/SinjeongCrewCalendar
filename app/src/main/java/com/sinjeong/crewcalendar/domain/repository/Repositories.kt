@@ -39,3 +39,20 @@ interface HolidayRepository {
     suspend fun getHolidays(month: YearMonth): Map<LocalDate, Pair<String, Boolean>> // name, isPublic
 }
 
+/**
+ * 월별 근무기록 스냅샷 — 지난 달은 그때 근무 그대로 보존.
+ * (근무선택을 다시 해서 패턴 위치가 바뀌어도 과거 월 기록은 변하지 않는다)
+ */
+interface SnapshotRepository {
+    suspend fun load(uid: String, month: YearMonth): Map<LocalDate, String>?
+    suspend fun save(uid: String, month: YearMonth, duties: Map<LocalDate, String>)
+    suspend fun savedMonths(uid: String): List<YearMonth>
+}
+
+/** 동료 (체험판: 수동 등록 · Firebase 연동 시 로그인 사용자끼리 자동 공유로 전환) */
+interface MateRepository {
+    fun observeMates(): Flow<List<Mate>>
+    suspend fun upsert(mate: Mate)
+    suspend fun remove(name: String)
+}
+
