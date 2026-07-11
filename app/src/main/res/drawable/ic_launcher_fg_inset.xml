@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 마스코트 아트를 안전영역에 맞게 살짝 축소 (원형 마스크에서 모서리만 잘리도록) -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_fg"
+    android:inset="10%" />
