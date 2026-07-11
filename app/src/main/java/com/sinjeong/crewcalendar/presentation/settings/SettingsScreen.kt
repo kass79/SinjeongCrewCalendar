@@ -139,7 +139,7 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
 
             // 문의 · 저작권
             SectionTitle("문의")
-            SettingRow(title = "Contact", sub = "kass7942@gmail.com")
+            SettingRow(title = "kass7942@gmail.com", sub = "근무 수정·건의는 메일로")
             Text(
                 "© 2026 Kang SungJin. All rights reserved.",
                 style = MaterialTheme.typography.labelSmall,

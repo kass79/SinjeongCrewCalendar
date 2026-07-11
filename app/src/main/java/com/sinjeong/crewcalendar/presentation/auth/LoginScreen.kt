@@ -9,6 +9,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.TextAlign
 import com.sinjeong.crewcalendar.R
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -126,11 +127,23 @@ fun LoginScreen(onLogin: (name: String, employeeNo: String) -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF8A8496),
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(10.dp))
             Text(
-                "모든 권리는 Kang SungJin에게 있습니다.",
-                style = MaterialTheme.typography.labelSmall,
+                "© 2026  KANG SUNGJIN",
+                fontSize = 11.sp,
+                letterSpacing = 3.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF1D3FA8).copy(alpha = 0.55f),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "All Rights Reserved",
+                fontSize = 9.sp,
+                letterSpacing = 1.5.sp,
                 color = Color(0xFF8A8496),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
             )
         }
     }
