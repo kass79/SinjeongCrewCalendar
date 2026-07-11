@@ -79,7 +79,12 @@ data class DutyCode(
             return when {
                 s == "~" -> DutyCode(s, DutyType.POST_NIGHT)
                 s == "주" -> DutyCode(s, DutyType.OFFICE)
-                s.startsWith("지대") -> DutyCode(s, DutyType.BRANCH_STANDBY, s.removePrefix("지대").removeSuffix("비").toIntOrNull(), isBranch = true)
+                s.startsWith("지대") -> {
+                    val postNight = s.endsWith("비") // 지대11비 = 야간대기 익일 비번
+                    val n = s.removePrefix("지대").removeSuffix("비").toIntOrNull()
+                    if (postNight) DutyCode(s, DutyType.POST_NIGHT, n, isBranch = true)
+                    else DutyCode(s, DutyType.BRANCH_STANDBY, n, isBranch = true)
+                }
                 s.startsWith("지휴") -> DutyCode(s, DutyType.BRANCH_REST, s.removePrefix("지휴").toIntOrNull(), isBranch = true)
                 s.startsWith("지") -> {
                     val body = s.removePrefix("지")
