@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.domain.usecase
 
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.Schedule
 import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
@@ -29,6 +30,17 @@ class UpdateDayUseCase @Inject constructor(
                 originalDutyRaw = day.originalDutyRaw ?: day.duty.raw,
             )
         )
+        // 야간 근무(33~51, 대11~13, 지10~14, 지대11)로 변경하면 익일은 자동 비번(~)
+        if (DutyCode.parse(newCode).isOvernight) {
+            val next = day.date.plusDays(1)
+            scheduleRepo.saveOverride(
+                Schedule(
+                    id = "${uid}_$next", uid = uid, date = next,
+                    dutyRaw = "~", source = Schedule.Source.MANUAL,
+                    updatedAtEpochMs = System.currentTimeMillis(),
+                )
+            )
+        }
     }
 
     /** 메모 저장 (근무변경 상태는 그대로 유지) */

@@ -130,11 +130,7 @@ fun MainCalendarScreen(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            state.today?.let {
-                TodaySummaryCard(it, groupLabel = state.currentGroup?.label,
-                    onClick = { viewModel.selectDate(it.date) })
-            }
-
+            // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
             WeekdayHeader()
 
             if (state.isLoading) {
@@ -421,12 +417,14 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: 
         }
         if (day.duty.raw.isNotBlank()) {
             Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
+                // 대11·휴28 같은 3자 이상 라벨은 폰트를 줄여 짤림 방지
+                val label = day.duty.display
                 Text(
-                    day.duty.display,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                    style = MaterialTheme.typography.labelMedium,
+                    label,
+                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
+                    fontSize = if (label.length >= 3) 10.5.sp else 12.5.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
+                    maxLines = 1, softWrap = false,
                 )
             }
         }

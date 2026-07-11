@@ -36,6 +36,11 @@ data class DutyCode(
 
     val isNight: Boolean get() = type == DutyType.MAIN_NIGHT || type == DutyType.BRANCH_NIGHT
 
+    /** 밤샘 근무 → 익일 비번 발생 (야간 다이아 + 야간 대기조 대11~13·지대11) */
+    val isOvernight: Boolean
+        get() = isNight ||
+            ((type == DutyType.STANDBY || type == DutyType.BRANCH_STANDBY) && (number ?: 0) >= 11)
+
     /** 달력 셀 표시 텍스트 — 지선은 "지" 접두사를 떼고 표시 (기존 앱 방식) */
     val display: String
         get() = when {
