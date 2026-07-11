@@ -29,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -60,6 +61,7 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainCalendarScreen(
+    onOpenRoster: () -> Unit = {},
     viewModel: MainCalendarViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -87,7 +89,7 @@ fun MainCalendarScreen(
                         }
                         Text(
                             state.month.format(DateTimeFormatter.ofPattern("yyyy년 M월")),
-                            style = MaterialTheme.typography.titleLarge,
+                            fontSize = 16.sp,
                             fontWeight = FontWeight.ExtraBold,
                         )
                         IconButton(onClick = { viewModel.moveMonth(1) }) {
@@ -97,12 +99,22 @@ fun MainCalendarScreen(
                 },
                 actions = {
                     RestCountChip(state.restDayCount)
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(4.dp))
                     FilledTonalButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
-                        contentPadding = PaddingValues(horizontal = 13.dp),
-                        modifier = Modifier.height(36.dp),
-                    ) { Text("근무선택", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold) }
+                        contentPadding = PaddingValues(horizontal = 9.dp),
+                        modifier = Modifier.height(34.dp),
+                    ) { Text("근무선택", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
+                    Spacer(Modifier.width(4.dp))
+                    FilledTonalButton(
+                        onClick = onOpenRoster,
+                        contentPadding = PaddingValues(horizontal = 9.dp),
+                        modifier = Modifier.height(34.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = LocalDutyColors.current.branch,
+                            contentColor = LocalDutyColors.current.onBranch,
+                        ),
+                    ) { Text("동료근무", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
                     IconButton(onClick = { viewModel.toggleTheme(isDark) }) {
                         Icon(
                             if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
@@ -303,43 +315,49 @@ private fun CalendarGrid(
     val leading = month.atDay(1).dayOfWeek.value % 7
     val cells: List<DaySchedule?> = List(leading) { null } + days
     var dragX by remember { mutableFloatStateOf(0f) }
+    val rows = (cells.size + 6) / 7
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(7),
-        modifier = modifier
-            .padding(horizontal = 8.dp)
-            // 손가락 스와이프로 월 이동 (좌←다음달, 우→이전달)
-            .pointerInput(month) {
-                detectHorizontalDragGestures(
-                    onDragStart = { dragX = 0f },
-                    onHorizontalDrag = { _, delta -> dragX += delta },
-                    onDragEnd = {
-                        if (dragX < -120f) onSwipeMonth(1)
-                        else if (dragX > 120f) onSwipeMonth(-1)
-                    },
-                )
-            },
-        verticalArrangement = Arrangement.spacedBy(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(3.dp),
-        userScrollEnabled = false,
-    ) {
-        items(cells.size, key = { it }) { i ->
-            val day = cells[i]
-            if (day == null) Spacer(Modifier.height(92.dp))
-            else DayCell(day, isSelected = day.date == selected, onClick = { onSelect(day.date) })
+    // 칸 높이 = 남은 화면을 주 수로 나눔 → 폰마다 최대 크기로 자동 최적화
+    BoxWithConstraints(modifier) {
+        // 하한 60dp: 폴드 펼침 등 낮은 화면에서도 마지막 주가 짤리지 않게
+        val cellHeight = ((maxHeight - (3.dp * (rows - 1))) / rows).coerceIn(60.dp, 130.dp)
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(7),
+            modifier = Modifier
+                .padding(horizontal = 8.dp)
+                // 손가락 스와이프로 월 이동 (좌←다음달, 우→이전달)
+                .pointerInput(month) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { dragX = 0f },
+                        onHorizontalDrag = { _, delta -> dragX += delta },
+                        onDragEnd = {
+                            if (dragX < -120f) onSwipeMonth(1)
+                            else if (dragX > 120f) onSwipeMonth(-1)
+                        },
+                    )
+                },
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+            userScrollEnabled = false,
+        ) {
+            items(cells.size, key = { it }) { i ->
+                val day = cells[i]
+                if (day == null) Spacer(Modifier.height(cellHeight))
+                else DayCell(day, isSelected = day.date == selected, height = cellHeight, onClick = { onSelect(day.date) })
+            }
         }
     }
 }
 
 @Composable
-private fun DayCell(day: DaySchedule, isSelected: Boolean, onClick: () -> Unit) {
+private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: () -> Unit) {
     val duty = LocalDutyColors.current
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
 
     Column(
         Modifier
-            .height(92.dp)
+            .height(height)
             .clip(RoundedCornerShape(10.dp))
             .then(
                 when {
@@ -366,7 +384,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, onClick: () -> Unit) 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${day.date.dayOfMonth}",
-                style = MaterialTheme.typography.labelSmall,
+                fontSize = 9.5.sp, lineHeight = 10.sp,
                 fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.SemiBold,
                 color = when {
                     isToday -> MaterialTheme.colorScheme.primary
@@ -378,10 +396,13 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, onClick: () -> Unit) 
             )
             val nameTag = day.holidayName ?: day.memorialName ?: day.seasonalTerm
             nameTag?.let {
-                Spacer(Modifier.weight(1f))
+                // 공휴일 이름: 아주 작게, 칸을 절대 밀지 않도록 남은 폭 안에서만
                 Text(
-                    it, fontSize = 8.sp, maxLines = 1,
+                    it, fontSize = 6.5.sp, lineHeight = 7.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.End,
                     color = if (day.holidayName != null || day.memorialName != null) duty.sunday else duty.onStandby,
+                    modifier = Modifier.weight(1f).padding(start = 2.dp, end = 2.dp),
                 )
             }
         }
@@ -408,13 +429,14 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, onClick: () -> Unit) 
         }
         day.signOn?.let {
             Text(
-                it, fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+                it, fontSize = 8.5.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
+        // 메모는 항상 한 줄 보이게 (칸이 작아도 잘리지 않도록 축소)
         if (day.memo.isNotBlank()) {
             Text(
-                day.memo, fontSize = 8.5.sp,
+                day.memo, fontSize = 8.sp, lineHeight = 8.5.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )

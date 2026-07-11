@@ -31,6 +31,7 @@ import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.diaboard.DiaBoardScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
+import com.sinjeong.crewcalendar.presentation.roster.RosterScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
@@ -106,7 +107,10 @@ private fun AppRoot() {
             startDestination = Tab.Calendar.route,
             modifier = Modifier.padding(padding),
         ) {
-            composable(Tab.Calendar.route) { MainCalendarScreen() }
+            composable(Tab.Calendar.route) {
+                MainCalendarScreen(onOpenRoster = { nav.navigate("roster") })
+            }
+            composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }
             composable(Tab.DiaBoard.route) { DiaBoardScreen() }
             composable(Tab.Mates.route) { MatesScreen() }
             composable(Tab.Settings.route) { SettingsScreen() }
