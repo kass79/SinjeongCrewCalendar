@@ -97,6 +97,7 @@ fun DiaBoardScreen() {
     }
 }
 
+// 배지 = 출근시각 (종별은 색으로 이미 구분되므로 "주간/야간" 글자는 중복)
 private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<DiaRow> = when (tab) {
     BoardTab.BRANCH -> {
         val src = if (holiday) Bundled.BRANCH_HOLIDAY else Bundled.BRANCH_WEEKDAY
@@ -110,7 +111,7 @@ private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<
                 label = code.removePrefix("지"),
                 range = "${r.signOn} – ${if (r.overnight) "익 " else ""}${r.signOff}",
                 desc = "지선 (신도림 ↔ 까치산)",
-                badge = if (kind == DiaRow.RowKind.STANDBY) "대기" else if (r.overnight) "야간" else "주간",
+                badge = "출근 ${r.signOn}",
                 kind = kind,
             )
         }
@@ -118,17 +119,17 @@ private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<
     BoardTab.MAIN_DAY -> {
         val src = if (holiday) Bundled.MAIN_DAY_HOLIDAY else Bundled.MAIN_DAY_WEEKDAY
         src.map { (n, r) ->
-            DiaRow("$n", "${r.signOn} – ${r.signOff}", "본선 주간", "주간", DiaRow.RowKind.DAY)
+            DiaRow("$n", "${r.signOn} – ${r.signOff}", "본선 주간", "출근 ${r.signOn}", DiaRow.RowKind.DAY)
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() < 11 }.map { (code, r) ->
-            DiaRow(code, "${r.signOn} – ${r.signOff}", "대기조 · 사업소 대기", "대기", DiaRow.RowKind.STANDBY)
+            DiaRow(code, "${r.signOn} – ${r.signOff}", "대기조 · 사업소 대기", "출근 ${r.signOn}", DiaRow.RowKind.STANDBY)
         }
     }
     BoardTab.MAIN_NIGHT -> {
         Bundled.MAIN_NIGHT.map { (n, variants) ->
             val (on, off) = variants[combo] ?: ("—" to "—")
-            DiaRow("$n", "$on – 익일 $off", "본선 야간 · ${combo.label} (당일→익일)", "야간", DiaRow.RowKind.NIGHT)
+            DiaRow("$n", "$on – 익일 $off", "본선 야간 · ${combo.label} (당일→익일)", "출근 $on", DiaRow.RowKind.NIGHT)
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() >= 11 }.map { (code, r) ->
-            DiaRow(code, "${r.signOn} – 익 ${r.signOff}", "야간 대기조", "대기", DiaRow.RowKind.STANDBY)
+            DiaRow(code, "${r.signOn} – 익 ${r.signOff}", "야간 대기조", "출근 ${r.signOn}", DiaRow.RowKind.STANDBY)
         }
     }
 }

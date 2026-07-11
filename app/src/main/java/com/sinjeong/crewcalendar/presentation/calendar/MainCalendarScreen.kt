@@ -81,47 +81,48 @@ fun MainCalendarScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
+            // 폴드7 등 좁은 화면 대응: 월 이동 화살표 제거(스와이프로 대체), 버튼 소형화
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(onClick = { viewModel.moveMonth(-1) }) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "이전 달")
-                        }
-                        Text(
-                            state.month.format(DateTimeFormatter.ofPattern("yyyy년 M월")),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                        )
-                        IconButton(onClick = { viewModel.moveMonth(1) }) {
-                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 달")
-                        }
-                    }
+                    Text(
+                        state.month.format(DateTimeFormatter.ofPattern("yyyy년 M월")),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                    )
                 },
                 actions = {
                     RestCountChip(state.restDayCount)
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(3.dp))
                     FilledTonalButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
-                        contentPadding = PaddingValues(horizontal = 9.dp),
-                        modifier = Modifier.height(34.dp),
-                    ) { Text("근무선택", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
-                    Spacer(Modifier.width(4.dp))
+                        contentPadding = PaddingValues(horizontal = 7.dp),
+                        modifier = Modifier.height(30.dp),
+                    ) { Text("근무선택", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold) }
+                    Spacer(Modifier.width(3.dp))
                     FilledTonalButton(
                         onClick = onOpenRoster,
-                        contentPadding = PaddingValues(horizontal = 9.dp),
-                        modifier = Modifier.height(34.dp),
+                        contentPadding = PaddingValues(horizontal = 7.dp),
+                        modifier = Modifier.height(30.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = LocalDutyColors.current.branch,
                             contentColor = LocalDutyColors.current.onBranch,
                         ),
-                    ) { Text("동료근무", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
-                    IconButton(onClick = { viewModel.toggleTheme(isDark) }) {
+                    ) { Text("동료근무", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold) }
+                    IconButton(
+                        onClick = { viewModel.toggleTheme(isDark) },
+                        modifier = Modifier.size(36.dp),
+                    ) {
                         Icon(
                             if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                             "다크/라이트 전환",
+                            modifier = Modifier.size(19.dp),
                         )
                     }
-                    IconButton(onClick = viewModel::goToday) { Icon(Icons.Default.Today, "오늘로") }
+                    IconButton(onClick = viewModel::goToday, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Today, "오늘로", modifier = Modifier.size(19.dp))
+                    }
+                    Spacer(Modifier.width(2.dp))
                 },
             )
         },
@@ -202,8 +203,8 @@ private fun RestCountChip(count: Int) {
     ) {
         Text(
             "휴 ${count}개",
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-            fontSize = 10.5.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+            fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
         )
     }
 }
