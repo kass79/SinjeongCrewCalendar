@@ -8,6 +8,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -135,6 +136,17 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                     "· 지선/평휴(야간) 자료 입수 대기",
             )
             SettingRow(title = "저장 방식", sub = "체험판 — 이 폰에만 저장 (서버 연동 시 자동 백업·동료 공유)")
+
+            // 문의 · 저작권
+            SectionTitle("문의")
+            SettingRow(title = "Contact", sub = "kass7942@gmail.com")
+            Text(
+                "© 2026 Kang SungJin. All rights reserved.",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+            )
 
             Spacer(Modifier.height(24.dp))
         }

@@ -126,6 +126,12 @@ fun LoginScreen(onLogin: (name: String, employeeNo: String) -> Unit) {
                 style = MaterialTheme.typography.labelSmall,
                 color = Color(0xFF8A8496),
             )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "모든 권리는 Kang SungJin에게 있습니다.",
+                style = MaterialTheme.typography.labelSmall,
+                color = Color(0xFF8A8496),
+            )
         }
     }
 }

@@ -84,11 +84,13 @@ fun MainCalendarScreen(
             // 폴드7 등 좁은 화면 대응: 월 이동 화살표 제거(스와이프로 대체), 버튼 소형화
             TopAppBar(
                 title = {
+                    // 좁은 화면(폴드 커버)에서도 월이 안 잘리게 축약 표기
                     Text(
-                        state.month.format(DateTimeFormatter.ofPattern("yyyy년 M월")),
+                        state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
+                        softWrap = false,
                     )
                 },
                 actions = {
