@@ -71,7 +71,17 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
             } ?: CrewGroup.BRANCH
             Person("${it.name} (나)", g, it.patternOffset, isMe = true)
         }
-        (listOfNotNull(me) + mates.map { Person(it.name, it.group, it.patternOffset, isMe = false) })
+        // 내장 전체 명단(26년 7월 근무표 기준) 위에 나·수동등록 동료가 이름으로 덮어씀
+        val taken = buildSet {
+            user?.let { add(it.name) }
+            mates.forEach { add(it.name) }
+        }
+        val bundled = CrewGroup.entries.flatMap { g ->
+            BundledRoster.forGroup(g)
+                .filterNot { it.first in taken }
+                .map { (name, off) -> Person(name, g, off, isMe = false) }
+        }
+        listOfNotNull(me) + mates.map { Person(it.name, it.group, it.patternOffset, isMe = false) } + bundled
     }
 
     val cellW = 38.dp
@@ -168,14 +178,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                                 .padding(horizontal = 8.dp, vertical = 3.dp),
                         )
                     }
-                    if (members.isEmpty()) item(key = "empty-${g.name}") {
-                        Text(
-                            "등록된 근무자 없음 — 동료 탭에서 추가",
-                            fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(8.dp),
-                        )
-                    }
-                    items(members.size, key = { "${g.name}-${members[it].name}" }) { i ->
+                    items(members.size, key = { "${g.name}-$it-${members[it].name}" }) { i ->
                         PersonRow(members[i], month, cellW, nameW, hScroll, duty)
                     }
                 }

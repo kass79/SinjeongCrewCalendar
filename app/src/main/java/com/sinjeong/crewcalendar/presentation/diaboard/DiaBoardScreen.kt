@@ -22,8 +22,6 @@ private enum class BoardTab(val label: String) { BRANCH("지선"), MAIN_DAY("본
 private data class DiaRow(
     val label: String,
     val range: String,
-    val desc: String,
-    val badge: String,
     val kind: RowKind,
 ) { enum class RowKind { DAY, NIGHT, STANDBY, BRANCH } }
 
@@ -82,10 +80,10 @@ fun DiaBoardScreen() {
             val rows = remember(tab, holiday, combo) { buildRows(tab, holiday, combo) }
             LazyColumn(
                 Modifier.weight(1f).padding(horizontal = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
                 contentPadding = PaddingValues(bottom = 12.dp),
             ) {
-                items(rows, key = { it.label + it.badge }) { row ->
+                items(rows, key = { it.label }) { row ->
                     DiaRowCard(row, onClick = { detailKey = row.label })
                 }
             }
@@ -97,7 +95,6 @@ fun DiaBoardScreen() {
     }
 }
 
-// 배지 = 출근시각 (종별은 색으로 이미 구분되므로 "주간/야간" 글자는 중복)
 private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<DiaRow> = when (tab) {
     BoardTab.BRANCH -> {
         val src = if (holiday) Bundled.BRANCH_HOLIDAY else Bundled.BRANCH_WEEKDAY
@@ -107,29 +104,23 @@ private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<
                 r.overnight -> DiaRow.RowKind.NIGHT
                 else -> DiaRow.RowKind.BRANCH
             }
-            DiaRow(
-                label = code.removePrefix("지"),
-                range = "${r.signOn} – ${if (r.overnight) "익 " else ""}${r.signOff}",
-                desc = "지선 (신도림 ↔ 까치산)",
-                badge = "출근 ${r.signOn}",
-                kind = kind,
-            )
+            DiaRow(code.removePrefix("지"), "${r.signOn} – ${if (r.overnight) "익 " else ""}${r.signOff}", kind)
         }
     }
     BoardTab.MAIN_DAY -> {
         val src = if (holiday) Bundled.MAIN_DAY_HOLIDAY else Bundled.MAIN_DAY_WEEKDAY
         src.map { (n, r) ->
-            DiaRow("$n", "${r.signOn} – ${r.signOff}", "본선 주간", "출근 ${r.signOn}", DiaRow.RowKind.DAY)
+            DiaRow("$n", "${r.signOn} – ${r.signOff}", DiaRow.RowKind.DAY)
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() < 11 }.map { (code, r) ->
-            DiaRow(code, "${r.signOn} – ${r.signOff}", "대기조 · 사업소 대기", "출근 ${r.signOn}", DiaRow.RowKind.STANDBY)
+            DiaRow(code, "${r.signOn} – ${r.signOff}", DiaRow.RowKind.STANDBY)
         }
     }
     BoardTab.MAIN_NIGHT -> {
         Bundled.MAIN_NIGHT.map { (n, variants) ->
             val (on, off) = variants[combo] ?: ("—" to "—")
-            DiaRow("$n", "$on – 익일 $off", "본선 야간 · ${combo.label} (당일→익일)", "출근 $on", DiaRow.RowKind.NIGHT)
+            DiaRow("$n", "$on – 익일 $off", DiaRow.RowKind.NIGHT)
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() >= 11 }.map { (code, r) ->
-            DiaRow(code, "${r.signOn} – 익 ${r.signOff}", "야간 대기조", "출근 ${r.signOn}", DiaRow.RowKind.STANDBY)
+            DiaRow(code, "${r.signOn} – 익 ${r.signOff}", DiaRow.RowKind.STANDBY)
         }
     }
 }
@@ -143,27 +134,20 @@ private fun DiaRowCard(row: DiaRow, onClick: () -> Unit) {
         DiaRow.RowKind.STANDBY -> duty.standby to duty.onStandby
         DiaRow.RowKind.BRANCH -> duty.branch to duty.onBranch
     }
+    // 한 줄 압축 행 — desc(종별)는 탭·색으로, 출근 배지는 range 첫 시각으로 중복이라 생략
     OutlinedCard(onClick = onClick) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 9.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(12.dp)) {
-                Box(Modifier.size(width = 42.dp, height = 38.dp), contentAlignment = Alignment.Center) {
-                    Text(row.label, fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp)
+            Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(9.dp)) {
+                Box(Modifier.size(width = 40.dp, height = 26.dp), contentAlignment = Alignment.Center) {
+                    Text(row.label, fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
                 }
             }
-            Column(Modifier.weight(1f)) {
-                Text(row.range, fontWeight = FontWeight.ExtraBold, style = MaterialTheme.typography.bodyMedium)
-                Text(row.desc, style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = RoundedCornerShape(6.dp)) {
-                Text(row.badge, fontSize = 10.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
+            Text(row.range, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            Text("상세", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
