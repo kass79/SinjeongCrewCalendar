@@ -81,31 +81,32 @@ fun MainCalendarScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            // 폴드7 등 좁은 화면 대응: 월 이동 화살표 제거(스와이프로 대체), 버튼 소형화
-            TopAppBar(
-                title = {
-                    // 좁은 화면(폴드 커버)에서도 월이 안 잘리게 축약 표기
+            // 컴팩트 헤더(기본 TopAppBar 64dp → 44dp) — 남는 상단 공간을 달력에 양보
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    Modifier.fillMaxWidth().statusBarsPadding().height(44.dp).padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
                         state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
-                        fontSize = 15.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         softWrap = false,
                     )
-                },
-                actions = {
+                    Spacer(Modifier.weight(1f))
                     RestCountChip(state.restDayCount)
-                    Spacer(Modifier.width(3.dp))
+                    Spacer(Modifier.width(4.dp))
                     FilledTonalButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
                         contentPadding = PaddingValues(horizontal = 7.dp),
-                        modifier = Modifier.height(30.dp),
+                        modifier = Modifier.height(28.dp),
                     ) { Text("근무선택", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold) }
-                    Spacer(Modifier.width(3.dp))
+                    Spacer(Modifier.width(4.dp))
                     FilledTonalButton(
                         onClick = onOpenRoster,
                         contentPadding = PaddingValues(horizontal = 7.dp),
-                        modifier = Modifier.height(30.dp),
+                        modifier = Modifier.height(28.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = LocalDutyColors.current.branch,
                             contentColor = LocalDutyColors.current.onBranch,
@@ -113,20 +114,19 @@ fun MainCalendarScreen(
                     ) { Text("동료근무", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold) }
                     IconButton(
                         onClick = { viewModel.toggleTheme(isDark) },
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(32.dp),
                     ) {
                         Icon(
                             if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                             "다크/라이트 전환",
-                            modifier = Modifier.size(19.dp),
+                            modifier = Modifier.size(18.dp),
                         )
                     }
-                    IconButton(onClick = viewModel::goToday, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Default.Today, "오늘로", modifier = Modifier.size(19.dp))
+                    IconButton(onClick = viewModel::goToday, modifier = Modifier.size(32.dp)) {
+                        Icon(Icons.Default.Today, "오늘로", modifier = Modifier.size(18.dp))
                     }
-                    Spacer(Modifier.width(2.dp))
-                },
-            )
+                }
+            }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -319,7 +319,7 @@ private fun CalendarGrid(
     // 칸 높이 = 남은 화면을 주 수로 나눔 → 폰마다 최대 크기로 자동 최적화
     BoxWithConstraints(modifier) {
         // 하한 60dp: 폴드 펼침 등 낮은 화면에서도 마지막 주가 짤리지 않게
-        val cellHeight = ((maxHeight - (3.dp * (rows - 1))) / rows).coerceIn(60.dp, 130.dp)
+        val cellHeight = ((maxHeight - (3.dp * (rows - 1))) / rows).coerceIn(60.dp, 150.dp)
         LazyVerticalGrid(
             columns = GridCells.Fixed(7),
             modifier = Modifier
