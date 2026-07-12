@@ -60,6 +60,15 @@ android {
     }
 }
 
+// google-api-client 계열이 grpc-api만 1.66으로 올려 Firestore(grpc 1.62)와 어긋나면
+// 런타임 NoClassDefFoundError(io.grpc.InternalGlobalInterceptors)로 크래시 → 전 부품 버전 통일
+configurations.all {
+    resolutionStrategy.force(
+        "io.grpc:grpc-api:1.62.2",
+        "io.grpc:grpc-context:1.62.2",
+    )
+}
+
 dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
 
