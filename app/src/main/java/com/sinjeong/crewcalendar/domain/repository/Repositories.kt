@@ -56,3 +56,17 @@ interface MateRepository {
     suspend fun remove(name: String)
 }
 
+/** 동료근무 실시간 공유 — 로그인 근무자 전체 (Firebase 없으면 빈 목록) */
+data class RosterEntry(
+    val uid: String,
+    val name: String,
+    val group: CrewGroup,
+    val patternOffset: Int,
+)
+
+interface RosterRepository {
+    fun observeUsers(): Flow<List<RosterEntry>>
+    /** 해당 월 근무변경 전체: uid → (날짜 → 변경 근무) */
+    fun observeMonthOverrides(month: YearMonth): Flow<Map<String, Map<LocalDate, String>>>
+}
+

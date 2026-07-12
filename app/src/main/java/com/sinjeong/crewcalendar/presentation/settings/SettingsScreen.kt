@@ -52,7 +52,12 @@ class SettingsViewModel @Inject constructor(
     fun setTheme(mode: ThemeMode) = themeController.set(mode)
 
     fun logout() {
-        viewModelScope.launch { (userRepo as? LocalUserRepository)?.logout() }
+        viewModelScope.launch {
+            when (val r = userRepo) {
+                is LocalUserRepository -> r.logout()
+                is com.sinjeong.crewcalendar.data.remote.FirestoreUserRepository -> r.logout()
+            }
+        }
     }
 }
 

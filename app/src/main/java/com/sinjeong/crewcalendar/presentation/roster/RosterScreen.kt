@@ -27,7 +27,11 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.domain.model.*
 import com.sinjeong.crewcalendar.domain.repository.MateRepository
+import com.sinjeong.crewcalendar.domain.repository.RosterEntry
+import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -42,14 +46,34 @@ import javax.inject.Inject
 class RosterViewModel @Inject constructor(
     userRepo: UserRepository,
     mateRepo: MateRepository,
+    rosterRepo: RosterRepository,
 ) : ViewModel() {
     val user: StateFlow<User?> = userRepo.observeMe()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     val mates: StateFlow<List<Mate>> = mateRepo.observeMates()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Firebase 연동 시: 로그인 근무자 실데이터 (없으면 빈 목록 → 내장 명단만) */
+    val liveUsers: StateFlow<List<RosterEntry>> = rosterRepo.observeUsers()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    private val monthFlow = MutableStateFlow(YearMonth.now())
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val monthOverrides: StateFlow<Map<String, Map<LocalDate, String>>> =
+        monthFlow.flatMapLatest { rosterRepo.observeMonthOverrides(it) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun setMonth(m: YearMonth) { monthFlow.value = m }
 }
 
-private data class Person(val name: String, val group: CrewGroup, val offset: Int, val isMe: Boolean)
+private data class Person(
+    val name: String,
+    val group: CrewGroup,
+    val offset: Int,
+    val isMe: Boolean,
+    /** 로그인 사용자(사번) — 근무변경 실시간 반영 대상 */
+    val uid: String? = null,
+)
 
 /**
  * 동료근무 — 사업소 전체 근무표 매트릭스 (가로 날짜 × 세로 이름 ㄱㄴㄷ).
@@ -60,29 +84,34 @@ private data class Person(val name: String, val group: CrewGroup, val offset: In
 fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel()) {
     val user by viewModel.user.collectAsStateWithLifecycle()
     val mates by viewModel.mates.collectAsStateWithLifecycle()
+    val liveUsers by viewModel.liveUsers.collectAsStateWithLifecycle()
+    val monthOverrides by viewModel.monthOverrides.collectAsStateWithLifecycle()
     var month by remember { mutableStateOf(YearMonth.now()) }
+    LaunchedEffect(month) { viewModel.setMonth(month) }
     var filter by remember { mutableStateOf<CrewGroup?>(null) }
     var query by remember { mutableStateOf("") }
     val duty = LocalDutyColors.current
 
-    val people = remember(user, mates) {
+    val people = remember(user, mates, liveUsers) {
         val me = user?.let {
             val g = Bundled.groupFor(it.patternId)?.let { grp ->
                 if (it.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else grp
             } ?: CrewGroup.BRANCH
-            Person("${it.name} (나)", g, it.patternOffset, isMe = true)
+            Person("${it.name} (나)", g, it.patternOffset, isMe = true, uid = it.uid)
         }
-        // 내장 전체 명단(26년 7월 근무표 기준) 위에 나·수동등록 동료가 이름으로 덮어씀
-        val taken = buildSet {
-            user?.let { add(it.name) }
-            mates.forEach { add(it.name) }
-        }
+        // 우선순위: 나 → 로그인 근무자(실데이터) → 수동등록 동료 → 내장 명단. 이름으로 중복 제거
+        val taken = mutableSetOf<String>()
+        user?.let { taken += it.name }
+        val live = liveUsers.filter { it.name !in taken && it.uid != user?.uid }
+            .map { taken += it.name; Person(it.name, it.group, it.patternOffset, isMe = false, uid = it.uid) }
+        val manual = mates.filter { it.name !in taken }
+            .map { taken += it.name; Person(it.name, it.group, it.patternOffset, isMe = false) }
         val bundled = CrewGroup.entries.flatMap { g ->
             BundledRoster.forGroup(g)
                 .filterNot { it.first in taken }
                 .map { (name, off) -> Person(name, g, off, isMe = false) }
         }
-        listOfNotNull(me) + mates.map { Person(it.name, it.group, it.patternOffset, isMe = false) } + bundled
+        listOfNotNull(me) + live + manual + bundled
     }
 
     val cellW = 38.dp
@@ -197,7 +226,9 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                         )
                     }
                     items(members.size, key = { "${g.name}-$it-${members[it].name}" }) { i ->
-                        PersonRow(members[i], month, cellW, nameW, hScroll, duty)
+                        val p = members[i]
+                        PersonRow(p, month, cellW, nameW, hScroll, duty,
+                            overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap())
                     }
                 }
             }
@@ -213,6 +244,8 @@ private fun PersonRow(
     nameW: androidx.compose.ui.unit.Dp,
     hScroll: androidx.compose.foundation.ScrollState,
     duty: DutyColors,
+    /** 근무변경 실시간 반영 (날짜 → 변경 근무, Firebase 연동 시) */
+    overrides: Map<LocalDate, String> = emptyMap(),
 ) {
     val pattern = Bundled.patternFor(p.group)
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -226,7 +259,7 @@ private fun PersonRow(
         Row(Modifier.horizontalScroll(hScroll)) {
             (1..month.lengthOfMonth()).forEach { d ->
                 val date = month.atDay(d)
-                val code = pattern.dutyOn(date, p.offset)
+                val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = when (code.type) {
                     DutyType.MAIN_DAY, DutyType.OFFICE -> duty.main to duty.onMain
                     DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> duty.night to duty.onNight

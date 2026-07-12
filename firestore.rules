@@ -1,0 +1,19 @@
+rules_version = '2';
+// 신정승무 캘린더 — Firestore 보안 규칙
+// 정책: 앱에서 로그인(익명 인증)한 사용자만 읽기/쓰기.
+//  - users: 근무선택 공유 명단 (이름·소속·순환위치만, 사번은 문서 ID로만 존재)
+//  - rosterOverrides: 근무변경 공유 (전체 공개 — 사용자 확정)
+//  - 메모는 서버에 저장하지 않음 (앱이 폰에만 보관)
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, write: if request.auth != null;
+    }
+    match /rosterOverrides/{id} {
+      allow read, write: if request.auth != null;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
