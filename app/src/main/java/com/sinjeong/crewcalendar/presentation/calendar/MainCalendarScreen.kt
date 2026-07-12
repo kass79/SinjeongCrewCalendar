@@ -81,10 +81,10 @@ fun MainCalendarScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            // 컴팩트 헤더(기본 TopAppBar 64dp → 44dp) — 남는 상단 공간을 달력에 양보
+            // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().height(44.dp).padding(horizontal = 10.dp),
+                    Modifier.fillMaxWidth().statusBarsPadding().height(40.dp).padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -342,17 +342,28 @@ private fun CalendarGrid(
             items(cells.size, key = { it }) { i ->
                 val day = cells[i]
                 if (day == null) Spacer(Modifier.height(cellHeight))
-                else DayCell(day, isSelected = day.date == selected, height = cellHeight, onClick = { onSelect(day.date) })
+                else DayCell(
+                    day, isSelected = day.date == selected, height = cellHeight,
+                    big = cellHeight >= 100.dp, // 펼침 화면 등 칸이 크면 글자도 키움
+                    onClick = { onSelect(day.date) },
+                )
             }
         }
     }
 }
 
 @Composable
-private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: () -> Unit) {
+private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Boolean, onClick: () -> Unit) {
     val duty = LocalDutyColors.current
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
+    val dateSize = if (big) 11.5.sp else 9.5.sp
+    val holSize = if (big) 8.sp else 6.5.sp
+    val chipSizeBig = if (big) 14.5.sp else 12.5.sp
+    val chipSizeSmall = if (big) 12.sp else 10.5.sp
+    val signOnSize = if (big) 10.sp else 8.5.sp
+    val memoSize = if (big) 9.5.sp else 8.sp
 
     Column(
         Modifier
@@ -383,7 +394,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: 
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${day.date.dayOfMonth}",
-                fontSize = 9.5.sp, lineHeight = 10.sp,
+                fontSize = dateSize, lineHeight = dateSize * 1.05,
                 fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.SemiBold,
                 color = when {
                     isToday -> MaterialTheme.colorScheme.primary
@@ -397,7 +408,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: 
             nameTag?.let {
                 // 공휴일 이름: 아주 작게, 칸을 절대 밀지 않도록 남은 폭 안에서만
                 Text(
-                    it, fontSize = 6.5.sp, lineHeight = 7.sp, maxLines = 1,
+                    it, fontSize = holSize, lineHeight = holSize * 1.1, maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.End,
                     color = if (day.holidayName != null || day.memorialName != null) duty.sunday else duty.onStandby,
@@ -422,7 +433,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: 
                 Text(
                     label,
                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                    fontSize = if (label.length >= 3) 10.5.sp else 12.5.sp,
+                    fontSize = if (label.length >= 3) chipSizeSmall else chipSizeBig,
                     fontWeight = FontWeight.ExtraBold,
                     maxLines = 1, softWrap = false,
                 )
@@ -430,14 +441,14 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, onClick: 
         }
         day.signOn?.let {
             Text(
-                it, fontSize = 8.5.sp, lineHeight = 9.sp, fontWeight = FontWeight.Bold,
+                it, fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         // 메모는 항상 한 줄 보이게 (칸이 작아도 잘리지 않도록 축소)
         if (day.memo.isNotBlank()) {
             Text(
-                day.memo, fontSize = 8.sp, lineHeight = 8.5.sp,
+                day.memo, fontSize = memoSize, lineHeight = memoSize * 1.06,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
