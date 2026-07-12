@@ -14,7 +14,11 @@ import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.first
@@ -51,6 +55,12 @@ class FirestoreUserRepository @Inject constructor(
     private val local: LocalUserRepository,
 ) : UserRepository {
     private val db get() = FirebaseFirestore.getInstance()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // 체험판(로컬)에서 이미 로그인한 사용자도 앱 시작 시 한 번 자동 미러
+        scope.launch { runCatching { local.observeMe().first()?.let { publish(it) } } }
+    }
 
     override val currentUid: String? get() = local.currentUid
     override fun observeMe(): Flow<User?> = local.observeMe()
