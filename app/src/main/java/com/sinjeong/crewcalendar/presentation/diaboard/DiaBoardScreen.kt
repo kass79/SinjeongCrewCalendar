@@ -12,7 +12,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.style.TextOverflow
 import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
@@ -24,7 +26,15 @@ private data class DiaRow(
     val label: String,
     val range: String,
     val kind: RowKind,
+    /** "전반 8:13~10:41 · 후반 12:51~14:51" — 없으면 null */
+    val legs: String? = null,
 ) { enum class RowKind { DAY, NIGHT, STANDBY, BRANCH } }
+
+private fun legsLabel(first: String?, second: String?): String? {
+    fun fmt(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", "▼")
+    if (first == null || second == null) return null
+    return "전반 ${fmt(first)} · 후반 ${fmt(second)}"
+}
 
 /**
  * 교번표 화면 (시안 v10).
@@ -96,7 +106,7 @@ fun DiaBoardScreen() {
     }
 }
 
-// 행 = 다이아 + 출근시각만 (시각 상세는 탭해서)
+// 행 = 다이아 + 출근시각 + 전반/후반 사업
 private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<DiaRow> = when (tab) {
     BoardTab.BRANCH -> {
         val src = if (holiday) Bundled.BRANCH_HOLIDAY else Bundled.BRANCH_WEEKDAY
@@ -106,22 +116,26 @@ private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<
                 r.overnight -> DiaRow.RowKind.NIGHT
                 else -> DiaRow.RowKind.BRANCH
             }
-            DiaRow(code.removePrefix("지"), r.signOn, kind)
+            DiaRow(code.removePrefix("지"), r.signOn, kind,
+                legsLabel(r.firstLeg, r.secondLeg) ?: "대기 · 종료 ${if (r.overnight) "익일 " else ""}${r.signOff}")
         }
     }
     BoardTab.MAIN_DAY -> {
         val src = if (holiday) Bundled.MAIN_DAY_HOLIDAY else Bundled.MAIN_DAY_WEEKDAY
         src.map { (n, r) ->
-            DiaRow("$n", r.signOn, DiaRow.RowKind.DAY)
+            val l = MainLegs.forDay(n, holiday)
+            DiaRow("$n", r.signOn, DiaRow.RowKind.DAY, l?.let { legsLabel("${it[0]}~${it[1]}", "${it[2]}~${it[3]}") })
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() < 11 }.map { (code, r) ->
-            DiaRow(code, r.signOn, DiaRow.RowKind.STANDBY)
+            DiaRow(code, r.signOn, DiaRow.RowKind.STANDBY, "사업소 대기 · 종료 ${r.signOff}")
         }
     }
     BoardTab.MAIN_NIGHT -> {
         Bundled.MAIN_NIGHT.map { (n, variants) ->
-            DiaRow("$n", variants[combo]?.first ?: "—", DiaRow.RowKind.NIGHT)
+            val l = MainLegs.forNight(n, combo)
+            DiaRow("$n", variants[combo]?.first ?: "—", DiaRow.RowKind.NIGHT,
+                l?.let { legsLabel("${it[0]}~${it[1]}", "${it[2]}~${it[3]}(익일)") })
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() >= 11 }.map { (code, r) ->
-            DiaRow(code, r.signOn, DiaRow.RowKind.STANDBY)
+            DiaRow(code, r.signOn, DiaRow.RowKind.STANDBY, "야간 대기 · 종료 익일 ${r.signOff}")
         }
     }
 }
@@ -135,20 +149,31 @@ private fun DiaRowCard(row: DiaRow, onClick: () -> Unit) {
         DiaRow.RowKind.STANDBY -> duty.standby to duty.onStandby
         DiaRow.RowKind.BRANCH -> duty.branch to duty.onBranch
     }
-    // 한 줄 압축 행 — 다이아 칩 + 출근시각만
+    // 압축 행 — 칩 + 출근시각(앞) + 전반/후반 사업
     OutlinedCard(onClick = onClick) {
         Row(
-            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
+            Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(9.dp)) {
-                Box(Modifier.size(width = 40.dp, height = 26.dp), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(width = 40.dp, height = 30.dp), contentAlignment = Alignment.Center) {
                     Text(row.label, fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
                 }
             }
-            Text("출근", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(row.range, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, modifier = Modifier.weight(1f))
+            Column(Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("출근", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(row.range, fontWeight = FontWeight.ExtraBold, fontSize = 13.5.sp)
+                }
+                row.legs?.let {
+                    Text(
+                        it, fontSize = 10.sp, fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
         }
     }
 }
