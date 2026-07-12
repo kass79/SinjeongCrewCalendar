@@ -14,6 +14,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.NightCombo
+import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 
 private enum class BoardTab(val label: String) { BRANCH("지선"), MAIN_DAY("본선 주간"), MAIN_NIGHT("본선 야간") }
@@ -95,6 +96,7 @@ fun DiaBoardScreen() {
     }
 }
 
+// 행 = 다이아 + 출근시각만 (시각 상세는 탭해서)
 private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<DiaRow> = when (tab) {
     BoardTab.BRANCH -> {
         val src = if (holiday) Bundled.BRANCH_HOLIDAY else Bundled.BRANCH_WEEKDAY
@@ -104,23 +106,22 @@ private fun buildRows(tab: BoardTab, holiday: Boolean, combo: NightCombo): List<
                 r.overnight -> DiaRow.RowKind.NIGHT
                 else -> DiaRow.RowKind.BRANCH
             }
-            DiaRow(code.removePrefix("지"), "${r.signOn} – ${if (r.overnight) "익 " else ""}${r.signOff}", kind)
+            DiaRow(code.removePrefix("지"), r.signOn, kind)
         }
     }
     BoardTab.MAIN_DAY -> {
         val src = if (holiday) Bundled.MAIN_DAY_HOLIDAY else Bundled.MAIN_DAY_WEEKDAY
         src.map { (n, r) ->
-            DiaRow("$n", "${r.signOn} – ${r.signOff}", DiaRow.RowKind.DAY)
+            DiaRow("$n", r.signOn, DiaRow.RowKind.DAY)
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() < 11 }.map { (code, r) ->
-            DiaRow(code, "${r.signOn} – ${r.signOff}", DiaRow.RowKind.STANDBY)
+            DiaRow(code, r.signOn, DiaRow.RowKind.STANDBY)
         }
     }
     BoardTab.MAIN_NIGHT -> {
         Bundled.MAIN_NIGHT.map { (n, variants) ->
-            val (on, off) = variants[combo] ?: ("—" to "—")
-            DiaRow("$n", "$on – 익일 $off", DiaRow.RowKind.NIGHT)
+            DiaRow("$n", variants[combo]?.first ?: "—", DiaRow.RowKind.NIGHT)
         } + Bundled.STANDBY.filterKeys { it.removePrefix("대").toInt() >= 11 }.map { (code, r) ->
-            DiaRow(code, "${r.signOn} – 익 ${r.signOff}", DiaRow.RowKind.STANDBY)
+            DiaRow(code, r.signOn, DiaRow.RowKind.STANDBY)
         }
     }
 }
@@ -134,7 +135,7 @@ private fun DiaRowCard(row: DiaRow, onClick: () -> Unit) {
         DiaRow.RowKind.STANDBY -> duty.standby to duty.onStandby
         DiaRow.RowKind.BRANCH -> duty.branch to duty.onBranch
     }
-    // 한 줄 압축 행 — desc(종별)는 탭·색으로, 출근 배지는 range 첫 시각으로 중복이라 생략
+    // 한 줄 압축 행 — 다이아 칩 + 출근시각만
     OutlinedCard(onClick = onClick) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 4.dp),
@@ -146,8 +147,8 @@ private fun DiaRowCard(row: DiaRow, onClick: () -> Unit) {
                     Text(row.label, fontWeight = FontWeight.ExtraBold, fontSize = 12.5.sp)
                 }
             }
-            Text(row.range, fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, modifier = Modifier.weight(1f))
-            Text("상세", fontSize = 9.5.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("출근", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(row.range, fontWeight = FontWeight.ExtraBold, fontSize = 14.sp, modifier = Modifier.weight(1f))
         }
     }
 }
@@ -177,8 +178,13 @@ private fun DiaDetailSheet(tab: BoardTab, key: String, onDismiss: () -> Unit) {
                     wd?.firstLeg?.let {
                         Text("평일 전반 $it · 후반 ${wd.secondLeg}", style = MaterialTheme.typography.labelMedium)
                     }
-                    wd?.workTimeLabel?.let {
-                        Text("근무시간 $it", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    key.toIntOrNull()?.let { n ->
+                        val w = RouteTable.forBranch(n, holiday = false)
+                        val h = RouteTable.forBranch(n, holiday = true)
+                        if (w != null || h != null) Text(
+                            "근무시간 평 ${w?.totalWorkTime ?: "—"} · 휴 ${h?.totalWorkTime ?: "—"}",
+                            style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold,
+                        )
                     }
                 }
                 BoardTab.MAIN_DAY -> {

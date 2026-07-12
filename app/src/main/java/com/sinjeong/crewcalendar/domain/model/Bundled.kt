@@ -124,7 +124,6 @@ object Bundled {
         val overnight: Boolean = false,
         val firstLeg: String? = null,
         val secondLeg: String? = null,
-        val workTimeLabel: String? = null,
     )
 
     /** 지선 평일 (출근+30분 = 승무시작 규칙 검증됨) */
@@ -141,7 +140,7 @@ object Bundled {
         "지11" to TimeRow("19:11", "6:54", true, "19:41#22:31", "05:21-06:54"),
         "지12" to TimeRow("19:14", "8:13", true, "19:44#22:52▼", "06:45-08:13"),
         "지13" to TimeRow("21:40", "8:17", true, "22:10#25:13▼", "06:50-08:17"),
-        "지14" to TimeRow("22:01", "8:22", true, "22:31#25:20▼", "06:54-08:22", "10시 7분"),
+        "지14" to TimeRow("22:01", "8:22", true, "22:31#25:20▼", "06:54-08:22"),
         "지대1" to TimeRow("8:00", "17:00"),
         "지대2" to TimeRow("9:00", "18:00"),
         "지대11" to TimeRow("18:00", "8:30", true),

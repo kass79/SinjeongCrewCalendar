@@ -62,6 +62,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     val mates by viewModel.mates.collectAsStateWithLifecycle()
     var month by remember { mutableStateOf(YearMonth.now()) }
     var filter by remember { mutableStateOf<CrewGroup?>(null) }
+    var query by remember { mutableStateOf("") }
     val duty = LocalDutyColors.current
 
     val people = remember(user, mates) {
@@ -118,12 +119,27 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 FilterChip(selected = filter == null, onClick = { filter = null }, label = { Text("전체", fontSize = 11.sp) })
                 CrewGroup.entries.forEach { g ->
                     FilterChip(selected = filter == g, onClick = { filter = g }, label = { Text(g.label, fontSize = 11.sp) })
                 }
+                Spacer(Modifier.weight(1f))
             }
+            OutlinedTextField(
+                value = query, onValueChange = { query = it },
+                placeholder = { Text("이름 검색", fontSize = 12.sp) },
+                singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp),
+                trailingIcon = if (query.isNotEmpty()) {
+                    { TextButton(onClick = { query = "" }) { Text("지움", fontSize = 11.sp) } }
+                } else null,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp),
+            )
 
             val nDays = month.lengthOfMonth()
             // 헤더: 날짜/요일
@@ -167,8 +183,10 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                 .filter { filter == null || filter == it }
             LazyColumn {
                 sections.forEach { g ->
-                    val members = people.filter { it.group == g }
+                    val q = query.trim()
+                    val members = people.filter { it.group == g && (q.isEmpty() || it.name.contains(q)) }
                         .sortedWith(compareBy({ !it.isMe }, { it.name }))
+                    if (q.isNotEmpty() && members.isEmpty()) return@forEach
                     item(key = "sec-${g.name}") {
                         Text(
                             g.label,

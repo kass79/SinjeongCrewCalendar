@@ -528,9 +528,13 @@ private fun DayDetailSheet(
             val mainLegs = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
                 if (isNight) combo?.let { MainLegs.forNight(n, it) } else MainLegs.forDay(n, holiday)
             }
-            val trains = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
-                if (isNight) combo?.let { RouteTable.forMainNight(n, it) }
-                else RouteTable.forMainDay(n, holiday)
+            val trains = day.duty.number?.let { n ->
+                when {
+                    day.duty.isBranch && day.duty.type != DutyType.BRANCH_STANDBY -> RouteTable.forBranch(n, holiday)
+                    day.duty.isBranch -> null
+                    isNight -> combo?.let { RouteTable.forMainNight(n, it) }
+                    else -> RouteTable.forMainDay(n, holiday)
+                }
             }
             val branchLegs = if (day.duty.isBranch) row?.let { r ->
                 r.firstLeg?.let { f -> r.secondLeg?.let { s -> f to s } }
@@ -549,10 +553,10 @@ private fun DayDetailSheet(
                         }
                         branchLegs != null -> {
                             KvRow("전반사업", fmtLeg(branchLegs.first))
-                            KvRow("└ 열번", "지선 행로표 입수 전", sub = true)
+                            KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
                             KvRow("후반사업", fmtLeg(branchLegs.second))
-                            KvRow("└ 열번", "지선 행로표 입수 전", sub = true)
-                            r.workTimeLabel?.let { KvRow("총근무시간", it) }
+                            KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
+                            trains?.let { KvRow("총근무시간", it.totalWorkTime) }
                         }
                         else -> {
                             KvRow("출근", r.signOn)
