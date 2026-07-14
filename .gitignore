@@ -21,3 +21,5 @@ google-services.json
 # 기타
 .DS_Store
 *.log
+
+.firebase/
