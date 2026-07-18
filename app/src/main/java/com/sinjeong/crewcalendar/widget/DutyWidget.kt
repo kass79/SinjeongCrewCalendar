@@ -94,4 +94,16 @@ class DutyWidget : GlanceAppWidget() {
 
 class DutyWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = DutyWidget()
+
+    // 위젯 추가·주기 갱신(updatePeriodMillis) 시 즉시 데이터 채우기
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: android.appwidget.AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        super.onUpdate(context, appWidgetManager, appWidgetIds)
+        androidx.work.WorkManager.getInstance(context).enqueue(
+            androidx.work.OneTimeWorkRequestBuilder<DutyWidgetWorker>().build()
+        )
+    }
 }

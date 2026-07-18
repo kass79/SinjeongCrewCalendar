@@ -44,9 +44,17 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var themeController: ThemeController
 
+    // 내일 근무 알림용 알림 권한 (안드로이드 13+, 거부해도 앱은 정상 동작)
+    private val notifPermission =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
         setContent {
             val mode by themeController.mode.collectAsState()
             val dark = when (mode) {

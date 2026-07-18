@@ -134,9 +134,32 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 }
             }
 
+            val ctx = LocalContext.current
+
+            // 알림
+            SectionTitle("알림")
+            val settingsPrefs = remember { ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+            var notifyOn by remember { mutableStateOf(settingsPrefs.getBoolean("notify_tomorrow", true)) }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("내일 근무 미리 알림", fontWeight = FontWeight.Bold)
+                    Text(
+                        "매일 저녁 8시, 내일 근무·출근시각 알림 (휴일·비번은 알리지 않음)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = notifyOn, onCheckedChange = {
+                    notifyOn = it
+                    settingsPrefs.edit().putBoolean("notify_tomorrow", it).apply()
+                })
+            }
+
             // 함께 쓰는 앱
             SectionTitle("함께 쓰는 앱")
-            val ctx = LocalContext.current
             SettingRow(
                 title = "슬기로운 승무생활",
                 sub = "사업소 안전정보 앱",

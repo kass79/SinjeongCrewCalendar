@@ -90,6 +90,9 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     LaunchedEffect(month) { viewModel.setMonth(month) }
     var filter by remember { mutableStateOf<CrewGroup?>(null) }
     var query by remember { mutableStateOf("") }
+    var favOnly by remember { mutableStateOf(false) }
+    // ★ = 동료 탭에서 즐겨찾기 그룹에 넣은 사람들
+    val favNames = remember(mates) { mates.filter { it.favGroup != null }.map { it.name }.toSet() }
     val duty = LocalDutyColors.current
 
     val people = remember(user, mates, liveUsers) {
@@ -157,6 +160,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                 CrewGroup.entries.forEach { g ->
                     FilterChip(selected = filter == g, onClick = { filter = g }, label = { Text(g.label, fontSize = 11.sp) })
                 }
+                FilterChip(selected = favOnly, onClick = { favOnly = !favOnly }, label = { Text("★", fontSize = 12.sp) })
                 Spacer(Modifier.weight(1f))
             }
             OutlinedTextField(
@@ -213,9 +217,12 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
             LazyColumn {
                 sections.forEach { g ->
                     val q = query.trim()
-                    val members = people.filter { it.group == g && (q.isEmpty() || it.name.contains(q)) }
-                        .sortedWith(compareBy({ !it.isMe }, { it.name }))
-                    if (q.isNotEmpty() && members.isEmpty()) return@forEach
+                    val members = people.filter {
+                        it.group == g &&
+                            (q.isEmpty() || it.name.contains(q)) &&
+                            (!favOnly || it.isMe || it.name in favNames)
+                    }.sortedWith(compareBy({ !it.isMe }, { it.name }))
+                    if ((q.isNotEmpty() || favOnly) && members.isEmpty()) return@forEach
                     item(key = "sec-${g.name}") {
                         Text(
                             g.label,
