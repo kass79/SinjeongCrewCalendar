@@ -360,8 +360,8 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
     val dateSize = if (big) 11.5.sp else 9.5.sp
     val holSize = if (big) 8.sp else 6.5.sp
-    val chipSizeBig = if (big) 14.5.sp else 12.5.sp
-    val chipSizeSmall = if (big) 12.sp else 10.5.sp
+    val chipSizeBig = if (big) 13.sp else 11.5.sp
+    val chipSizeSmall = if (big) 11.5.sp else 10.sp
     val signOnSize = if (big) 10.sp else 8.5.sp
     val memoSize = if (big) 9.5.sp else 8.sp
 
@@ -428,15 +428,19 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
         }
         if (day.duty.raw.isNotBlank()) {
             Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
-                // 대11·휴28 같은 3자 이상 라벨은 폰트를 줄여 짤림 방지
+                // 칩 크기 통일(글자수 무관 동일 사각형) + 3자 이상은 폰트만 축소
                 val label = day.duty.display
-                Text(
-                    label,
-                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                    fontSize = if (label.length >= 3) chipSizeSmall else chipSizeBig,
-                    fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1, softWrap = false,
-                )
+                Box(
+                    Modifier.size(width = if (big) 42.dp else 34.dp, height = if (big) 24.dp else 20.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        fontSize = if (label.length >= 3) chipSizeSmall else chipSizeBig,
+                        fontWeight = FontWeight.ExtraBold,
+                        maxLines = 1, softWrap = false,
+                    )
+                }
             }
         }
         day.signOn?.let {

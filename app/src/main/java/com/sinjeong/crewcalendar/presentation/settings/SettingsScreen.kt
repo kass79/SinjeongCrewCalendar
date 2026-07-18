@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -7,6 +8,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -132,15 +134,29 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
                 }
             }
 
+            // 함께 쓰는 앱
+            SectionTitle("함께 쓰는 앱")
+            val ctx = LocalContext.current
+            SettingRow(
+                title = "슬기로운 승무생활",
+                sub = "사업소 안전정보 앱",
+                trailing = {
+                    TextButton(onClick = {
+                        val launch = ctx.packageManager.getLaunchIntentForPackage("com.sinjeong.safety")
+                        if (launch != null) ctx.startActivity(launch)
+                        else Toast.makeText(ctx, "안전앱이 설치되어 있지 않습니다", Toast.LENGTH_SHORT).show()
+                    }) { Text("열기") }
+                },
+            )
+
             // 데이터 정보
             SectionTitle("데이터")
             SettingRow(title = "시각표", sub = "25.03.04 개정 (본선·지선)")
             SettingRow(
                 title = "행로표 (열번·근무시간)",
-                sub = "확인일 2023.10.04 · 본선 ${RouteTable.MAIN_DAY_WEEKDAY.size + RouteTable.MAIN_NIGHT.size}개 다이아 " +
-                    "· 지선/평휴(야간) 자료 입수 대기",
+                sub = "본선 확인일 23.10.04 · 지선 25.03.04 — 전 다이아 열번·근무시간 내장",
             )
-            SettingRow(title = "저장 방식", sub = "체험판 — 이 폰에만 저장 (서버 연동 시 자동 백업·동료 공유)")
+            SettingRow(title = "저장 방식", sub = "근무선택·근무변경은 동료와 공유, 메모·과거기록은 이 폰에만 저장")
 
             // 문의 · 저작권
             SectionTitle("문의")
