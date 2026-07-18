@@ -362,7 +362,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
-    val signOnSize = if (big) 10.sp else 8.5.sp
+    val signOnSize = if (big) 9.sp else 8.sp
     val memoSize = if (big) 9.5.sp else 8.sp
 
     Column(
@@ -428,15 +428,16 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
         }
         if (day.duty.raw.isNotBlank()) {
             Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
-                // 칩 크기 통일(글자수 무관 동일 사각형) + 3자 이상은 폰트만 축소
+                // 칩 폭 통일(글자수 무관 동일) — 높이는 글자에 맞춰(시스템 글꼴 확대 시 짤림 방지)
                 val label = day.duty.display
                 Box(
-                    Modifier.size(width = if (big) 42.dp else 34.dp, height = if (big) 24.dp else 20.dp),
+                    Modifier.width(if (big) 42.dp else 34.dp).padding(vertical = 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Text(
                         label,
                         fontSize = if (label.length >= 3) chipSizeSmall else chipSizeBig,
+                        lineHeight = if (label.length >= 3) chipSizeSmall * 1.15 else chipSizeBig * 1.15,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1, softWrap = false,
                     )
