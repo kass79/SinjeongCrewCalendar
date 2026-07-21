@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -44,7 +45,7 @@ fun OfficeContactsScreen(onBack: () -> Unit) {
         ) {
             item {
                 Text(
-                    "번호를 누르면 복사됩니다 (구내번호는 사업소 유선전화에서 사용)",
+                    "직통번호는 눌러서 전화, 구내번호는 눌러서 복사",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
@@ -62,8 +63,22 @@ fun OfficeContactsScreen(onBack: () -> Unit) {
                 }
                 items(section.items, key = { "${section.title}_${it.name}" }) { c ->
                     ContactRow(c) {
-                        clipboard.setText(AnnotatedString(c.number))
-                        Toast.makeText(context, "복사됨: ${c.number}", Toast.LENGTH_SHORT).show()
+                        if (c.ext) {
+                            clipboard.setText(AnnotatedString(c.number))
+                            Toast.makeText(context, "복사됨: ${c.number} (구내)", Toast.LENGTH_SHORT).show()
+                        } else {
+                            runCatching {
+                                context.startActivity(
+                                    android.content.Intent(
+                                        android.content.Intent.ACTION_DIAL,
+                                        android.net.Uri.parse("tel:" + c.number),
+                                    )
+                                )
+                            }.onFailure {
+                                clipboard.setText(AnnotatedString(c.number))
+                                Toast.makeText(context, "복사됨: ${c.number}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
                     }
                 }
             }
@@ -104,6 +119,14 @@ private fun ContactRow(c: BundledContacts.Contact, onClick: () -> Unit) {
                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                     )
                 }
+            } else {
+                Spacer(Modifier.width(8.dp))
+                Icon(
+                    Icons.Filled.Call,
+                    contentDescription = "전화",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
             }
         }
     }

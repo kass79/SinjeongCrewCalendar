@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.presentation.roster
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -15,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -91,6 +93,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     var filter by remember { mutableStateOf<CrewGroup?>(null) }
     var query by remember { mutableStateOf("") }
     var favOnly by remember { mutableStateOf(false) }
+    var dialTarget by remember { mutableStateOf<Person?>(null) }
     // ★ = 동료 탭에서 즐겨찾기 그룹에 넣은 사람들
     val favNames = remember(mates) { mates.filter { it.favGroup != null }.map { it.name }.toSet() }
     val duty = LocalDutyColors.current
@@ -235,9 +238,48 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                     items(members.size, key = { "${g.name}-$it-${members[it].name}" }) { i ->
                         val p = members[i]
                         PersonRow(p, month, cellW, nameW, hScroll, duty,
-                            overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap())
+                            overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
+                            onNameClick = { dialTarget = p })
                     }
                 }
+            }
+        }
+    }
+
+    dialTarget?.let { person ->
+        DialSheet(person, onDismiss = { dialTarget = null })
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DialSheet(person: Person, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val cleanName = person.name.removeSuffix(" (나)").trim()
+    val phone = BundledStaff.phoneFor(cleanName, person.group == CrewGroup.MAIN_CONDUCTOR)
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(person.group.label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (phone != null) {
+                Text(phone, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = {
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + phone))) }
+                        onDismiss()
+                    }, modifier = Modifier.weight(1f)) { Text("전화") }
+                    OutlinedButton(onClick = {
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:" + phone))) }
+                        onDismiss()
+                    }, modifier = Modifier.weight(1f)) { Text("문자") }
+                }
+                Text("판독본 번호예요. 틀리면 관리자에게 알려주세요.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("등록된 전화번호가 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }
@@ -253,6 +295,7 @@ private fun PersonRow(
     duty: DutyColors,
     /** 근무변경 실시간 반영 (날짜 → 변경 근무, Firebase 연동 시) */
     overrides: Map<LocalDate, String> = emptyMap(),
+    onNameClick: () -> Unit = {},
 ) {
     val pattern = Bundled.patternFor(p.group)
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -261,7 +304,7 @@ private fun PersonRow(
             fontSize = 10.sp, fontWeight = FontWeight.Bold,
             color = if (p.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(nameW).padding(horizontal = 4.dp),
+            modifier = Modifier.width(nameW).clickable { onNameClick() }.padding(horizontal = 4.dp),
         )
         Row(Modifier.horizontalScroll(hScroll)) {
             (1..month.lengthOfMonth()).forEach { d ->
