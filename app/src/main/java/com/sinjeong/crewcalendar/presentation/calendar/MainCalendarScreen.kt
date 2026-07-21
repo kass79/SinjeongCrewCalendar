@@ -85,13 +85,13 @@ fun MainCalendarScreen(
             // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().height(38.dp)
-                        .padding(horizontal = 10.dp).padding(top = 2.dp),
+                    Modifier.fillMaxWidth().statusBarsPadding().height(34.dp)
+                        .padding(horizontal = 10.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
-                        fontSize = 16.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         softWrap = false,
@@ -565,8 +565,11 @@ private fun DayDetailSheet(
             fun fmtLeg(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", " ▼")
 
             // 행로표 원본 (본선만 — 지선 행로표는 추후)
-            val routeAsset = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
+            val routeAsset = day.duty.number?.let { n ->
                 when {
+                    // 지선 주간 지1~지8 (평일 bwd / 휴일 bhol). 지선 야간 이미지는 추후
+                    day.duty.isBranch -> if (day.duty.type == DutyType.BRANCH && n in 1..8)
+                        (if (holiday) "bhol_$n" else "bwd_$n") else null
                     day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->
                         val tag = when (c) {
                             NightCombo.PP -> "pp"; NightCombo.PH -> "ph"
