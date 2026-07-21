@@ -2,10 +2,15 @@ package com.sinjeong.crewcalendar.presentation.calendar
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
@@ -80,6 +85,36 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
                     Icon(Icons.Default.Close, "닫기")
                 }
             }
+        }
+    }
+}
+
+/** 행로표 원본을 상세시트 안에 인라인 표시 — 폭에 맞춰 크게, 탭하면 전체화면 확대 */
+@Composable
+fun RouteImageInline(asset: String, onExpand: () -> Unit) {
+    val context = LocalContext.current
+    val bitmap = remember(asset) {
+        runCatching {
+            context.assets.open("routes/$asset.webp").use { BitmapFactory.decodeStream(it) }
+        }.getOrNull()
+    }
+    if (bitmap != null) {
+        Column {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "행로표 원본",
+                contentScale = ContentScale.FillWidth,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onExpand() },
+            )
+            Text(
+                "탭하면 크게 볼 수 있어요",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp, start = 2.dp),
+            )
         }
     }
 }

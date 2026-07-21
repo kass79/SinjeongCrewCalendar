@@ -53,10 +53,10 @@ data class DutyColors(
 )
 
 private val LightDutyColors = DutyColors(
-    // 주간·대기·야간·지선 배경 한 단계 옅게 (사용자 요청)
-    main = Color(0xFFC9F7DA), onMain = Color(0xFF00210E),
-    rest = Color(0xFFFFDAD5), onRest = Color(0xFFB3271E),
-    standby = Color(0xFFFFECB8), onStandby = Color(0xFF755B00),
+    // 주간(녹)·휴일(빨)·대기(노) 배경 더 옅게 (v1.3.1 사용자 요청) — 글자색은 유지해 대비 확보
+    main = Color(0xFFE8FAF0), onMain = Color(0xFF00210E),
+    rest = Color(0xFFFFF0EC), onRest = Color(0xFFB3271E),
+    standby = Color(0xFFFFF8E8), onStandby = Color(0xFF755B00),
     branch = Color(0xFFCDF4FA), onBranch = Color(0xFF006874),
     off = Color(0xFFE5E9E1), onOff = Color(0xFF565D55),
     // 야간 = 은은한 보라 (v8 확정)

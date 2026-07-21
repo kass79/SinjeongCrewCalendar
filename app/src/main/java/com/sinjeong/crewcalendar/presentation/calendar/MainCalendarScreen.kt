@@ -85,7 +85,8 @@ fun MainCalendarScreen(
             // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().height(40.dp).padding(horizontal = 10.dp),
+                    Modifier.fillMaxWidth().statusBarsPadding().height(38.dp)
+                        .padding(horizontal = 10.dp).padding(top = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
@@ -363,7 +364,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
-    val signOnSize = if (big) 9.sp else 8.sp
+    val signOnSize = if (big) 8.sp else 7.sp
     val memoSize = if (big) 9.5.sp else 8.sp
 
     Column(
@@ -435,12 +436,16 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
                     Modifier.width(if (big) 42.dp else 34.dp).padding(vertical = 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
+                    // 다이아 텍스트 자동 맞춤: 칩 폭을 넘치면 들어갈 때까지 축소 (시스템 글꼴 확대에도 안 짤림)
+                    val baseSize = if (label.length >= 3) chipSizeSmall else chipSizeBig
+                    var fitSize by remember(label, big) { mutableStateOf(baseSize) }
                     Text(
                         label,
-                        fontSize = if (label.length >= 3) chipSizeSmall else chipSizeBig,
-                        lineHeight = if (label.length >= 3) chipSizeSmall * 1.15 else chipSizeBig * 1.15,
+                        fontSize = fitSize,
+                        lineHeight = fitSize * 1.15,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1, softWrap = false,
+                        onTextLayout = { if (it.hasVisualOverflow && fitSize > 7.sp) fitSize *= 0.92f },
                     )
                 }
             }
@@ -559,31 +564,7 @@ private fun DayDetailSheet(
             } else null
             fun fmtLeg(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", " ▼")
 
-            row?.let { r ->
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    when {
-                        mainLegs != null -> {
-                            KvRow("전반사업", "${mainLegs[0]}~${mainLegs[1]}")
-                            KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
-                            KvRow("후반사업", "${mainLegs[2]}~${mainLegs[3]}" + if (isNight) " (익일)" else "")
-                            KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
-                            trains?.let { KvRow("총근무시간", it.totalWorkTime) }
-                        }
-                        branchLegs != null -> {
-                            KvRow("전반사업", fmtLeg(branchLegs.first))
-                            KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
-                            KvRow("후반사업", fmtLeg(branchLegs.second))
-                            KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
-                            trains?.let { KvRow("총근무시간", it.totalWorkTime) }
-                        }
-                        else -> {
-                            KvRow("출근", r.signOn)
-                            KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
-                        }
-                    }
-                }
-            }
-            // 행로표 원본 보기 (본선만 — 지선 행로표는 추후)
+            // 행로표 원본 (본선만 — 지선 행로표는 추후)
             val routeAsset = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
                 when {
                     day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->
@@ -599,8 +580,31 @@ private fun DayDetailSheet(
                 }
             }
             if (routeAsset != null) {
-                OutlinedButton(onClick = { showRoute = true }, modifier = Modifier.fillMaxWidth()) {
-                    Text("행로표 원본 보기")
+                RouteImageInline(routeAsset) { showRoute = true }
+            } else {
+                row?.let { r ->
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        when {
+                            mainLegs != null -> {
+                                KvRow("전반사업", "${mainLegs[0]}~${mainLegs[1]}")
+                                KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
+                                KvRow("후반사업", "${mainLegs[2]}~${mainLegs[3]}" + if (isNight) " (익일)" else "")
+                                KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
+                                trains?.let { KvRow("총근무시간", it.totalWorkTime) }
+                            }
+                            branchLegs != null -> {
+                                KvRow("전반사업", fmtLeg(branchLegs.first))
+                                KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
+                                KvRow("후반사업", fmtLeg(branchLegs.second))
+                                KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
+                                trains?.let { KvRow("총근무시간", it.totalWorkTime) }
+                            }
+                            else -> {
+                                KvRow("출근", r.signOn)
+                                KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
+                            }
+                        }
+                    }
                 }
             }
             if (showRoute && routeAsset != null) {
