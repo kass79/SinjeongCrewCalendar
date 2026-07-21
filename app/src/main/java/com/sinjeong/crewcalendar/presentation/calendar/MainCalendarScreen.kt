@@ -40,6 +40,7 @@ import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.MainLegs
+import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
@@ -539,6 +540,7 @@ private fun DayDetailSheet(
                 }
             }
             // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
+            var showRoute by remember { mutableStateOf(false) }
             val holiday = Bundled.isHolidayTimetable(day.date)
             val isNight = day.duty.type == DutyType.MAIN_NIGHT
             val mainLegs = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
@@ -580,6 +582,33 @@ private fun DayDetailSheet(
                         }
                     }
                 }
+            }
+            // 행로표 원본 보기 (본선만 — 지선 행로표는 추후)
+            val routeAsset = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
+                when {
+                    day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->
+                        val tag = when (c) {
+                            NightCombo.PP -> "pp"; NightCombo.PH -> "ph"
+                            NightCombo.HP -> "hp"; NightCombo.HH -> "hh"
+                        }
+                        "${tag}_$n"
+                    }
+                    day.duty.type == DutyType.MAIN_DAY ->
+                        if (holiday) { if (n <= 25) "hol_$n" else null } else "wd_$n"
+                    else -> null
+                }
+            }
+            if (routeAsset != null) {
+                OutlinedButton(onClick = { showRoute = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("행로표 원본 보기")
+                }
+            }
+            if (showRoute && routeAsset != null) {
+                RouteImageDialog(
+                    asset = routeAsset,
+                    title = "${day.duty.display} 다이아 행로표",
+                    onDismiss = { showRoute = false },
+                )
             }
             OutlinedTextField(
                 value = memo, onValueChange = { memo = it },
