@@ -65,7 +65,10 @@ class SettingsViewModel @Inject constructor(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel = hiltViewModel(),
+    onOpenContacts: () -> Unit = {},
+) {
     val user by viewModel.user.collectAsStateWithLifecycle()
     val mode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val savedMonths by viewModel.savedMonths.collectAsStateWithLifecycle()
@@ -160,6 +163,11 @@ fun SettingsScreen(viewModel: SettingsViewModel = hiltViewModel()) {
 
             // 함께 쓰는 앱
             SectionTitle("함께 쓰는 앱")
+            SettingRow(
+                title = "사업소 연락처",
+                sub = "부서·관제·주박지 번호",
+                trailing = { TextButton(onClick = onOpenContacts) { Text("열기") } },
+            )
             SettingRow(
                 title = "슬기로운 승무생활",
                 sub = "사업소 안전정보 앱",

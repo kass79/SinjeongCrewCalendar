@@ -6,6 +6,7 @@ import com.sinjeong.crewcalendar.domain.repository.*
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject
@@ -42,10 +43,13 @@ class LocalUserRepository @Inject constructor(
     }
 
     private val state = MutableStateFlow<User?>(load())
+    private val unlocked = MutableStateFlow(false)
 
     override val currentUid: String get() = state.value?.uid ?: "local"
 
-    override fun observeMe(): Flow<User?> = state
+    /** PIN 통과(unlocked) 전에는 null → 로그인/PIN 화면 게이트 */
+    override fun observeMe(): Flow<User?> =
+        combine(state, unlocked) { u, unl -> if (unl) u else null }
 
     override suspend fun upsert(user: User) {
         prefs.edit()
@@ -59,11 +63,8 @@ class LocalUserRepository @Inject constructor(
         state.value = user
     }
 
-    /** 로그아웃: 로그인 정보만 지우고 근무기록(스냅샷·메모)은 남긴다 */
-    suspend fun logout() {
-        prefs.edit().remove("name").remove("empNo").apply()
-        state.value = null
-    }
+    /** 기존 호출부 호환 — 로그아웃은 signOut()으로 일원화 */
+    suspend fun logout() = signOut()
 
     override suspend fun searchByName(query: String): List<User> = emptyList()
 
@@ -72,6 +73,28 @@ class LocalUserRepository @Inject constructor(
     override suspend fun updatePatternPosition(patternId: String, offset: Int) {
         val cur = state.value ?: return // 로그인 전에는 근무선택 불가
         upsert(cur.copy(patternId = patternId, patternOffset = offset))
+    }
+
+    override fun hasPin(): Boolean = !prefs.getString("pin", null).isNullOrBlank()
+
+    override fun savedName(): String? = prefs.getString("name", null)?.takeIf { it.isNotBlank() }
+
+    override suspend fun registerWithPin(user: User, pin: String) {
+        prefs.edit().putString("pin", pin).apply()
+        upsert(user)          // 이름·사번·패턴 저장
+        unlocked.value = true
+    }
+
+    override fun unlockWithPin(pin: String): Boolean {
+        val ok = prefs.getString("pin", null) == pin && pin.isNotBlank()
+        if (ok) unlocked.value = true
+        return ok
+    }
+
+    override suspend fun signOut() {
+        prefs.edit().remove("name").remove("empNo").remove("pin").apply()
+        unlocked.value = false
+        state.value = null
     }
 }
 

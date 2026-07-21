@@ -29,6 +29,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.presentation.auth.AuthViewModel
 import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
+import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
 import com.sinjeong.crewcalendar.presentation.diaboard.DiaBoardScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
 import com.sinjeong.crewcalendar.presentation.roster.RosterScreen
@@ -82,7 +83,7 @@ private fun AppRoot() {
     val authVm: AuthViewModel = hiltViewModel()
     val user by authVm.user.collectAsStateWithLifecycle()
     if (user == null) {
-        LoginScreen(onLogin = authVm::login)
+        LoginScreen()
         return
     }
 
@@ -121,7 +122,8 @@ private fun AppRoot() {
             composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }
             composable(Tab.DiaBoard.route) { DiaBoardScreen() }
             composable(Tab.Mates.route) { MatesScreen() }
-            composable(Tab.Settings.route) { SettingsScreen() }
+            composable(Tab.Settings.route) { SettingsScreen(onOpenContacts = { nav.navigate("contacts") }) }
+            composable("contacts") { OfficeContactsScreen(onBack = { nav.popBackStack() }) }
         }
     }
 }

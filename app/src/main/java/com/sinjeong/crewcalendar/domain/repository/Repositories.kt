@@ -13,6 +13,17 @@ interface UserRepository {
     suspend fun updateFcmToken(token: String)
     /** 근무선택: 패턴 + 순환 오프셋 저장 → 전체 달력 자동 재계산 */
     suspend fun updatePatternPosition(patternId: String, offset: Int)
+
+    /** 이 기기에 PIN이 저장돼 있는가 (재로그인 시 PIN 모드) */
+    fun hasPin(): Boolean
+    /** 저장된 로그인 이름 (PIN 모드 표시용) */
+    fun savedName(): String?
+    /** 첫 로그인 완료: 신원 저장 + PIN 저장 + 잠금해제 */
+    suspend fun registerWithPin(user: User, pin: String)
+    /** PIN 검증 후 잠금해제. 맞으면 true */
+    fun unlockWithPin(pin: String): Boolean
+    /** 로그아웃: 이름·사번·PIN 삭제 + 잠금 (근무기록·메모는 유지) */
+    suspend fun signOut()
 }
 
 interface PatternRepository {

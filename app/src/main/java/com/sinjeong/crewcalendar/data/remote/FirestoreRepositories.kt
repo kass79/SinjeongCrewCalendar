@@ -79,6 +79,16 @@ class FirestoreUserRepository @Inject constructor(
 
     suspend fun logout() = local.logout()
 
+    override fun hasPin() = local.hasPin()
+    override fun savedName() = local.savedName()
+    override suspend fun registerWithPin(user: User, pin: String) {
+        local.registerWithPin(user, pin)
+        // 서버 미러: local.registerWithPin의 upsert는 로컬만 저장하므로 여기서 한 번 더 서버로 publish
+        local.observeMe().first()?.let { runCatching { upsert(it) } }
+    }
+    override fun unlockWithPin(pin: String) = local.unlockWithPin(pin)
+    override suspend fun signOut() = local.signOut()
+
     /** 내 근무선택을 공용 명단에 미러 (숨김 설정이면 제거) */
     private suspend fun publish(user: User) {
         runCatching {
