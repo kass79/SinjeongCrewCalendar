@@ -18,11 +18,13 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -77,6 +79,7 @@ fun MainCalendarScreen(
         ThemeMode.SYSTEM -> systemDark
     }
     val snackbar = remember { SnackbarHostState() }
+    val context = LocalContext.current
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
 
     LaunchedEffect(state.error) {
@@ -127,6 +130,19 @@ fun MainCalendarScreen(
                             "다크/라이트 전환",
                             modifier = Modifier.size(18.dp),
                         )
+                    }
+                    IconButton(
+                        onClick = {
+                            runCatching {
+                                val uri = com.sinjeong.crewcalendar.util.renderMonthImage(
+                                    context, state.month, state.days, state.user?.name ?: "내",
+                                )
+                                com.sinjeong.crewcalendar.util.shareMonthImage(context, uri)
+                            }
+                        },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(Icons.Default.Share, "근무표 공유", modifier = Modifier.size(18.dp))
                     }
                     IconButton(onClick = viewModel::goToday, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Today, "오늘로", modifier = Modifier.size(18.dp))

@@ -59,6 +59,17 @@
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="duty_channel" />
 
+        <!-- 근무표 이미지 공유용 FileProvider -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- WorkManager 기본 자동초기화 제거 — SinjeongApp(Configuration.Provider, HiltWorkerFactory)이 담당 -->
         <provider
             android:name="androidx.startup.InitializationProvider"
