@@ -34,6 +34,7 @@ import com.sinjeong.crewcalendar.presentation.diaboard.DiaBoardScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
 import com.sinjeong.crewcalendar.presentation.roster.RosterScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
+import com.sinjeong.crewcalendar.presentation.timetable.DeadheadScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
@@ -117,9 +118,20 @@ private fun AppRoot() {
             modifier = Modifier.padding(padding),
         ) {
             composable(Tab.Calendar.route) {
-                MainCalendarScreen(onOpenRoster = { nav.navigate("roster") })
+                MainCalendarScreen(
+                    onOpenRoster = { nav.navigate("roster") },
+                    onOpenTimetable = {
+                        nav.navigate(Tab.DiaBoard.route) {
+                            popUpTo(nav.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    },
+                    onOpenDeadhead = { nav.navigate("deadhead") },
+                )
             }
             composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }
+            composable("deadhead") { DeadheadScreen(onBack = { nav.popBackStack() }) }
             composable(Tab.DiaBoard.route) { DiaBoardScreen() }
             composable(Tab.Mates.route) { MatesScreen() }
             composable(Tab.Settings.route) { SettingsScreen(onOpenContacts = { nav.navigate("contacts") }) }

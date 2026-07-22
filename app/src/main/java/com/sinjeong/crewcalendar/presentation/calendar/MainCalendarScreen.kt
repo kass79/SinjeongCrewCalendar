@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
@@ -63,6 +64,8 @@ import java.util.Locale
 @Composable
 fun MainCalendarScreen(
     onOpenRoster: () -> Unit = {},
+    onOpenTimetable: () -> Unit = {},
+    onOpenDeadhead: () -> Unit = {},
     viewModel: MainCalendarViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -146,6 +149,8 @@ fun MainCalendarScreen(
                     selected = state.selectedDate,
                     onSelect = viewModel::selectDate,
                     onSwipeMonth = viewModel::moveMonth,
+                    onOpenTimetable = onOpenTimetable,
+                    onOpenDeadhead = onOpenDeadhead,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -311,10 +316,19 @@ private fun CalendarGrid(
     selected: LocalDate?,
     onSelect: (LocalDate) -> Unit,
     onSwipeMonth: (Long) -> Unit,
+    onOpenTimetable: () -> Unit,
+    onOpenDeadhead: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val leading = month.atDay(1).dayOfWeek.value % 7
-    val cells: List<DaySchedule?> = List(leading) { null } + days
+    val cells0: List<DaySchedule?> = List(leading) { null } + days
+    val trailing = (7 - (cells0.size % 7)) % 7
+    val cells: List<DaySchedule?> = cells0 + List(trailing) { null }
+    // 빈 칸(null) 처음 2개 = 근무시각표 / 편승시각표 카드
+    val nullIdx = cells.indices.filter { cells[it] == null }
+    val card1 = nullIdx.getOrNull(0)
+    val card2 = nullIdx.getOrNull(1)
+    val duty = LocalDutyColors.current
     var dragX by remember { mutableFloatStateOf(0f) }
     val rows = (cells.size + 6) / 7
 
@@ -343,14 +357,37 @@ private fun CalendarGrid(
         ) {
             items(cells.size, key = { it }) { i ->
                 val day = cells[i]
-                if (day == null) Spacer(Modifier.height(cellHeight))
-                else DayCell(
-                    day, isSelected = day.date == selected, height = cellHeight,
-                    big = cellHeight >= 100.dp, // 펼침 화면 등 칸이 크면 글자도 키움
-                    onClick = { onSelect(day.date) },
-                )
+                when (i) {
+                    card1 -> TimetableCard("근무시각표", onOpenTimetable, cellHeight, duty.main, duty.onMain)
+                    card2 -> TimetableCard("편승시각표", onOpenDeadhead, cellHeight, duty.branch, duty.onBranch)
+                    else -> if (day == null) Spacer(Modifier.height(cellHeight))
+                    else DayCell(
+                        day, isSelected = day.date == selected, height = cellHeight,
+                        big = cellHeight >= 100.dp, // 펼침 화면 등 칸이 크면 글자도 키움
+                        onClick = { onSelect(day.date) },
+                    )
+                }
             }
         }
+    }
+}
+
+/* ── 빈 칸에 들어가는 시각표 바로가기 카드 ─────────────── */
+@Composable
+private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Color, fg: Color) {
+    Column(
+        Modifier
+            .height(height)
+            .clip(RoundedCornerShape(10.dp))
+            .background(bg.copy(alpha = 0.6f))
+            .clickable(onClick = onClick)
+            .padding(4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(Icons.Default.Schedule, null, tint = fg, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = fg, textAlign = TextAlign.Center)
     }
 }
 
@@ -567,9 +604,14 @@ private fun DayDetailSheet(
             // 행로표 원본 (본선만 — 지선 행로표는 추후)
             val routeAsset = day.duty.number?.let { n ->
                 when {
-                    // 지선 주간 지1~지8 (평일 bwd / 휴일 bhol). 지선 야간 이미지는 추후
-                    day.duty.isBranch -> if (day.duty.type == DutyType.BRANCH && n in 1..8)
-                        (if (holiday) "bhol_$n" else "bwd_$n") else null
+                    // 지선 주간 지1~8 (bwd/bhol) + 야간 지10~14 (bnwd/bnhol)
+                    day.duty.isBranch -> when {
+                        day.duty.type == DutyType.BRANCH && n in 1..8 ->
+                            if (holiday) "bhol_$n" else "bwd_$n"
+                        day.duty.type == DutyType.BRANCH_NIGHT && n in 10..14 ->
+                            if (holiday) "bnhol_$n" else "bnwd_$n"
+                        else -> null
+                    }
                     day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->
                         val tag = when (c) {
                             NightCombo.PP -> "pp"; NightCombo.PH -> "ph"
