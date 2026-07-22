@@ -89,13 +89,13 @@ fun MainCalendarScreen(
             // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
-                    Modifier.fillMaxWidth().statusBarsPadding().height(30.dp)
-                        .padding(horizontal = 10.dp),
+                    // 상단 공백 제거 — 상태바와 겹쳐도 됨(사용자 요청). statusBarsPadding 미적용
+                    Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 10.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
-                        fontSize = 13.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         softWrap = false,
