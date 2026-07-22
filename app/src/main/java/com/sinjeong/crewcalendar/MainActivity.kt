@@ -120,14 +120,6 @@ private fun AppRoot() {
             composable(Tab.Calendar.route) {
                 MainCalendarScreen(
                     onOpenRoster = { nav.navigate("roster") },
-                    onOpenTimetable = {
-                        nav.navigate(Tab.DiaBoard.route) {
-                            popUpTo(nav.graph.startDestinationId) { saveState = true }
-                            launchSingleTop = true
-                            restoreState = true
-                        }
-                    },
-                    onOpenDeadhead = { nav.navigate("deadhead") },
                 )
             }
             composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }

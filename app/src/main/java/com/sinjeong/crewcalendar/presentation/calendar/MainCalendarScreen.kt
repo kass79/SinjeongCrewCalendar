@@ -77,6 +77,7 @@ fun MainCalendarScreen(
         ThemeMode.SYSTEM -> systemDark
     }
     val snackbar = remember { SnackbarHostState() }
+    var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
 
     LaunchedEffect(state.error) {
         state.error?.let { snackbar.showSnackbar(it); viewModel.dismissError() }
@@ -149,8 +150,8 @@ fun MainCalendarScreen(
                     selected = state.selectedDate,
                     onSelect = viewModel::selectDate,
                     onSwipeMonth = viewModel::moveMonth,
-                    onOpenTimetable = onOpenTimetable,
-                    onOpenDeadhead = onOpenDeadhead,
+                    onOpenTimetable = { fullTimetable = "tt_work" to "근무시각표" },
+                    onOpenDeadhead = { fullTimetable = "tt_deadhead" to "편승시각표" },
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -194,6 +195,10 @@ fun MainCalendarScreen(
                 onDismiss = viewModel::closeDutyChange,
             )
         }
+    }
+
+    fullTimetable?.let { (asset, title) ->
+        RouteImageDialog(asset = asset, title = title, onDismiss = { fullTimetable = null })
     }
 }
 
