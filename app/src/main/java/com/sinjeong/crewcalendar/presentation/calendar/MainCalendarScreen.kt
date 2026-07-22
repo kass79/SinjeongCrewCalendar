@@ -93,12 +93,12 @@ fun MainCalendarScreen(
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
                     // 상단 공백 제거 — 상태바와 겹쳐도 됨(사용자 요청). statusBarsPadding 미적용
-                    Modifier.fillMaxWidth().height(30.dp).padding(horizontal = 10.dp, vertical = 2.dp),
+                    Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 10.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
-                        fontSize = 11.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         softWrap = false,
@@ -396,6 +396,8 @@ private fun CalendarGrid(
 /* ── 빈 칸에 들어가는 시각표 바로가기 카드 ─────────────── */
 @Composable
 private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Color, fg: Color) {
+    // "근무시각표" → "근무\n시각표" 의도적 2줄 — 좁은 칸에서 어색한 중간 줄바꿈 방지 + 큰 글씨
+    val twoLine = if (label.length >= 5) label.substring(0, 2) + "\n" + label.substring(2) else label
     Column(
         Modifier
             .height(height)
@@ -406,9 +408,14 @@ private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Co
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(Icons.Default.Schedule, null, tint = fg, modifier = Modifier.size(18.dp))
-        Spacer(Modifier.height(3.dp))
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = fg, textAlign = TextAlign.Center)
+        Icon(Icons.Default.Schedule, null, tint = fg, modifier = Modifier.size(22.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(
+            twoLine,
+            fontSize = 12.5.sp, lineHeight = 16.sp,
+            fontWeight = FontWeight.ExtraBold, color = fg, textAlign = TextAlign.Center,
+            softWrap = false,
+        )
     }
 }
 
