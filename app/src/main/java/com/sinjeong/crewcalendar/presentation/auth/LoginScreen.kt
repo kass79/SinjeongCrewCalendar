@@ -3,7 +3,10 @@ package com.sinjeong.crewcalendar.presentation.auth
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -116,17 +119,21 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
         Modifier.fillMaxSize().background(
             Brush.verticalGradient(listOf(Color(0xFFFDE7EE), Color(0xFFEDE9FB))),
         ),
-        contentAlignment = Alignment.Center,
+        contentAlignment = Alignment.TopCenter,
     ) {
         Column(
-            Modifier.padding(horizontal = 32.dp).widthIn(max = 400.dp),
+            Modifier.widthIn(max = 400.dp)
+                .verticalScroll(rememberScrollState())
+                .imePadding()
+                .padding(horizontal = 32.dp)
+                .padding(top = 40.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Image(
                 painterResource(R.drawable.login_hero),
                 contentDescription = null,
-                modifier = Modifier.size(170.dp).clip(RoundedCornerShape(28.dp)),
+                modifier = Modifier.size(130.dp).clip(RoundedCornerShape(28.dp)),
             )
             Text(
                 "신정승무 캘린더",

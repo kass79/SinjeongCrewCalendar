@@ -16,7 +16,7 @@ private fun dutyColors(t: DutyType): Pair<Int, Int> = when (t) {
     DutyType.POST_NIGHT -> 0xFFE5E9E1.toInt() to 0xFF565D55.toInt()
     DutyType.REST, DutyType.BRANCH_REST -> 0xFFFFF0EC.toInt() to 0xFFB3271E.toInt()
     DutyType.STANDBY, DutyType.BRANCH_STANDBY -> 0xFFFFF8E8.toInt() to 0xFF755B00.toInt()
-    DutyType.BRANCH -> 0xFFCDF4FA.toInt() to 0xFF006874.toInt()
+    DutyType.BRANCH -> 0xFFE8FAF0.toInt() to 0xFF00512B.toInt()
     DutyType.ETC -> 0x00000000 to 0xFF888888.toInt()
 }
 

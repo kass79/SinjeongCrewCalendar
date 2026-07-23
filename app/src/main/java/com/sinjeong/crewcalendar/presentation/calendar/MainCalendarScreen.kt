@@ -93,12 +93,12 @@ fun MainCalendarScreen(
             Surface(color = MaterialTheme.colorScheme.surface) {
                 Row(
                     // 상단 공백 제거 — 상태바와 겹쳐도 됨(사용자 요청). statusBarsPadding 미적용
-                    Modifier.fillMaxWidth().height(36.dp).padding(horizontal = 10.dp, vertical = 2.dp),
+                    Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 10.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
                         state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
-                        fontSize = 13.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
                         softWrap = false,
@@ -229,8 +229,9 @@ private fun RestCountChip(count: Int) {
     ) {
         Text(
             "휴 ${count}개",
-            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-            fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
+            fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            maxLines = 1, softWrap = false,
         )
     }
 }
@@ -243,7 +244,7 @@ private fun dutyChipColors(type: DutyType, duty: DutyColors, fallback: Color): P
         DutyType.POST_NIGHT -> duty.off to duty.onOff
         DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
         DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
-        DutyType.BRANCH -> duty.branch to duty.onBranch
+        DutyType.BRANCH -> duty.main to duty.onMain
         DutyType.ETC -> Color.Transparent to fallback
     }
 

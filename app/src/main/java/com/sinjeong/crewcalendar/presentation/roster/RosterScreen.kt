@@ -316,7 +316,7 @@ private fun PersonRow(
                     DutyType.POST_NIGHT -> duty.off to duty.onOff
                     DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
                     DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
-                    DutyType.BRANCH -> duty.branch to duty.onBranch
+                    DutyType.BRANCH -> duty.main to duty.onMain
                     DutyType.ETC -> Color.Transparent to MaterialTheme.colorScheme.onSurfaceVariant
                 }
                 Box(Modifier.width(cellW).padding(1.dp)) {
