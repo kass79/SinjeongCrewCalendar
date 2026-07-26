@@ -3,9 +3,13 @@ import sys
 import os
 import time
 import random
+import platform
 import subprocess
 from datetime import datetime, timedelta
 from playwright.sync_api import sync_playwright, TimeoutError
+
+IS_MAC = platform.system() == "Darwin"
+IS_WINDOWS = platform.system() == "Windows"
 
 # ───────────────────────────────────────────────
 # 🧑 사람처럼 행동하기 위한 헬퍼 함수
@@ -17,9 +21,17 @@ def human_delay(min_sec=0.8, max_sec=2.2):
     time.sleep(delay)
 
 def clipboard_paste(page, text):
-    """macOS 클립보드에 텍스트 복사 후 Cmd+V로 붙여넣기 — 빠르고 자연스러운 방식"""
-    subprocess.run(['pbcopy'], input=text.encode('utf-8'), check=True)
-    page.keyboard.press('Meta+v')
+    """클립보드에 텍스트 복사 후 붙여넣기 — 맥(pbcopy+Cmd+V) / 윈도우(clip+Ctrl+V) 모두 지원"""
+    if IS_MAC:
+        subprocess.run(['pbcopy'], input=text.encode('utf-8'), check=True)
+        page.keyboard.press('Meta+v')
+    elif IS_WINDOWS:
+        # clip.exe는 UTF-16(BOM 포함)으로 넣어야 한글이 깨지지 않음
+        subprocess.run('clip', input=text.encode('utf-16'), check=True)
+        page.keyboard.press('Control+v')
+    else:
+        # 리눅스 등: 클립보드 도구 없이 에디터에 직접 입력
+        page.keyboard.insert_text(text)
 
 def human_click(locator, page=None):
     """클릭 직전 짧은 망설임 후 클릭"""
@@ -159,7 +171,7 @@ def run(text_file, image_file, schedule_str):
                 # 날짜/시간 세팅 UI (DatePicker) 제어
                 # Threads의 DatePicker는 월(Month)을 넘기는 기능과 일(Day)을 클릭하는 구조입니다.
                 target_month_en = target_dt.strftime("%B %Y") # "June 2026"
-                target_month_kr = target_dt.strftime("%Y년 %-m월") # "2026년 6월"
+                target_month_kr = f"{target_dt.year}년 {target_dt.month}월" # "2026년 6월" (%-m은 윈도우 미지원)
                 target_day = str(target_dt.day)
 
                 print("📅 달력 열림 확인 — hh/mm 인풋 먼저 체크...")
