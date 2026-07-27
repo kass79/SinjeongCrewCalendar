@@ -126,9 +126,10 @@ ffmpeg -y -i renders/<렌더된>.mp4 -i voice.wav -i bgm.wav \
 - `hyperframes tts`(Kokoro-82M): 지원 언어에 한국어 없음 (en/es/fr/hi/it/pt/ja/zh만)
 - `edge-tts`: 설치는 되나 마이크로소프트 서버 접근이 이그레스 정책에 막힘
 
-→ 사용자가 **음성 파일을 직접 만들어 주는 것**이 유일한 방법이다. 안내할 곳:
-클로바더빙, 타입캐스트, 또는 본인 윈도우 PC에서 `pip install edge-tts` 후
-`edge-tts --voice ko-KR-InJoonNeural --text "..." --write-media voice.mp3` (무료, 고품질).
+→ 사용자가 **음성 파일을 직접 만들어 주는 것**이 유일한 방법이다.
+`scripts/make_voice.py`를 카스에게 안내한다 — spec.json의 자막을 읽어
+문장별 mp3를 한 번에 뽑는 스크립트다(카스 PC에서 `pip install edge-tts` 후 실행).
+클로바더빙·타입캐스트로 직접 녹음해 주셔도 된다.
 
 음성을 받으면 그 길이에 맞춰 `spec.json`의 자막 타이밍을 다시 잡고 재렌더링한다.
 
