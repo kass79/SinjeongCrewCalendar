@@ -168,7 +168,8 @@ fun MainCalendarScreen(
         },
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
-            Column(Modifier.weight(if (wide) 0.52f else 1f).fillMaxHeight()) {
+            // 펼침 비율 44:56 — 달력은 접힘 폰 폭 수준(~370dp)을 유지하고 행로표에 폭을 몰아줌
+            Column(Modifier.weight(if (wide) 0.44f else 1f).fillMaxHeight()) {
                 // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
                 WeekdayHeader()
 
@@ -191,7 +192,7 @@ fun MainCalendarScreen(
             }
             // 펼침: 오른쪽 상세 패널 — 바텀시트와 같은 내용(DayDetailContent) 재사용
             if (wide) Surface(
-                Modifier.weight(0.48f).fillMaxHeight(),
+                Modifier.weight(0.56f).fillMaxHeight(),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
@@ -725,7 +726,7 @@ private fun DayDetailContent(
             }
             if (routeAsset != null) {
                 // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로
-                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 7.dp) { showRoute = true }
+                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp) { showRoute = true }
             } else {
                 row?.let { r ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
