@@ -11,7 +11,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -30,7 +29,6 @@ import com.sinjeong.crewcalendar.presentation.auth.AuthViewModel
 import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
-import com.sinjeong.crewcalendar.presentation.diaboard.DiaBoardScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
 import com.sinjeong.crewcalendar.presentation.roster.RosterScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
@@ -73,7 +71,6 @@ class MainActivity : ComponentActivity() {
 
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     Calendar("calendar", "달력", Icons.Default.CalendarMonth),
-    DiaBoard("diaboard", "교번표", Icons.Default.TableChart),
     Mates("mates", "동료", Icons.Default.Groups),
     Settings("settings", "설정", Icons.Default.Settings),
 }
@@ -124,7 +121,6 @@ private fun AppRoot() {
             }
             composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }
             composable("deadhead") { DeadheadScreen(onBack = { nav.popBackStack() }) }
-            composable(Tab.DiaBoard.route) { DiaBoardScreen() }
             composable(Tab.Mates.route) { MatesScreen() }
             composable(Tab.Settings.route) { SettingsScreen(onOpenContacts = { nav.navigate("contacts") }) }
             composable("contacts") { OfficeContactsScreen(onBack = { nav.popBackStack() }) }

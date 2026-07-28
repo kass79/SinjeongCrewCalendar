@@ -97,7 +97,7 @@ fun MainCalendarScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text(
-                        state.month.format(DateTimeFormatter.ofPattern("yy년 M월")),
+                        state.month.format(DateTimeFormatter.ofPattern("M월")),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
@@ -426,7 +426,7 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
-    val dateSize = if (big) 11.5.sp else 9.5.sp
+    val dateSize = if (big) 9.5.sp else 7.5.sp
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
@@ -470,7 +470,12 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
                     day.date.dayOfWeek == DayOfWeek.SATURDAY -> duty.saturday
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
-                modifier = Modifier.padding(start = 3.dp),
+                // 날짜 숫자 뒤 아주 옅은 사각형 — onSurface 알파라 라이트/다크 자동 대응
+                modifier = Modifier
+                    .padding(start = 3.dp)
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
             )
             val nameTag = day.holidayName ?: day.memorialName ?: day.seasonalTerm
             nameTag?.let {
@@ -630,15 +635,18 @@ private fun DayDetailSheet(
             } else null
             fun fmtLeg(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", " ▼")
 
-            // 행로표 원본 (본선만 — 지선 행로표는 추후)
+            // 행로표 원본 (본선 + 지선)
             val routeAsset = day.duty.number?.let { n ->
                 when {
-                    // 지선 주간 지1~8 (bwd/bhol) + 야간 지10~14 (bnwd/bnhol)
+                    // 지선 주간 지1~8 (bwd/bhol) + 야간 지10~14 (평평≡평휴=bnwd, 휴평=bnhp, 휴휴=bnhol — 10/12/13 종료편성이 다름)
                     day.duty.isBranch -> when {
                         day.duty.type == DutyType.BRANCH && n in 1..8 ->
                             if (holiday) "bhol_$n" else "bwd_$n"
-                        day.duty.type == DutyType.BRANCH_NIGHT && n in 10..14 ->
-                            if (holiday) "bnhol_$n" else "bnwd_$n"
+                        day.duty.type == DutyType.BRANCH_NIGHT && n in 10..14 -> when (combo) {
+                            NightCombo.HP -> "bnhp_$n"
+                            NightCombo.HH -> "bnhol_$n"
+                            else -> "bnwd_$n"
+                        }
                         else -> null
                     }
                     day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->

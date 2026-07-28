@@ -43,11 +43,13 @@ class LocalUserRepository @Inject constructor(
     }
 
     private val state = MutableStateFlow<User?>(load())
-    private val unlocked = MutableStateFlow(false)
+
+    /** 자동 로그인: 저장된 사용자가 있으면 앱 시작 시 바로 잠금해제(PIN 재입력 없음) */
+    private val unlocked = MutableStateFlow(state.value != null)
 
     override val currentUid: String get() = state.value?.uid ?: "local"
 
-    /** PIN 통과(unlocked) 전에는 null → 로그인/PIN 화면 게이트 */
+    /** 잠금해제 전에는 null → 로그인 화면 게이트 (최초 로그인 / 로그아웃 후) */
     override fun observeMe(): Flow<User?> =
         combine(state, unlocked) { u, unl -> if (unl) u else null }
 
