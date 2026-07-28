@@ -66,7 +66,9 @@ def build(spec):
     fill_w = src_w * H / src_h
     kb_css = []
     for i, s in enumerate(shots, 1):
+        # 스케일 1.0에서도 프레임이 항상 채워지도록 클램프 (검은 띠 방지)
         left = round(W / 2 - float(s.get("focus", 0.5)) * fill_w)
+        left = min(0, max(round(W - fill_w), left))
         oy = s.get("origin_y", 45)
         kb_css.append(
             f"      #kb{i} {{ left: {left}px; "
@@ -88,9 +90,10 @@ def build(spec):
             tl.append(f'      tl.fromTo("#f{i}", {{ opacity: 0 }}, '
                       f'{{ opacity: 1, duration: 0.6, ease: "power1.inOut" }}, {s["start"]});')
             if i < len(shots):
-                nxt = shots[i]["start"]
+                nxt = float(shots[i]["start"])
                 tl.append(f'      tl.to("#f{i}", {{ opacity: 0, duration: 0.6, '
                           f'ease: "power1.inOut" }}, {nxt});')
+                tl.append(f'      tl.set("#f{i}", {{ opacity: 0 }}, {round(nxt+0.6,2)});')
 
     end_start = float(end.get("start", dur - 2.6))
     for i, c in enumerate(shots, 1):
@@ -190,7 +193,8 @@ def build(spec):
       .cap .line {{ font-size: {cap_fs}px; font-weight: {st['cap_weight']};
         line-height: 1.35; color: {st['cap_color']}; text-align: center;
         text-shadow: 0 2px 8px rgba(0,0,0,.9), 0 0 40px rgba(0,0,0,.7); }}
-      .cap .em {{ color: {st['em_color']}; display: inline-block; }}
+      .cap .em {{ color: {st['em_color']}; display: inline-block;
+        transform-origin: left center; }}  /* 팝 확대가 오른쪽으로만 — 앞 단어와 안 겹침 */
 
       #vig-i {{ position: absolute; inset: 0; background: {vig}
         rgba(0,0,0,0) 40%, rgba(0,0,0,.38) 74%, rgba(0,0,0,.82) 100%); }}

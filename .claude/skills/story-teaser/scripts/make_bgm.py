@@ -117,16 +117,19 @@ def build(spec, out_path):
         riser = lowpass(rng.standard_normal(n), 0.08) * np.linspace(0, 1, n) ** 2
         add(riser * 0.16, float(s["start"]) - 0.8)
 
-    # 4. 빗소리 + 천둥
-    if spec.get("lightning"):
-        lo = min(spec["lightning"]) - 0.1
-        hi = max(spec["lightning"]) + 3.0
-        n = sec(min(hi, dur) - lo)
+    # 4. 빗소리 + 천둥 — spec의 "rain": [시작, 끝] 이 있으면 그 구간, 없으면 번개 주변
+    rain_span = spec.get("rain")
+    if rain_span is None and spec.get("lightning"):
+        rain_span = [min(spec["lightning"]) - 0.1, max(spec["lightning"]) + 3.0]
+    if rain_span:
+        lo = max(float(rain_span[0]), 0.0)
+        n = sec(min(float(rain_span[1]), dur) - lo)
         if n > 0:
             rain = rng.standard_normal(n)
             rain = rain - lowpass(rain, 0.02)
             rain = lowpass(rain, 0.35) * env_ar(n, 0.7, 0.8)
             add(rain * 0.10, lo)
+    if spec.get("lightning"):
         for j, at in enumerate(spec["lightning"]):
             n = sec(2.2)
             tt = np.arange(n) / SR
