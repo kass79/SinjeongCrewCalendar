@@ -638,15 +638,13 @@ private fun DayDetailSheet(
             // 행로표 원본 (본선 + 지선)
             val routeAsset = day.duty.number?.let { n ->
                 when {
-                    // 지선 주간 지1~8 (bwd/bhol) + 야간 지10~14 (평평≡평휴=bnwd, 휴평=bnhp, 휴휴=bnhol — 10/12/13 종료편성이 다름)
+                    // 지선 주간 지1~8 (bwd/bhol) + 야간 지10~14 (당일 휴일=bnhol, 평일=bnwd)
+                    // 야간 표는 시각이 전부 동일하고 종료편성(지N)만 조합별로 달라 당일 기준 2종이면 충분
                     day.duty.isBranch -> when {
                         day.duty.type == DutyType.BRANCH && n in 1..8 ->
                             if (holiday) "bhol_$n" else "bwd_$n"
-                        day.duty.type == DutyType.BRANCH_NIGHT && n in 10..14 -> when (combo) {
-                            NightCombo.HP -> "bnhp_$n"
-                            NightCombo.HH -> "bnhol_$n"
-                            else -> "bnwd_$n"
-                        }
+                        day.duty.type == DutyType.BRANCH_NIGHT && n in 10..14 ->
+                            if (holiday) "bnhol_$n" else "bnwd_$n"
                         else -> null
                     }
                     day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->
