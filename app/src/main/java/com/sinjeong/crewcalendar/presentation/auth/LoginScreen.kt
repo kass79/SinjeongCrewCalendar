@@ -18,6 +18,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -115,6 +117,11 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
     val mode by viewModel.mode.collectAsState()
     val error by viewModel.error.collectAsState()
 
+    // 키보드가 떴거나 세로가 짧은 화면(폴드 펼침·가로)에선 히어로·여백을 걷어내 입력칸 자리 확보
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+    val shortScreen = LocalConfiguration.current.screenHeightDp < 640
+    val compactTop = imeVisible || shortScreen
+
     Box(
         Modifier.fillMaxSize().background(
             Brush.verticalGradient(listOf(Color(0xFFFDE7EE), Color(0xFFEDE9FB))),
@@ -123,14 +130,14 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
     ) {
         Column(
             Modifier.widthIn(max = 400.dp)
-                .verticalScroll(rememberScrollState())
                 .imePadding()
+                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 32.dp)
-                .padding(top = 40.dp, bottom = 24.dp),
+                .padding(top = if (compactTop) 12.dp else 40.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Image(
+            if (!compactTop) Image(
                 painterResource(R.drawable.login_hero),
                 contentDescription = null,
                 modifier = Modifier.size(130.dp).clip(RoundedCornerShape(28.dp)),
@@ -150,24 +157,26 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
                 )
             }
 
-            Spacer(Modifier.height(10.dp))
-            Text(
-                "© 2026  KANG SUNGJIN",
-                fontSize = 11.sp,
-                letterSpacing = 3.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = Color(0xFF1D3FA8).copy(alpha = 0.55f),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Text(
-                "All Rights Reserved",
-                fontSize = 9.sp,
-                letterSpacing = 1.5.sp,
-                color = Color(0xFF8A8496),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
+            if (!compactTop) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "© 2026  KANG SUNGJIN",
+                    fontSize = 11.sp,
+                    letterSpacing = 3.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color(0xFF1D3FA8).copy(alpha = 0.55f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    "All Rights Reserved",
+                    fontSize = 9.sp,
+                    letterSpacing = 1.5.sp,
+                    color = Color(0xFF8A8496),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
         }
     }
 }

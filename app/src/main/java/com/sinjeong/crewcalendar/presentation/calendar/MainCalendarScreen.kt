@@ -87,7 +87,11 @@ fun MainCalendarScreen(
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     // 펼침 전용 선택 날짜 — 접었다 펴도 살아남게 epochDay(Long)로 저장
     var panelEpochDay by rememberSaveable { mutableStateOf<Long?>(null) }
-    val detailDate = if (wide) panelEpochDay?.let(LocalDate::ofEpochDay) else state.selectedDate
+    // 펼침 기본 선택 = 오늘(이번 달일 때만). 다른 달이면 null → "날짜를 선택하세요"
+    val detailDate = if (wide)
+        panelEpochDay?.let(LocalDate::ofEpochDay)
+            ?: LocalDate.now().takeIf { YearMonth.from(it) == state.month }
+    else state.selectedDate
 
     LaunchedEffect(state.error) {
         state.error?.let { snackbar.showSnackbar(it); viewModel.dismissError() }
@@ -163,7 +167,7 @@ fun MainCalendarScreen(
         },
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
-            Column(Modifier.weight(if (wide) 0.55f else 1f).fillMaxHeight()) {
+            Column(Modifier.weight(if (wide) 0.52f else 1f).fillMaxHeight()) {
                 // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
                 WeekdayHeader()
 
@@ -186,7 +190,7 @@ fun MainCalendarScreen(
             }
             // 펼침: 오른쪽 상세 패널 — 바텀시트와 같은 내용(DayDetailContent) 재사용
             if (wide) Surface(
-                Modifier.weight(0.45f).fillMaxHeight(),
+                Modifier.weight(0.48f).fillMaxHeight(),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
@@ -202,8 +206,11 @@ fun MainCalendarScreen(
                         onChangeDuty = { viewModel.openDutyChange(day.date) },
                         onRevert = { viewModel.changeDuty(day.date, null) },
                         onClose = { panelEpochDay = null },
-                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                            .padding(top = 14.dp),
+                        compact = false,
+                        // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
+                        // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다
+                        modifier = Modifier.fillMaxSize().imePadding()
+                            .verticalScroll(rememberScrollState()).padding(top = 14.dp),
                     )
                 }
             }
@@ -221,6 +228,10 @@ fun MainCalendarScreen(
                     onChangeDuty = { viewModel.openDutyChange(date) },
                     onRevert = { viewModel.changeDuty(date, null) },
                     onClose = { viewModel.selectDate(null) },
+                    // ponytail: 접힘 시트는 키보드가 메모 칸을 가린다(ModalBottomSheet가 별도 윈도우라
+                    // imePadding()이 0으로 들어옴 — 에뮬 실측). verticalScroll로 감싸면 인라인 행로표
+                    // 이미지가 무한높이 제약에서 깨져 시트 렌더가 망가진다. 시트 레이아웃을 손대야 하는
+                    // 별건이라 v1.6.1에선 손대지 않음. 고칠 땐 RouteImageInline에 높이 상한부터.
                 )
             }
         }
@@ -449,11 +460,14 @@ private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Co
     ) {
         Icon(Icons.Default.Schedule, null, tint = fg, modifier = Modifier.size(22.dp))
         Spacer(Modifier.height(4.dp))
+        // 칸이 좁거나 시스템 글꼴 확대 시 가로로 짤리지 않게 자동 축소 (DayCell 다이아 칩과 같은 방식)
+        var fitSize by remember(twoLine, height) { mutableStateOf(12.5.sp) }
         Text(
             twoLine,
-            fontSize = 12.5.sp, lineHeight = 16.sp,
+            fontSize = fitSize, lineHeight = fitSize * 1.28,
             fontWeight = FontWeight.ExtraBold, color = fg, textAlign = TextAlign.Center,
             softWrap = false,
+            onTextLayout = { if (it.hasVisualOverflow && fitSize > 7.sp) fitSize *= 0.92f },
         )
     }
 }
@@ -586,6 +600,7 @@ private fun DayDetailContent(
     onChangeDuty: () -> Unit,
     onRevert: () -> Unit,
     onClose: () -> Unit,
+    compact: Boolean = true,   // true=접힘 바텀시트(기존 그대로), false=펼침 오른쪽 패널
     modifier: Modifier = Modifier,
 ) {
     val duty = LocalDutyColors.current
@@ -596,45 +611,48 @@ private fun DayDetailContent(
     val isDia = day.duty.type in setOf(DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
     Column(
-        modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
+        modifier.padding(horizontal = if (compact) 20.dp else 10.dp).padding(bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
-                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
-                )
-                (day.holidayName ?: day.memorialName)?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold, color = duty.sunday)
-                }
-                day.seasonalTerm?.let {
-                    Text(it, style = MaterialTheme.typography.labelSmall, color = duty.onStandby)
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(10.dp)) {
+            // 펼침 패널은 날짜·근무칩 줄 생략 — 행로표에 폭/높이를 몰아준다
+            if (compact) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        buildString {
-                            append(day.duty.display.ifBlank { "근무 없음" })
-                            if (isDia) append(" Dia")
-                            combo?.let { append(" (${it.label})") }
-                        },
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                        fontWeight = FontWeight.ExtraBold, fontSize = 15.sp,
+                        day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
+                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                     )
+                    (day.holidayName ?: day.memorialName)?.let {
+                        Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold, color = duty.sunday)
+                    }
+                    day.seasonalTerm?.let {
+                        Text(it, style = MaterialTheme.typography.labelSmall, color = duty.onStandby)
+                    }
                 }
-                if (day.duty.isBranch) Surface(color = duty.branch, contentColor = duty.onBranch, shape = RoundedCornerShape(6.dp)) {
-                    Text("지선", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                }
-                Spacer(Modifier.weight(1f))
-                Surface(
-                    onClick = onChangeDuty,
-                    color = duty.standby, contentColor = duty.onStandby,
-                    shape = RoundedCornerShape(999.dp),
-                ) {
-                    Text("근무변경", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(10.dp)) {
+                        Text(
+                            buildString {
+                                append(day.duty.display.ifBlank { "근무 없음" })
+                                if (isDia) append(" Dia")
+                                combo?.let { append(" (${it.label})") }
+                            },
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                            fontWeight = FontWeight.ExtraBold, fontSize = 15.sp,
+                        )
+                    }
+                    if (day.duty.isBranch) Surface(color = duty.branch, contentColor = duty.onBranch, shape = RoundedCornerShape(6.dp)) {
+                        Text("지선", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        onClick = onChangeDuty,
+                        color = duty.standby, contentColor = duty.onStandby,
+                        shape = RoundedCornerShape(999.dp),
+                    ) {
+                        Text("근무변경", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
+                    }
                 }
             }
             if (day.isOverridden && day.originalDutyRaw != null) {
@@ -738,7 +756,9 @@ private fun DayDetailContent(
                 minLines = 2,
             )
             Row(Modifier.fillMaxWidth()) {
-                OutlinedButton(onClick = onPickDuty) { Text("근무선택") }
+                // 펼침은 상단 근무변경 칩이 없으니 왼쪽 버튼이 그 자리를 대신한다
+                if (compact) OutlinedButton(onClick = onPickDuty) { Text("근무선택") }
+                else OutlinedButton(onClick = onChangeDuty) { Text("근무변경") }
                 Spacer(Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = { onSaveMemo(""); onClose() }) { Text("삭제") }
