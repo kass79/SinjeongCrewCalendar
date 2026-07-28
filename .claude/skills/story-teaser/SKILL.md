@@ -119,19 +119,40 @@ ffmpeg -y -i renders/<렌더된>.mp4 -i voice.wav -i bgm.wav \
 `aspect`: `"16:9"`(기본, 카스 선호) 또는 `"9:16"`(쇼츠·릴스).
 생성기가 자막 크기·위치·비네트를 비율에 맞춰 자동 조정한다.
 
-## 나레이션 음성 (TTS) — 현재 제약
+## 나레이션 음성 (TTS) — 매번 자동 시도할 것
 
-이 환경에서 **한국어 TTS는 불가능하다.** 확인된 사실:
+티저 제작 때마다 **edge-tts 접근을 먼저 시도한다** (환경 허용 도메인에
+`speech.platform.bing.com`이 추가되어 있으면 성공한다):
 
-- `hyperframes tts`(Kokoro-82M): 지원 언어에 한국어 없음 (en/es/fr/hi/it/pt/ja/zh만)
-- `edge-tts`: 설치는 되나 마이크로소프트 서버 접근이 이그레스 정책에 막힘
+```bash
+pip install --break-system-packages -q edge-tts
+timeout 30 python3 <스킬경로>/scripts/make_voice.py spec.json --out voice
+```
 
-→ 사용자가 **음성 파일을 직접 만들어 주는 것**이 유일한 방법이다.
-`scripts/make_voice.py`를 카스에게 안내한다 — spec.json의 자막을 읽어
-문장별 mp3를 한 번에 뽑는 스크립트다(카스 PC에서 `pip install edge-tts` 후 실행).
-클로바더빙·타입캐스트로 직접 녹음해 주셔도 된다.
+**성공하면 (voice/ 에 mp3 생성됨) — 전자동 나레이션 믹스:**
 
-음성을 받으면 그 길이에 맞춰 `spec.json`의 자막 타이밍을 다시 잡고 재렌더링한다.
+1. 각 mp3 길이를 `ffprobe`로 재고, 문장이 자막 표시 시간보다 길면
+   `spec.json`의 해당 자막 `dur`(과 이후 타이밍)을 음성 길이 +0.4초로 늘려 재빌드한다.
+2. 문장별 mp3를 자막 시작 시각에 `adelay`로 배치하고, BGM은 -10dB로 덕킹해 믹스:
+
+```bash
+ffmpeg -y -i renders/<렌더>.mp4 \
+  -i voice/01.mp3 -i voice/02.mp3 -i voice/03.mp3 -i voice/04.mp3 -i voice/05_end.mp3 \
+  -i bgm.wav -filter_complex "\
+[1:a]adelay=400|400[v1];[2:a]adelay=3500|3500[v2];[3:a]adelay=6500|6500[v3];\
+[4:a]adelay=9400|9400[v4];[5:a]adelay=11800|11800[v5];\
+[6:a]volume=0.32[b];[v1][v2][v3][v4][v5][b]amix=inputs=6:duration=first:normalize=0[a]" \
+  -map 0:v -map "[a]" -c:v copy -c:a aac -b:a 192k -shortest 최종.mp4
+```
+(adelay 값 = 각 자막 start × 1000ms. spec이 바뀌면 같이 바꿀 것)
+
+기본 목소리 `ko-KR-InJoonNeural`(차분한 남성), 속도 `-8%`. 사용자가 원하면 변경.
+
+**실패하면 (타임아웃/403) — 조용히 BGM만으로 진행한다.** 매번 사용자에게
+TTS 안 된다고 반복해 알리지 말 것. 사용자가 음성을 원할 때만: 환경 설정
+Network access → Custom에 `speech.platform.bing.com` 추가(새 세션부터 적용)를
+안내하거나, 카스 PC에서 `scripts/make_voice.py`를 돌려 mp3를 받는다.
+(참고: `hyperframes tts`의 Kokoro 모델은 한국어 미지원이라 대안이 못 된다)
 
 ## 하지 말 것
 
