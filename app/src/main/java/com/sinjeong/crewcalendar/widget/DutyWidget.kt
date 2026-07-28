@@ -84,8 +84,8 @@ class DutyWidget : GlanceAppWidget() {
                         Text(
                             sub,
                             style = TextStyle(
-                                color = GlanceTheme.colors.onSurfaceVariant,
-                                fontSize = 11.sp,
+                                color = GlanceTheme.colors.onSurface,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Medium,
                             ),
                             modifier = GlanceModifier.padding(start = 2.dp, bottom = 3.dp),
@@ -108,35 +108,34 @@ class DutyWidget : GlanceAppWidget() {
 
     @androidx.compose.runtime.Composable
     private fun DayCell(cell: Cell, isToday: Boolean, modifier: GlanceModifier) {
-        val fg = if (isToday) GlanceTheme.colors.onPrimaryContainer else GlanceTheme.colors.onSurface
-        val dim = if (isToday) GlanceTheme.colors.onPrimaryContainer else GlanceTheme.colors.onSurfaceVariant
+        // 오늘 칸은 primary 로 확실히 튀게. 나머지는 inverseOnSurface —
+        // 라이트에서 흰색에 가깝고(밝은 카드) 다크에서는 배경보다 밝은 회색이라 양쪽 다 산뜻하다.
+        val fg = if (isToday) GlanceTheme.colors.onPrimary else GlanceTheme.colors.onSurface
         Column(
             modifier = modifier
                 .background(
-                    if (isToday) GlanceTheme.colors.primaryContainer
-                    else GlanceTheme.colors.surfaceVariant
+                    if (isToday) GlanceTheme.colors.primary
+                    else GlanceTheme.colors.inverseOnSurface
                 )
                 .cornerRadius(10.dp)
                 .padding(vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            // 요일+날짜를 한 줄로 합쳐 근무 글자를 키울 세로 여유를 만든다.
             Text(
-                cell.dow,
+                "${cell.dow} ${cell.day}",
                 style = TextStyle(
-                    color = if (cell.red) GlanceTheme.colors.error else dim,
-                    fontSize = 9.sp,
+                    color = if (cell.red && !isToday) GlanceTheme.colors.error else fg,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Medium,
                 ),
-            )
-            Text(
-                cell.day,
-                style = TextStyle(color = dim, fontSize = 10.sp),
             )
             Text(
                 cell.duty.ifBlank { "·" },
                 style = TextStyle(
                     color = fg,
-                    fontSize = 14.sp,
-                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
                 ),
             )
         }

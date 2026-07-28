@@ -724,7 +724,8 @@ private fun DayDetailContent(
                 }
             }
             if (routeAsset != null) {
-                RouteImageInline(routeAsset) { showRoute = true }
+                // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로
+                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 7.dp) { showRoute = true }
             } else {
                 row?.let { r ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
