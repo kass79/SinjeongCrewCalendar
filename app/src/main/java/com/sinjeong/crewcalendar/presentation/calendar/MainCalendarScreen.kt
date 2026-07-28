@@ -209,6 +209,7 @@ fun MainCalendarScreen(
                         onRevert = { viewModel.changeDuty(day.date, null) },
                         onClose = { panelEpochDay = null },
                         compact = false,
+                        autoRoute = panelEpochDay != null,
                         // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
                         // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다
                         modifier = Modifier.fillMaxSize().imePadding()
@@ -610,6 +611,9 @@ private fun DayDetailContent(
     onRevert: () -> Unit,
     onClose: () -> Unit,
     compact: Boolean = true,   // true=접힘 바텀시트(기존 그대로), false=펼침 오른쪽 패널
+    // 근무일 진입 시 전체화면 행로표 자동 오픈. 펼침은 앱 시작 시 '오늘'이 기본 선택돼
+    // 있어서(panelEpochDay==null) 그때만 false — 탭한 뒤부터 자동으로 뜬다
+    autoRoute: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val duty = LocalDutyColors.current
@@ -681,7 +685,6 @@ private fun DayDetailContent(
                 }
             }
             // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
-            var showRoute by remember { mutableStateOf(false) }
             val holiday = Bundled.isHolidayTimetable(day.date)
             val isNight = day.duty.type == DutyType.MAIN_NIGHT
             val mainLegs = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
@@ -724,6 +727,10 @@ private fun DayDetailContent(
                     else -> null
                 }
             }
+            // 근무일이면 탭 즉시 전체화면 행로표부터 (인라인 표보다 훨씬 큼).
+            // 키를 (날짜, autoRoute)로 둬서 ① 닫으면 리컴포지션에도 다시 안 열리고
+            // ② 날짜를 바꿔 탭하면 다시 열린다. 비번·휴무(routeAsset==null)는 그대로 상세만.
+            var showRoute by remember(day.date, autoRoute) { mutableStateOf(autoRoute && routeAsset != null) }
             if (routeAsset != null) {
                 // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로
                 RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp) { showRoute = true }
