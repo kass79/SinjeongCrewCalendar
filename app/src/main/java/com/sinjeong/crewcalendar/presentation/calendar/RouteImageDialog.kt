@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -106,6 +107,8 @@ fun RouteImageInline(asset: String, onExpand: () -> Unit) {
                 contentScale = ContentScale.FillWidth,
                 modifier = Modifier
                     .fillMaxWidth()
+                    // aspectRatio 없이는 verticalScroll(무한 높이 제약) 안에서 측정이 깨진다
+                    .aspectRatio(bitmap.width.toFloat() / bitmap.height)
                     .clip(RoundedCornerShape(10.dp))
                     .clickable { onExpand() },
             )

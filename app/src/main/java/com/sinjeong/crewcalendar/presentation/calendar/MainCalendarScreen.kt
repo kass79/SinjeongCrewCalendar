@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -220,7 +221,17 @@ fun MainCalendarScreen(
     // 접힘: 날짜 탭 → 상세 시트 (출근시간·전반/후반사업·근무시간·메모·근무변경)
     if (!wide) state.selectedDate?.let { date ->
         state.days.firstOrNull { it.date == date }?.let { day ->
+            // 시트 윈도우는 키보드가 떠도 위치·크기가 그대로다(바닥 883px이 키보드에 덮임).
+            // 시트 높이를 키우는 보정(imePadding 등)은 M3 1.3.1 앵커가 리사이즈를 반영하지
+            // 못해 실패한다(에뮬 실측). 대신 스크롤 '안쪽' 끝에 키보드 높이만큼 패딩을 넣어
+            // 시트 기하는 그대로 두고, 키보드가 열리는 동안 스크롤을 바닥에 붙여
+            // 메모·버튼을 키보드 위로 끌어올린다.
             ModalBottomSheet(onDismissRequest = { viewModel.selectDate(null) }) {
+                val scroll = rememberScrollState()
+                val imeBottom = with(LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() }
+                LaunchedEffect(imeBottom > 0.dp) {
+                    if (imeBottom > 0.dp) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
+                }
                 DayDetailContent(
                     day = day,
                     onSaveMemo = { viewModel.saveMemo(date, it) },
@@ -228,10 +239,7 @@ fun MainCalendarScreen(
                     onChangeDuty = { viewModel.openDutyChange(date) },
                     onRevert = { viewModel.changeDuty(date, null) },
                     onClose = { viewModel.selectDate(null) },
-                    // ponytail: 접힘 시트는 키보드가 메모 칸을 가린다(ModalBottomSheet가 별도 윈도우라
-                    // imePadding()이 0으로 들어옴 — 에뮬 실측). verticalScroll로 감싸면 인라인 행로표
-                    // 이미지가 무한높이 제약에서 깨져 시트 렌더가 망가진다. 시트 레이아웃을 손대야 하는
-                    // 별건이라 v1.6.1에선 손대지 않음. 고칠 땐 RouteImageInline에 높이 상한부터.
+                    modifier = Modifier.verticalScroll(scroll).padding(bottom = imeBottom),
                 )
             }
         }
