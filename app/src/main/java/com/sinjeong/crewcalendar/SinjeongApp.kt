@@ -10,6 +10,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.sinjeong.crewcalendar.widget.BriefingAlarm
 import com.sinjeong.crewcalendar.widget.DutyNotifyWorker
 import com.sinjeong.crewcalendar.widget.DutyWidgetWorker
 import dagger.hilt.android.HiltAndroidApp
@@ -34,7 +35,13 @@ class SinjeongApp : Application(), Configuration.Provider {
                 description = "교환 요청, 근무 변경, 출근 알림"
             }
         )
+        nm.createNotificationChannel(
+            NotificationChannel(BriefingAlarm.CHANNEL, "출근 브리핑", NotificationManager.IMPORTANCE_HIGH).apply {
+                description = "출근 1시간 전 근무·날씨 브리핑"
+            }
+        )
         scheduleBackgroundWork()
+        BriefingAlarm.requestRearm(this) // 앱 실행 시 다음 출근 알람 재등록
     }
 
     /** 위젯 데이터 갱신(즉시 1회 + 6시간 주기) + 내일 근무 알림(매일 20:00) */

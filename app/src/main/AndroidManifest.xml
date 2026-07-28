@@ -13,6 +13,9 @@
     <uses-permission android:name="android.permission.READ_CALENDAR" />
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.VIBRATE" />
+    <!-- 출근 1시간 전 브리핑: 정확 알람(12~13 기본허용, 14+는 setWindow 폴백) + 부팅 후 재등록 -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <application
         android:name=".SinjeongApp"
@@ -44,6 +47,15 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/duty_widget_info" />
+        </receiver>
+
+        <!-- 출근 1시간 전 브리핑 알람 + 부팅 재등록 (보호된 시스템 브로드캐스트는 exported=false로도 수신) -->
+        <receiver
+            android:name=".widget.BriefingReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
         </receiver>
 
         <!-- FCM: 교환 요청 / 근무 변경 알림 -->

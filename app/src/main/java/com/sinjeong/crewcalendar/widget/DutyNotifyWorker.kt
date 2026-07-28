@@ -33,6 +33,7 @@ class DutyNotifyWorker @AssistedInject constructor(
 ) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        runCatching { BriefingAlarm.arm(context, getMonthSchedule) } // 하루 1회 브리핑 알람 재등록
         runCatching {
             val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
             if (!prefs.getBoolean("notify_tomorrow", true)) return Result.success()

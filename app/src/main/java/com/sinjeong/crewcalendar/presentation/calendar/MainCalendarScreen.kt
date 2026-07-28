@@ -22,8 +22,10 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -81,9 +83,18 @@ fun MainCalendarScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
+    // 폭 600dp 이상(폴드 펼침·태블릿) = 좌우 2패널. 그 미만은 기존 바텀시트 그대로
+    val wide = LocalConfiguration.current.screenWidthDp >= 600
+    // 펼침 전용 선택 날짜 — 접었다 펴도 살아남게 epochDay(Long)로 저장
+    var panelEpochDay by rememberSaveable { mutableStateOf<Long?>(null) }
+    val detailDate = if (wide) panelEpochDay?.let(LocalDate::ofEpochDay) else state.selectedDate
 
     LaunchedEffect(state.error) {
         state.error?.let { snackbar.showSnackbar(it); viewModel.dismissError() }
+    }
+    // 접힘→펼침 전환: 열려 있던 시트의 날짜를 오른쪽 패널로 인계
+    LaunchedEffect(wide) {
+        if (wide) state.selectedDate?.let { panelEpochDay = it.toEpochDay(); viewModel.selectDate(null) }
     }
 
     Scaffold(
@@ -151,40 +162,67 @@ fun MainCalendarScreen(
             }
         },
     ) { padding ->
-        Column(Modifier.padding(padding).fillMaxSize()) {
-            // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
-            WeekdayHeader()
+        Row(Modifier.padding(padding).fillMaxSize()) {
+            Column(Modifier.weight(if (wide) 0.55f else 1f).fillMaxHeight()) {
+                // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
+                WeekdayHeader()
 
-            if (state.isLoading) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator()
+                if (state.isLoading) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator()
+                    }
+                } else {
+                    CalendarGrid(
+                        month = state.month,
+                        days = state.days,
+                        selected = detailDate,
+                        onSelect = { if (wide) panelEpochDay = it.toEpochDay() else viewModel.selectDate(it) },
+                        onSwipeMonth = viewModel::moveMonth,
+                        onOpenTimetable = { fullTimetable = "tt_work" to "근무시각표" },
+                        onOpenDeadhead = { fullTimetable = "tt_deadhead" to "편승시각표" },
+                        modifier = Modifier.weight(1f),
+                    )
                 }
-            } else {
-                CalendarGrid(
-                    month = state.month,
-                    days = state.days,
-                    selected = state.selectedDate,
-                    onSelect = viewModel::selectDate,
-                    onSwipeMonth = viewModel::moveMonth,
-                    onOpenTimetable = { fullTimetable = "tt_work" to "근무시각표" },
-                    onOpenDeadhead = { fullTimetable = "tt_deadhead" to "편승시각표" },
-                    modifier = Modifier.weight(1f),
-                )
+            }
+            // 펼침: 오른쪽 상세 패널 — 바텀시트와 같은 내용(DayDetailContent) 재사용
+            if (wide) Surface(
+                Modifier.weight(0.45f).fillMaxHeight(),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+            ) {
+                val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
+                if (day == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("날짜를 선택하세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                } else {
+                    DayDetailContent(
+                        day = day,
+                        onSaveMemo = { viewModel.saveMemo(day.date, it) },
+                        onPickDuty = { viewModel.openDutyPicker(day.date) },
+                        onChangeDuty = { viewModel.openDutyChange(day.date) },
+                        onRevert = { viewModel.changeDuty(day.date, null) },
+                        onClose = { panelEpochDay = null },
+                        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                            .padding(top = 14.dp),
+                    )
+                }
             }
         }
     }
 
-    // 날짜 탭 → 상세 시트 (출근시간·전반/후반사업·근무시간·메모·근무변경)
-    state.selectedDate?.let { date ->
+    // 접힘: 날짜 탭 → 상세 시트 (출근시간·전반/후반사업·근무시간·메모·근무변경)
+    if (!wide) state.selectedDate?.let { date ->
         state.days.firstOrNull { it.date == date }?.let { day ->
-            DayDetailSheet(
-                day = day,
-                onDismiss = { viewModel.selectDate(null) },
-                onSaveMemo = { viewModel.saveMemo(date, it) },
-                onPickDuty = { viewModel.openDutyPicker(date) },
-                onChangeDuty = { viewModel.openDutyChange(date) },
-                onRevert = { viewModel.changeDuty(date, null) },
-            )
+            ModalBottomSheet(onDismissRequest = { viewModel.selectDate(null) }) {
+                DayDetailContent(
+                    day = day,
+                    onSaveMemo = { viewModel.saveMemo(date, it) },
+                    onPickDuty = { viewModel.openDutyPicker(date) },
+                    onChangeDuty = { viewModel.openDutyChange(date) },
+                    onRevert = { viewModel.changeDuty(date, null) },
+                    onClose = { viewModel.selectDate(null) },
+                )
+            }
         }
     }
 
@@ -538,16 +576,17 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
     }
 }
 
-/* ── 날짜 상세 시트 (기존 앱 형식: 출근시간/전반사업/후반사업/근무시간) ── */
-@OptIn(ExperimentalMaterial3Api::class)
+/* ── 날짜 상세 내용 (기존 앱 형식: 출근시간/전반사업/후반사업/근무시간)
+      접힘 = ModalBottomSheet 안, 펼침 = 오른쪽 패널 안. 컨테이너만 다르고 내용은 동일 ── */
 @Composable
-private fun DayDetailSheet(
+private fun DayDetailContent(
     day: DaySchedule,
-    onDismiss: () -> Unit,
     onSaveMemo: (String) -> Unit,
     onPickDuty: () -> Unit,
     onChangeDuty: () -> Unit,
     onRevert: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val duty = LocalDutyColors.current
     var memo by remember(day.date) { mutableStateOf(day.memo) }
@@ -556,12 +595,11 @@ private fun DayDetailSheet(
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     val isDia = day.duty.type in setOf(DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
-        Column(
-            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(
+        modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(
                     day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
@@ -703,12 +741,11 @@ private fun DayDetailSheet(
                 OutlinedButton(onClick = onPickDuty) { Text("근무선택") }
                 Spacer(Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { onSaveMemo(""); onDismiss() }) { Text("삭제") }
-                    TextButton(onClick = onDismiss) { Text("취소") }
-                    Button(onClick = { onSaveMemo(memo); onDismiss() }) { Text("저장") }
+                    TextButton(onClick = { onSaveMemo(""); onClose() }) { Text("삭제") }
+                    TextButton(onClick = onClose) { Text("취소") }
+                    Button(onClick = { onSaveMemo(memo); onClose() }) { Text("저장") }
                 }
             }
-        }
     }
 }
 

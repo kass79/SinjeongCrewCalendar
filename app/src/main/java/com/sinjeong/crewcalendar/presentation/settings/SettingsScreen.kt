@@ -160,6 +160,25 @@ fun SettingsScreen(
                     settingsPrefs.edit().putBoolean("notify_tomorrow", it).apply()
                 })
             }
+            var briefingOn by remember { mutableStateOf(settingsPrefs.getBoolean("notify_briefing", true)) }
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("출근 1시간 전 브리핑", fontWeight = FontWeight.Bold)
+                    Text(
+                        "당일 출근 1시간 전, 근무·출근시각·날씨 요약 알림 (새벽 근무도 그대로 울림)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Switch(checked = briefingOn, onCheckedChange = {
+                    briefingOn = it
+                    settingsPrefs.edit().putBoolean("notify_briefing", it).apply()
+                    com.sinjeong.crewcalendar.widget.BriefingAlarm.requestRearm(ctx) // 켜면 등록, 끄면 해제
+                })
+            }
 
             // 함께 쓰는 앱
             SectionTitle("함께 쓰는 앱")
