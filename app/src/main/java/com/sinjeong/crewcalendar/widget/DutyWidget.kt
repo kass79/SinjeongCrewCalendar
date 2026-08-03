@@ -63,6 +63,7 @@ class DutyWidget : GlanceAppWidget() {
                         .cornerRadius(20.dp)
                         .padding(horizontal = 8.dp, vertical = 6.dp)
                         .clickable(actionStartActivity<MainActivity>()),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (cells.isEmpty()) {
                         Box(

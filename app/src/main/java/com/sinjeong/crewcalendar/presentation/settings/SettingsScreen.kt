@@ -1,6 +1,8 @@
 package com.sinjeong.crewcalendar.presentation.settings
 
-import android.widget.Toast
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -33,6 +35,28 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.YearMonth
 import javax.inject.Inject
+
+/**
+ * 안전앱 "슬기로운 승무생활" 열기 — 설정 화면과 달력 상단바가 함께 쓴다.
+ * 설치됨 → 실행 / 미설치 → 플레이스토어 / 스토어 없음 → 웹. 어떤 경우에도 크래시 없음.
+ * (조회는 매니페스트 <queries>에 패키지가 선언돼 있어야 동작한다)
+ */
+fun openSafetyApp(context: Context) {
+    val pkg = "com.sinjeong.safety"
+    val launch = runCatching { context.packageManager.getLaunchIntentForPackage(pkg) }.getOrNull()
+    if (launch != null) {
+        runCatching { context.startActivity(launch) }
+        return
+    }
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))) }
+        .onFailure {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$pkg")),
+                )
+            }
+        }
+}
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -190,13 +214,7 @@ fun SettingsScreen(
             SettingRow(
                 title = "슬기로운 승무생활",
                 sub = "사업소 안전정보 앱",
-                trailing = {
-                    TextButton(onClick = {
-                        val launch = ctx.packageManager.getLaunchIntentForPackage("com.sinjeong.safety")
-                        if (launch != null) ctx.startActivity(launch)
-                        else Toast.makeText(ctx, "안전앱이 설치되어 있지 않습니다", Toast.LENGTH_SHORT).show()
-                    }) { Text("열기") }
-                },
+                trailing = { TextButton(onClick = { openSafetyApp(ctx) }) { Text("열기") } },
             )
 
             // 데이터 정보

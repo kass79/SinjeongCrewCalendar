@@ -16,6 +16,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Share
@@ -49,6 +50,7 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
+import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
@@ -163,6 +165,12 @@ fun MainCalendarScreen(
                     IconButton(onClick = viewModel::goToday, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Default.Today, "오늘로", modifier = Modifier.size(18.dp))
                     }
+                    IconButton(
+                        onClick = { openSafetyApp(context) },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(Icons.Default.HealthAndSafety, "슬기로운 승무생활", modifier = Modifier.size(18.dp))
+                    }
                 }
             }
         },
@@ -209,7 +217,6 @@ fun MainCalendarScreen(
                         onRevert = { viewModel.changeDuty(day.date, null) },
                         onClose = { panelEpochDay = null },
                         compact = false,
-                        autoRoute = panelEpochDay != null,
                         // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
                         // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다
                         modifier = Modifier.fillMaxSize().imePadding()
@@ -228,7 +235,11 @@ fun MainCalendarScreen(
             // 못해 실패한다(에뮬 실측). 대신 스크롤 '안쪽' 끝에 키보드 높이만큼 패딩을 넣어
             // 시트 기하는 그대로 두고, 키보드가 열리는 동안 스크롤을 바닥에 붙여
             // 메모·버튼을 키보드 위로 끌어올린다.
-            ModalBottomSheet(onDismissRequest = { viewModel.selectDate(null) }) {
+            // 시트는 처음부터 완전히 펼쳐 연다 — 50% 부분전개면 커진 행로표가 화면을 다 먹어 메모가 안 보인다.
+            ModalBottomSheet(
+                onDismissRequest = { viewModel.selectDate(null) },
+                sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            ) {
                 val scroll = rememberScrollState()
                 val imeBottom = with(LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() }
                 LaunchedEffect(imeBottom > 0.dp) {
@@ -611,9 +622,6 @@ private fun DayDetailContent(
     onRevert: () -> Unit,
     onClose: () -> Unit,
     compact: Boolean = true,   // true=접힘 바텀시트(기존 그대로), false=펼침 오른쪽 패널
-    // 근무일 진입 시 전체화면 행로표 자동 오픈. 펼침은 앱 시작 시 '오늘'이 기본 선택돼
-    // 있어서(panelEpochDay==null) 그때만 false — 탭한 뒤부터 자동으로 뜬다
-    autoRoute: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val duty = LocalDutyColors.current
@@ -727,13 +735,13 @@ private fun DayDetailContent(
                     else -> null
                 }
             }
-            // 근무일이면 탭 즉시 전체화면 행로표부터 (인라인 표보다 훨씬 큼).
-            // 키를 (날짜, autoRoute)로 둬서 ① 닫으면 리컴포지션에도 다시 안 열리고
-            // ② 날짜를 바꿔 탭하면 다시 열린다. 비번·휴무(routeAsset==null)는 그대로 상세만.
-            var showRoute by remember(day.date, autoRoute) { mutableStateOf(autoRoute && routeAsset != null) }
+            // 전체화면 행로표는 인라인 표를 탭했을 때만 연다(날짜 탭 자동 오픈은 되돌림).
+            // 키를 날짜로 둬서 ① 닫으면 리컴포지션에도 다시 안 열리고 ② 날짜를 바꾸면 닫힌 채 시작.
+            var showRoute by remember(day.date) { mutableStateOf(false) }
             if (routeAsset != null) {
-                // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로
-                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp) { showRoute = true }
+                // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로.
+                // 접힘은 폭 1.5배까지 키워 세로를 벌고 넘치는 폭은 가로 스크롤 — 펼침은 이미 커서 1f 유지
+                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp, zoom = if (compact) 1.5f else 1f) { showRoute = true }
             } else {
                 row?.let { r ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {

@@ -5,12 +5,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
@@ -99,12 +100,14 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
 }
 
 /**
- * 행로표 원본을 상세시트 안에 인라인 표시 — 폭에 맞춰 크게, 탭하면 전체화면 확대.
+ * 행로표 원본을 상세시트 안에 인라인 표시 — 탭하면 전체화면 확대.
  * bleed: 부모 Column의 가로 패딩을 이만큼 되밀어(음수 패딩) 이미지만 화면 끝까지 넓힌다.
  *        바깥에 보고하는 폭은 그대로라 형제 항목(제목·칩·메모·버튼)은 영향받지 않는다.
+ * zoom:  1f = 가용 폭에 딱 맞춤(가로 스크롤 없음, 기존 동작). 1f 초과면 그 배율로 키우고
+ *        넘치는 폭은 가로 스크롤. 행로표가 ~2.13:1 가로형이라 폭을 키워야 세로가 커진다.
  */
 @Composable
-fun RouteImageInline(asset: String, bleed: Dp = 0.dp, onExpand: () -> Unit) {
+fun RouteImageInline(asset: String, bleed: Dp = 0.dp, zoom: Float = 1f, onExpand: () -> Unit) {
     val context = LocalContext.current
     val bitmap = remember(asset) {
         runCatching {
@@ -112,26 +115,28 @@ fun RouteImageInline(asset: String, bleed: Dp = 0.dp, onExpand: () -> Unit) {
         }.getOrNull()
     }
     if (bitmap != null) {
-        Box(
+        BoxWithConstraints(
             Modifier
                 .layout { measurable, constraints ->
                     val extra = if (constraints.hasBoundedWidth) bleed.roundToPx() * 2 else 0
                     val p = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + extra))
                     layout(p.width - extra, p.height) { p.place(-extra / 2, 0) }
                 }
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { onExpand() },
+                .clip(RoundedCornerShape(10.dp)),
         ) {
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "행로표 원본",
-                contentScale = ContentScale.FillWidth,
-                filterQuality = FilterQuality.High,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // aspectRatio 없이는 verticalScroll(무한 높이 제약) 안에서 측정이 깨진다
-                    .aspectRatio(bitmap.width.toFloat() / bitmap.height),
-            )
+            val w = maxWidth * zoom
+            val h = w * bitmap.height / bitmap.width
+            Box(Modifier.horizontalScroll(rememberScrollState())) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "행로표 원본",
+                    // h를 원본 비율로 직접 계산하므로 FillBounds여도 왜곡되지 않는다.
+                    // horizontalScroll(무한 폭 제약) 안에서는 fillMaxWidth/aspectRatio를 못 써 크기를 명시한다
+                    contentScale = ContentScale.FillBounds,
+                    filterQuality = FilterQuality.High,
+                    modifier = Modifier.size(w, h).clickable { onExpand() },
+                )
+            }
             Icon(
                 Icons.Default.ZoomOutMap, "크게 보기",
                 tint = Color.White,
