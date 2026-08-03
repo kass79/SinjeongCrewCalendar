@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -40,6 +42,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
@@ -47,7 +50,7 @@ import javax.inject.Inject
 @HiltViewModel
 class RosterViewModel @Inject constructor(
     userRepo: UserRepository,
-    mateRepo: MateRepository,
+    private val mateRepo: MateRepository,
     rosterRepo: RosterRepository,
 ) : ViewModel() {
     val user: StateFlow<User?> = userRepo.observeMe()
@@ -66,6 +69,17 @@ class RosterViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     fun setMonth(m: YearMonth) { monthFlow.value = m }
+
+    /**
+     * 즐겨찾기 지정/해제. 동료로 등록 안 된 사람(내장 명단·로그인 근무자)은 이 시점에 Mate로 만든다.
+     * 해제는 favGroup=null — Mate는 지우지 않는다(수동 등록분 보호).
+     */
+    fun setFav(name: String, group: CrewGroup, offset: Int, fav: FavGroup?) {
+        val existing = mates.value.find { it.name == name }
+        viewModelScope.launch {
+            mateRepo.upsert(existing?.copy(favGroup = fav) ?: Mate(name, group, offset, fav))
+        }
+    }
 }
 
 private data class Person(
@@ -76,6 +90,9 @@ private data class Person(
     /** 로그인 사용자(사번) — 근무변경 실시간 반영 대상 */
     val uid: String? = null,
 )
+
+/** 즐겨찾기·전화번호는 " (나)" 꼬리표 없는 실제 이름으로 매칭한다 */
+private val Person.cleanName: String get() = name.removeSuffix(" (나)").trim()
 
 /**
  * 동료근무 — 사업소 전체 근무표 매트릭스 (가로 날짜 × 세로 이름 ㄱㄴㄷ).
@@ -223,8 +240,8 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                     val members = people.filter {
                         it.group == g &&
                             (q.isEmpty() || it.name.contains(q)) &&
-                            (!favOnly || it.isMe || it.name in favNames)
-                    }.sortedWith(compareBy({ !it.isMe }, { it.name }))
+                            (!favOnly || it.isMe || it.cleanName in favNames)
+                    }.sortedWith(compareBy({ !it.isMe }, { it.cleanName !in favNames }, { it.name }))
                     if ((q.isNotEmpty() || favOnly) && members.isEmpty()) return@forEach
                     item(key = "sec-${g.name}") {
                         Text(
@@ -238,6 +255,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                     items(members.size, key = { "${g.name}-$it-${members[it].name}" }) { i ->
                         val p = members[i]
                         PersonRow(p, month, cellW, nameW, hScroll, duty,
+                            isFav = p.cleanName in favNames,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
                             onNameClick = { dialTarget = p })
                     }
@@ -247,24 +265,63 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     }
 
     dialTarget?.let { person ->
-        DialSheet(person, onDismiss = { dialTarget = null })
+        DialSheet(
+            person,
+            fav = mates.find { it.name == person.cleanName }?.favGroup,
+            onSetFav = { viewModel.setFav(person.cleanName, person.group, person.offset, it) },
+            onDismiss = { dialTarget = null },
+        )
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DialSheet(person: Person, onDismiss: () -> Unit) {
+private fun DialSheet(
+    person: Person,
+    fav: FavGroup?,
+    onSetFav: (FavGroup?) -> Unit,
+    onDismiss: () -> Unit,
+) {
     val context = LocalContext.current
-    val cleanName = person.name.removeSuffix(" (나)").trim()
+    val duty = LocalDutyColors.current
+    val cleanName = person.cleanName
     val phone = BundledStaff.phoneFor(cleanName, person.group == CrewGroup.MAIN_CONDUCTOR)
+    var favMenu by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-            Text(person.group.label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Box {
+                    IconButton(onClick = { favMenu = true }) {
+                        Icon(
+                            if (fav != null) Icons.Default.Star else Icons.Outlined.StarOutline,
+                            "즐겨찾기 그룹",
+                            tint = if (fav != null) duty.onStandby else MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    DropdownMenu(expanded = favMenu, onDismissRequest = { favMenu = false }) {
+                        FavGroup.entries.forEach { g ->
+                            DropdownMenuItem(
+                                text = { Text("★ ${g.label}" + if (fav == g) " ✓" else "") },
+                                onClick = { onSetFav(g); favMenu = false },
+                            )
+                        }
+                        if (fav != null) DropdownMenuItem(
+                            text = { Text("즐겨찾기 해제") },
+                            onClick = { onSetFav(null); favMenu = false },
+                        )
+                    }
+                }
+            }
+            Text(
+                person.group.label + (fav?.let { " · ★ ${it.label}" } ?: ""),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (phone != null) {
                 Text(phone, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -293,19 +350,26 @@ private fun PersonRow(
     nameW: androidx.compose.ui.unit.Dp,
     hScroll: androidx.compose.foundation.ScrollState,
     duty: DutyColors,
+    isFav: Boolean = false,
     /** 근무변경 실시간 반영 (날짜 → 변경 근무, Firebase 연동 시) */
     overrides: Map<LocalDate, String> = emptyMap(),
     onNameClick: () -> Unit = {},
 ) {
     val pattern = Bundled.patternFor(p.group)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-            p.name,
-            fontSize = 10.sp, fontWeight = FontWeight.Bold,
-            color = if (p.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(nameW).clickable { onNameClick() }.padding(horizontal = 4.dp),
-        )
+        Row(
+            Modifier.width(nameW).clickable { onNameClick() }.padding(horizontal = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                p.name,
+                fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                color = if (p.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            if (isFav) Text("★", fontSize = 8.sp, color = duty.onStandby)
+        }
         Row(Modifier.horizontalScroll(hScroll)) {
             (1..month.lengthOfMonth()).forEach { d ->
                 val date = month.atDay(d)
