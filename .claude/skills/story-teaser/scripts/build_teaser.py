@@ -45,6 +45,7 @@ STYLES = {
 
 def build(spec):
     st = STYLES[spec.get("style", "cinematic")]
+    font_family = spec.get("font", st["font"])  # 예: '"Noto Serif CJK JP", serif' (일본어 콘텐츠)
     vertical = spec.get("aspect", "16:9") == "9:16"
     W, H = (1080, 1920) if vertical else (1920, 1080)
     dur = float(spec["duration"])
@@ -174,9 +175,11 @@ def build(spec):
     <style>
       @font-face {{ font-family: "Noto Serif CJK KR"; src: local("Noto Serif CJK KR"); }}
       @font-face {{ font-family: "Noto Sans CJK KR"; src: local("Noto Sans CJK KR"); }}
+      @font-face {{ font-family: "Noto Serif CJK JP"; src: local("Noto Serif CJK JP"); }}
+      @font-face {{ font-family: "Noto Sans CJK JP"; src: local("Noto Sans CJK JP"); }}
       * {{ margin: 0; padding: 0; box-sizing: border-box; }}
       html, body {{ width: {W}px; height: {H}px; overflow: hidden; background: #000;
-        font-family: {st['font']}; }}
+        font-family: {font_family}; }}
       #root {{ position: relative; width: {W}px; height: {H}px; overflow: hidden; }}
       .clip {{ position: absolute; inset: 0; overflow: hidden; }}
       #vig {{ z-index: 40; }} #grain {{ z-index: 41; }}
