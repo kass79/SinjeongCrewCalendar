@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -428,6 +429,9 @@ private fun CalendarGrid(
     BoxWithConstraints(modifier) {
         // 하한 60dp: 폴드 펼침 등 낮은 화면에서도 마지막 주가 짤리지 않게
         val cellHeight = ((maxHeight - (3.dp * (rows - 1))) / rows).coerceIn(60.dp, 150.dp)
+        // 칸 폭 = 가용폭 − 좌우 8dp − 칸 사이 3dp×6. 접힘 폰 ~54dp / 펼침 44% 달력 ~37dp.
+        // 좁은 쪽은 날짜 옆에 3글자가 절대 안 들어가서(`제헌절` → `제…`) 이름을 아랫줄로 내린다.
+        val nameBelow = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7 < 45.dp
         LazyVerticalGrid(
             columns = GridCells.Fixed(7),
             modifier = Modifier
@@ -456,6 +460,7 @@ private fun CalendarGrid(
                     else DayCell(
                         day, isSelected = day.date == selected, height = cellHeight,
                         big = cellHeight >= 100.dp, // 펼침 화면 등 칸이 크면 글자도 키움
+                        nameBelow = nameBelow,
                         onClick = { onSelect(day.date) },
                     )
                 }
@@ -493,13 +498,36 @@ private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Co
     }
 }
 
+/**
+ * 공휴일·기념일·절기 이름. 주어진 폭을 넘치면 들어갈 때까지 자동 축소(다이아 칩과 같은 방식) —
+ * 접힘 칸에서 `광복절`이 `광…`으로 잘리던 문제(v1.6.8). 최소 크기에서도 안 들어갈 때만 말줄임.
+ */
 @Composable
-private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Boolean, onClick: () -> Unit) {
+private fun HolidayTag(name: String, size: TextUnit, color: Color, modifier: Modifier) {
+    var fit by remember(name, size) { mutableStateOf(size) }
+    Text(
+        name, fontSize = fit, lineHeight = fit * 1.1, maxLines = 1,
+        softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
+        color = color, modifier = modifier,
+        onTextLayout = { if (it.hasVisualOverflow && fit > 5.sp) fit *= 0.92f },
+    )
+}
+
+@Composable
+private fun DayCell(
+    day: DaySchedule,
+    isSelected: Boolean,
+    height: Dp,
+    big: Boolean,
+    nameBelow: Boolean,
+    onClick: () -> Unit,
+) {
     val duty = LocalDutyColors.current
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
-    val dateSize = if (big) 9.5.sp else 7.5.sp
+    // 날짜 숫자는 공휴일 이름에 폭을 양보하려고 한 단계 작게(v1.6.8)
+    val dateSize = if (big) 9.sp else 7.sp
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
@@ -532,6 +560,8 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
         verticalArrangement = Arrangement.spacedBy(1.dp),
     ) {
         // 날짜 줄: 공휴일이면 숫자 빨강, 이름 표시 (기념일은 이름만 빨강)
+        val nameTag = day.holidayName ?: day.memorialName ?: day.seasonalTerm
+        val nameColor = if (day.holidayName != null || day.memorialName != null) duty.sunday else duty.onStandby
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 "${day.date.dayOfMonth}",
@@ -545,22 +575,19 @@ private fun DayCell(day: DaySchedule, isSelected: Boolean, height: Dp, big: Bool
                 },
                 // 날짜 숫자 뒤 아주 옅은 사각형 — onSurface 알파라 라이트/다크 자동 대응
                 modifier = Modifier
-                    .padding(start = 3.dp)
+                    .padding(start = 2.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                    .padding(horizontal = 2.dp, vertical = 1.dp),
             )
-            val nameTag = day.holidayName ?: day.memorialName ?: day.seasonalTerm
-            nameTag?.let {
-                // 공휴일 이름: 아주 작게, 칸을 절대 밀지 않도록 남은 폭 안에서만
-                Text(
-                    it, fontSize = holSize, lineHeight = holSize * 1.1, maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.End,
-                    color = if (day.holidayName != null || day.memorialName != null) duty.sunday else duty.onStandby,
-                    modifier = Modifier.weight(1f).padding(start = 2.dp, end = 2.dp),
-                )
+            // 넓은 칸(접힘 폰 ~54dp)은 날짜 옆 남은 폭에 붙인다
+            if (!nameBelow) nameTag?.let {
+                HolidayTag(it, holSize, nameColor, Modifier.weight(1f).padding(start = 1.dp, end = 2.dp))
             }
+        }
+        // 좁은 칸(펼침 44% 달력 ~37dp)은 아랫줄에서 칸 전체 폭을 쓴다 — 세로는 남아돌아 아래를 안 민다
+        if (nameBelow) nameTag?.let {
+            HolidayTag(it, holSize, nameColor, Modifier.fillMaxWidth().padding(horizontal = 2.dp))
         }
         // 근무변경된 날: 원래 근무 작게(취소선) + 새 근무 2줄
         if (day.isOverridden && day.originalDutyRaw != null) {
@@ -740,8 +767,10 @@ private fun DayDetailContent(
             var showRoute by remember(day.date) { mutableStateOf(false) }
             if (routeAsset != null) {
                 // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로.
-                // 접힘은 폭 1.5배까지 키워 세로를 벌고 넘치는 폭은 가로 스크롤 — 펼침은 이미 커서 1f 유지
-                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp, zoom = if (compact) 1.5f else 1f) { showRoute = true }
+                // 접힘은 폭을 키워 세로를 벌고 넘치는 폭은 가로 스크롤 — 펼침은 이미 커서 1f 유지.
+                // 본선 원본이 ~2.1:1로 지선(~1.41:1)보다 납작해 같은 배율이면 세로가 덜 커진다 → 본선만 1.8배(v1.6.8)
+                val zoom = if (!compact) 1f else if (day.duty.isBranch) 1.5f else 1.8f
+                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp, zoom = zoom) { showRoute = true }
             } else {
                 row?.let { r ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
