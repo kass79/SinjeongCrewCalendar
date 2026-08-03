@@ -1,6 +1,8 @@
 package com.sinjeong.crewcalendar.presentation.calendar
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -46,11 +48,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 
-/** 행로표 원본 뷰어 — assets/routes/{asset}.webp, 핀치 확대(1~6배)·드래그 이동 */
+/**
+ * 행로표 원본 뷰어 — assets/routes/{asset}.webp, 핀치 확대(1~6배)·드래그 이동.
+ *
+ * 세로 화면 + 가로형 이미지면 비트맵을 90도 돌려 표의 긴 변을 화면 긴 변에 맞춘다.
+ * 행로표가 본선 ~2.13:1 / 지선 ~1.41:1 가로형이라 세로 화면에선 폭맞춤만으로는
+ * 표가 납작하게 눌린다(접힘 기준 본선 약 2배 커짐). 펼침은 화면이 가로로 넓어 조건에서 빠진다.
+ */
 @Composable
 fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
     val context = LocalContext.current
-    val bitmap = remember(asset) {
+    val src = remember(asset) {
         runCatching {
             context.assets.open("routes/$asset.webp").use { BitmapFactory.decodeStream(it) }
         }.getOrNull()
@@ -59,7 +67,20 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             var scale by remember { mutableFloatStateOf(1f) }
             var offset by remember { mutableStateOf(Offset.Zero) }
-            Box(Modifier.fillMaxSize()) {
+            BoxWithConstraints(Modifier.fillMaxSize()) {
+                val portrait = maxHeight > maxWidth
+                // 원본(src)은 remember(asset)가 계속 붙들고 있으므로 recycle 하지 않는다.
+                // 접힘↔펼침 전환 때 회전본만 다시 만들면 된다.
+                val bitmap = remember(src, portrait) {
+                    if (src != null && portrait && src.width > src.height) {
+                        Bitmap.createBitmap(
+                            src, 0, 0, src.width, src.height,
+                            Matrix().apply { postRotate(90f) }, true,
+                        )
+                    } else {
+                        src
+                    }
+                }
                 if (bitmap != null) {
                     Image(
                         bitmap = bitmap.asImageBitmap(),
