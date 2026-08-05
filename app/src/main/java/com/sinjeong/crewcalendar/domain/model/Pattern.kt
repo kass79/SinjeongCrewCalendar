@@ -26,4 +26,8 @@ data class Pattern(
         val idx = Math.floorMod(days + offset, sequence.size)
         return DutyCode.parse(sequence[idx])
     }
+
+    /** dutyOn의 역함수 — "date의 근무 = sequence[index]" 를 만족하는 offset */
+    fun offsetFor(date: LocalDate, index: Int): Int =
+        Math.floorMod(index - ChronoUnit.DAYS.between(anchorDate, date).toInt(), length)
 }

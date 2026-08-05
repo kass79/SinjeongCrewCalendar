@@ -157,26 +157,27 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
                 )
             }
 
-            if (!compactTop) {
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "© 2026  KANG SUNGJIN",
-                    fontSize = 11.sp,
-                    letterSpacing = 3.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color(0xFF1D3FA8).copy(alpha = 0.55f),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text(
-                    "All Rights Reserved",
-                    fontSize = 9.sp,
-                    letterSpacing = 1.5.sp,
-                    color = Color(0xFF8A8496),
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
+            // 저작권은 세 화면(CREDENTIAL·SET_PIN·PIN) 모두에서 항상 표시한다.
+            // compactTop(키보드·짧은 화면)에서는 지우지 않고 여백·자간만 줄여 자리만 아낀다.
+            Spacer(Modifier.height(if (compactTop) 2.dp else 10.dp))
+            Text(
+                "© 2026  KANG SUNG JIN",
+                fontSize = if (compactTop) 11.sp else 12.sp,
+                letterSpacing = if (compactTop) 1.5.sp else 2.5.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color(0xFF1D3FA8),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "ALL RIGHTS RESERVED",
+                fontSize = if (compactTop) 9.5.sp else 10.5.sp,
+                letterSpacing = if (compactTop) 1.sp else 1.8.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF4A4458),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }

@@ -36,6 +36,9 @@ import com.sinjeong.crewcalendar.MainActivity
 class DutyWidget : GlanceAppWidget() {
     override val stateDefinition = PreferencesGlanceStateDefinition
 
+    // 실제 위젯 크기를 알아야 좁게 줄였을 때(2x1 등) 글자를 줄여 잘림을 막을 수 있다
+    override val sizeMode = androidx.glance.appwidget.SizeMode.Exact
+
     companion object {
         /** "화|28|5|0;수|29|휴3|1;…" — 요일|일자|근무|빨강(일요일·공휴일). 비면 빈 상태 */
         val KEY_WEEK = stringPreferencesKey("week_strip")
@@ -55,6 +58,8 @@ class DutyWidget : GlanceAppWidget() {
                     if (p.size == 4) Cell(p[0], p[1], p[2], p[3] == "1") else null
                 }
                 val sub = prefs[KEY_SUB].orEmpty()
+                // 4x1(기본)보다 좁히면 칸 폭이 급격히 줄어든다 — 요일을 떼고 글자를 줄여 잘림 방지
+                val narrow = androidx.glance.LocalSize.current.width < 230.dp
 
                 Column(
                     modifier = GlanceModifier
@@ -84,10 +89,11 @@ class DutyWidget : GlanceAppWidget() {
                     if (sub.isNotBlank()) {
                         Text(
                             sub,
+                            maxLines = 1,
                             style = TextStyle(
                                 color = GlanceTheme.colors.onSurface,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
+                                fontSize = if (narrow) 12.sp else 13.sp,
+                                fontWeight = FontWeight.Bold,
                             ),
                             modifier = GlanceModifier.padding(start = 2.dp, bottom = 3.dp),
                         )
@@ -98,7 +104,7 @@ class DutyWidget : GlanceAppWidget() {
                     Row(modifier = GlanceModifier.fillMaxWidth()) {
                         cells.forEachIndexed { i, c ->
                             Box(modifier = GlanceModifier.defaultWeight().padding(horizontal = 1.dp)) {
-                                DayCell(c, isToday = i == 0, modifier = GlanceModifier.fillMaxWidth())
+                                DayCell(c, isToday = i == 0, narrow = narrow, modifier = GlanceModifier.fillMaxWidth())
                             }
                         }
                     }
@@ -108,7 +114,7 @@ class DutyWidget : GlanceAppWidget() {
     }
 
     @androidx.compose.runtime.Composable
-    private fun DayCell(cell: Cell, isToday: Boolean, modifier: GlanceModifier) {
+    private fun DayCell(cell: Cell, isToday: Boolean, narrow: Boolean, modifier: GlanceModifier) {
         // 오늘 칸은 primary 로 확실히 튀게. 나머지는 inverseOnSurface —
         // 라이트에서 흰색에 가깝고(밝은 카드) 다크에서는 배경보다 밝은 회색이라 양쪽 다 산뜻하다.
         val fg = if (isToday) GlanceTheme.colors.onPrimary else GlanceTheme.colors.onSurface
@@ -123,19 +129,22 @@ class DutyWidget : GlanceAppWidget() {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             // 요일+날짜를 한 줄로 합쳐 근무 글자를 키울 세로 여유를 만든다.
+            // 좁힌 위젯에서는 요일을 떼고(날짜만) 글자를 줄여 한 줄에 들어가게 한다.
             Text(
-                "${cell.dow} ${cell.day}",
+                if (narrow) cell.day else "${cell.dow} ${cell.day}",
+                maxLines = 1,
                 style = TextStyle(
                     color = if (cell.red && !isToday) GlanceTheme.colors.error else fg,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = if (narrow) 10.sp else 11.5.sp,
+                    fontWeight = FontWeight.Bold,
                 ),
             )
             Text(
                 cell.duty.ifBlank { "·" },
+                maxLines = 1,
                 style = TextStyle(
                     color = fg,
-                    fontSize = 15.sp,
+                    fontSize = if (narrow) 13.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )

@@ -5,7 +5,6 @@ import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import kotlinx.coroutines.flow.first
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
 /**
@@ -23,8 +22,7 @@ class SelectDutyPositionUseCase @Inject constructor(
         val pattern = Bundled.patternFor(group)
         require(patternIndex in pattern.sequence.indices) { "잘못된 근무 위치" }
 
-        val days = ChronoUnit.DAYS.between(pattern.anchorDate, date).toInt()
-        val offset = Math.floorMod(patternIndex - days, pattern.length)
+        val offset = pattern.offsetFor(date, patternIndex)
         userRepo.upsert(user.copy(patternId = pattern.id, patternOffset = offset, role = group.role))
     }
 }

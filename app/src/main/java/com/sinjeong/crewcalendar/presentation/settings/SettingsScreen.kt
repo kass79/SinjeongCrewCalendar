@@ -92,11 +92,13 @@ class SettingsViewModel @Inject constructor(
 fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onOpenContacts: () -> Unit = {},
+    onOpenAdmin: () -> Unit = {},
 ) {
     val user by viewModel.user.collectAsStateWithLifecycle()
     val mode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val savedMonths by viewModel.savedMonths.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
+    var askAdminPw by remember { mutableStateOf(false) }
 
     LaunchedEffect(user?.uid) { viewModel.refreshSavedMonths() }
 
@@ -226,11 +228,24 @@ fun SettingsScreen(
             )
             SettingRow(title = "저장 방식", sub = "근무선택·근무변경은 동료와 공유, 메모·과거기록은 이 폰에만 저장")
 
+            // 관리자
+            SectionTitle("관리자")
+            SettingRow(
+                title = "동료 대리등록",
+                sub = "앱을 아직 안 깐 동료의 이름·사번·근무를 대신 등록 (암호 필요)",
+                trailing = {
+                    TextButton(onClick = {
+                        if (com.sinjeong.crewcalendar.presentation.admin.AdminGate.unlocked) onOpenAdmin()
+                        else askAdminPw = true
+                    }) { Text("열기") }
+                },
+            )
+
             // 문의 · 저작권
             SectionTitle("문의")
             SettingRow(title = "kass7942@gmail.com", sub = "근무 수정·건의는 메일로")
             Text(
-                "© 2026 Kang SungJin. All rights reserved.",
+                "© 2026 KANG SUNG JIN. ALL RIGHTS RESERVED.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
@@ -240,6 +255,11 @@ fun SettingsScreen(
             Spacer(Modifier.height(24.dp))
         }
     }
+
+    if (askAdminPw) com.sinjeong.crewcalendar.presentation.admin.AdminPasswordDialog(
+        onUnlocked = { askAdminPw = false; onOpenAdmin() },
+        onDismiss = { askAdminPw = false },
+    )
 
     if (confirmLogout) {
         AlertDialog(

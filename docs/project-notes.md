@@ -71,6 +71,35 @@ CLAUDE.md에서 분리한 이력·이슈 목록. 레이아웃을 손대거나 �
   `clip(CircleShape)`, 18 → **22dp**. `Icon`이 아니라 `Image`여야 tint가 안 먹어 원색이 살아납니다.
   nodpi에 둔 이유: 크기를 dp로 못 박으니 밀도 스케일 업샘플링이 낭비라서.
 
+- **하단 탭바 80 → 56dp**(v1.6.12 사용자 요청 "3단계 줄여줘"). M3 `NavigationBar` 기본 높이는 80dp라
+  `Modifier.height(56.dp + 제스처바 인셋)`으로 고정합니다. **인셋을 따로 더하는 게 핵심** — 56dp 안에서
+  깎으면 `windowInsetsPadding`이 내부에서 먹어 탭이 제스처 바에 씹힙니다. 아이콘 24 → 20dp,
+  라벨 기본 → 10sp. 실측 249 → 186px(1080x2400/420dpi, 제스처바 39px 포함) = 달력에 63px 환원.
+  되돌리려면 `MainActivity.kt`의 `NavigationBar(modifier = ...)`를 지우면 됩니다.
+- **로그인 저작권 항상 표시**(v1.6.12 사용자 요청). 종전엔 `if (!compactTop)` 안에 있어 키보드가 뜨거나
+  짧은 화면(폴드 펼침·가로)에서 통째로 사라졌습니다. 조건 밖으로 빼고 `compactTop`일 땐 지우는 대신
+  글자·자간·여백만 줄입니다. 표기는 `© 2026 KANG SUNG JIN` / `ALL RIGHTS RESERVED`(사용자 표기),
+  대비를 alpha 0.55 → 불투명, 9/11 → 10.5/12sp로 올렸습니다. 설정 화면 문구도 같은 표기로 통일.
+- **관리자 대리등록**(v1.6.12). 설정 → 관리자 → 암호 → `presentation/admin/AdminScreen.kt`.
+  암호는 평문 없이 SHA-256 해시 상수만 코드에 두고 비교(`AdminGate`), 세션은 프로세스 메모리라
+  앱을 완전히 종료하면 잠깁니다. 등록은 `BundledStaff.validate`로 이름·사번을 명단 대조해 **불일치면 차단**.
+  근무 다이아는 **달력의 `DutyPickerSheet`를 그대로 재사용**(private → internal) — patternOffset 계산
+  경로를 하나로 유지하려고 새로 만들지 않았습니다. offset 공식은 `Pattern.offsetFor(date, index)`로
+  뽑아 `SelectDutyPositionUseCase`와 공유합니다(중복 제거).
+  저장은 `RosterRepository.adminUpsert/adminDelete` → Firestore `users/{사번}`,
+  스키마는 `FirestoreUserRepository.publish`와 동일 + `addedBy="admin"`.
+  본인이 나중에 직접 로그인하면 publish가 같은 문서를 통째로 `set`해 `addedBy`가 사라집니다(=본인 소유 승격,
+  중복 행 없음). `RosterEntry.addedBy`는 기본값 null이라 기존 읽기 코드는 그대로 동작.
+- **위젯: 오늘 출근시각이 지나면 내일 표시**(v1.6.12). `DutyWidgetWorker.subLine()`.
+  오늘 출근 전이면 "오늘 출근 HH:MM", 지났거나 오늘이 비번·휴무면 내일로 넘어가
+  "내일 출근 HH:MM" / "내일 비번" / "내일 휴무". 야간 표기 `25:20`은 `atStartOfDay().plusHours(25)`라
+  익일 01:20으로 자연히 계산됩니다. 모레는 안 봅니다(스트립 7칸에 이미 보임).
+  갱신은 워커가 실행될 때마다 **다음 경계 1건만** 예약(`widget_boundary`, 오늘 출근시각 또는 자정 중 빠른 쪽) —
+  하루 1~2회 추가 기동이라 배터리 영향은 무시할 수준. 기존 6시간 주기·앱 실행 1회·onUpdate는 그대로.
+- **위젯 텍스트**(v1.6.12). 근무 15 → 16sp, 요일·날짜 11 → 11.5sp Medium → Bold, 부제 12 → 13sp Bold,
+  전부 `maxLines=1`. `SizeMode.Exact`를 켜고 폭 230dp 미만(2x1 등)이면 **요일을 떼고 날짜만** 남기며
+  10/13sp로 줄입니다 — 좁힌 위젯에서 "월 28"이 잘리던 것 방지.
+
 ## 남은 이슈 (보고만 하고 미수정)
 
 1. 인라인 행로표 우하단 확대 아이콘이 "야간 8:00" 셀 끝자락을 반투명하게 덮음
@@ -88,6 +117,10 @@ CLAUDE.md에서 분리한 이력·이슈 목록. 레이아웃을 손대거나 �
    즐겨찾기가 이름 Set 기준이라 한쪽에 ★을 달면 다른 쪽에도 붙는다. 전화번호는 이미
    `phoneFor(name, isConductor)`로 구분됨. 고치려면 `Mate` 키를 이름+소속으로 바꿔야 함(저장 포맷 변경)
 5. 동료근무 이름 칸이 64dp라 `Tester (나)` 같은 긴 이름은 말줄임(`Tester …`). ★ 추가 전부터 그랬음
+7. **관리자 대리등록은 앱 화면만 막습니다.** `firestore.rules`가 `users/{uid}`에
+   `allow write: if request.auth != null` 이라 익명 로그인만 하면 서버는 누구나 쓸 수 있습니다.
+   암호는 "실수로 들어가는 것"을 막는 잠금이지 서버 권한이 아닙니다. rules 강화는 사용자 배포 몫이라
+   이번에 손대지 않았습니다(권장안은 v1.6.12 보고서 참고).
 6. 접힘 상세시트에서 메모 키보드가 뜨면 `padding(bottom = imeBottom)` + 스크롤 바닥고정 때문에
    버튼 아래로 빈 공간이 크게 남음(v1.6.7 완전 펼침 이후 더 눈에 띔). 동작은 정상 — 고치려면
    `70f59c4` 우회를 다시 설계해야 해서 미룸

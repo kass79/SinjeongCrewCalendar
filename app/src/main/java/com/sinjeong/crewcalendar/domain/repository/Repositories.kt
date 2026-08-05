@@ -73,11 +73,17 @@ data class RosterEntry(
     val name: String,
     val group: CrewGroup,
     val patternOffset: Int,
+    /** 관리자가 대리 등록한 사람이면 "admin". 본인이 직접 가입하면 그 write가 문서를 덮어써 null이 된다 */
+    val addedBy: String? = null,
 )
 
 interface RosterRepository {
     fun observeUsers(): Flow<List<RosterEntry>>
     /** 해당 월 근무변경 전체: uid → (날짜 → 변경 근무) */
     fun observeMonthOverrides(month: YearMonth): Flow<Map<String, Map<LocalDate, String>>>
+
+    /** 관리자 대리 등록/수정 — users/{사번}에 로그인 사용자와 같은 스키마로 write. 서버 미연동이면 false */
+    suspend fun adminUpsert(entry: RosterEntry): Boolean = false
+    suspend fun adminDelete(uid: String): Boolean = false
 }
 

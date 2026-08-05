@@ -6,7 +6,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Groups
@@ -18,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -25,6 +31,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinjeong.crewcalendar.presentation.admin.AdminScreen
 import com.sinjeong.crewcalendar.presentation.auth.AuthViewModel
 import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
@@ -91,7 +98,10 @@ private fun AppRoot() {
 
     Scaffold(
         bottomBar = {
-            NavigationBar {
+            // M3 기본 80dp → 56dp. 달력에 세로 공간을 그만큼 돌려준다(사용자 요청 "3단계 줄여줘").
+            // 제스처 바 높이는 따로 더해 준다 — 56dp 안에서 깎으면 탭이 제스처 바에 먹힌다.
+            val gestureBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+            NavigationBar(modifier = Modifier.height(56.dp + gestureBar)) {
                 Tab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = currentDest?.hierarchy?.any { it.route == tab.route } == true,
@@ -102,8 +112,8 @@ private fun AppRoot() {
                                 restoreState = true
                             }
                         },
-                        icon = { Icon(tab.icon, tab.label) },
-                        label = { Text(tab.label) },
+                        icon = { Icon(tab.icon, tab.label, modifier = Modifier.size(20.dp)) },
+                        label = { Text(tab.label, fontSize = 10.sp, maxLines = 1) },
                     )
                 }
             }
@@ -122,8 +132,14 @@ private fun AppRoot() {
             composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }
             composable("deadhead") { DeadheadScreen(onBack = { nav.popBackStack() }) }
             composable(Tab.Mates.route) { MatesScreen() }
-            composable(Tab.Settings.route) { SettingsScreen(onOpenContacts = { nav.navigate("contacts") }) }
+            composable(Tab.Settings.route) {
+                SettingsScreen(
+                    onOpenContacts = { nav.navigate("contacts") },
+                    onOpenAdmin = { nav.navigate("admin") },
+                )
+            }
             composable("contacts") { OfficeContactsScreen(onBack = { nav.popBackStack() }) }
+            composable("admin") { AdminScreen(onBack = { nav.popBackStack() }) }
         }
     }
 }

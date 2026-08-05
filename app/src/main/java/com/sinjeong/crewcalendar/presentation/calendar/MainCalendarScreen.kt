@@ -874,10 +874,11 @@ private fun KvRow(key: String, value: String, sub: Boolean = false) {
     }
 }
 
-/* ── 근무선택 시트: ① 소속 → ② 근무 그리드 ─────────────── */
+/* ── 근무선택 시트: ① 소속 → ② 근무 그리드 ───────────────
+   관리자 화면(동료 대리등록)도 이 시트를 그대로 재사용한다 — patternOffset 계산 경로를 하나로 유지. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DutyPickerSheet(
+internal fun DutyPickerSheet(
     picker: DutyPickerState,
     currentGroup: CrewGroup?,
     currentOffset: Int,

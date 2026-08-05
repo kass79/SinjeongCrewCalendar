@@ -157,7 +157,10 @@ class FirestoreRosterRepository @Inject constructor() : RosterRepository {
                     val group =
                         if (d.getString("role") == CrewRole.CONDUCTOR.name) CrewGroup.MAIN_CONDUCTOR
                         else Bundled.groupFor(d.getString("patternId")) ?: CrewGroup.BRANCH
-                    RosterEntry(d.id, name, group, (d.getLong("patternOffset") ?: 0L).toInt())
+                    RosterEntry(
+                        d.id, name, group, (d.getLong("patternOffset") ?: 0L).toInt(),
+                        addedBy = d.getString("addedBy"),
+                    )
                 } ?: emptyList())
             }
             awaitClose { reg.remove() }
@@ -185,6 +188,32 @@ class FirestoreRosterRepository @Inject constructor() : RosterRepository {
             awaitClose { reg.remove() }
         })
     }
+
+    /**
+     * 관리자 대리 등록 — 앱을 아직 안 깐 동료의 근무를 대신 올린다.
+     * 문서 스키마는 FirestoreUserRepository.publish 와 동일 + addedBy.
+     * 본인이 나중에 직접 가입하면 publish 가 같은 문서를 통째로 set 해 addedBy 가 사라진다(=본인 소유로 승격).
+     */
+    override suspend fun adminUpsert(entry: RosterEntry): Boolean = runCatching {
+        if (!ensureAuth()) return false
+        db.collection("users").document(entry.uid).set(
+            mapOf(
+                "name" to entry.name,
+                "role" to entry.group.role.name,
+                "patternId" to Bundled.patternFor(entry.group).id,
+                "patternOffset" to entry.patternOffset,
+                "addedBy" to "admin",
+                "updatedAt" to FieldValue.serverTimestamp(),
+            )
+        ).await()
+        true
+    }.getOrDefault(false)
+
+    override suspend fun adminDelete(uid: String): Boolean = runCatching {
+        if (!ensureAuth()) return false
+        db.collection("users").document(uid).delete().await()
+        true
+    }.getOrDefault(false)
 }
 
 /** 오프라인(로컬) 모드용 — 공유 데이터 없음 */
