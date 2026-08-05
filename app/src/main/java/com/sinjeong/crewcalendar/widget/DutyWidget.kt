@@ -58,8 +58,9 @@ class DutyWidget : GlanceAppWidget() {
                     if (p.size == 4) Cell(p[0], p[1], p[2], p[3] == "1") else null
                 }
                 val sub = prefs[KEY_SUB].orEmpty()
-                // 4x1(기본)보다 좁히면 칸 폭이 급격히 줄어든다 — 요일을 떼고 글자를 줄여 잘림 방지
-                val narrow = androidx.glance.LocalSize.current.width < 230.dp
+                // 칸 하나가 46dp 아래로 내려가면 "월 10"·"휴21"이 잘린다(3x1 실측 42dp에서 "휴…").
+                // 그 아래로는 요일을 떼고 글자를 줄여 날짜·근무를 살린다.
+                val narrow = androidx.glance.LocalSize.current.width / 7 < 46.dp
 
                 Column(
                     modifier = GlanceModifier
@@ -135,7 +136,7 @@ class DutyWidget : GlanceAppWidget() {
                 maxLines = 1,
                 style = TextStyle(
                     color = if (cell.red && !isToday) GlanceTheme.colors.error else fg,
-                    fontSize = if (narrow) 10.sp else 11.5.sp,
+                    fontSize = if (narrow) 9.sp else 11.5.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
@@ -144,7 +145,7 @@ class DutyWidget : GlanceAppWidget() {
                 maxLines = 1,
                 style = TextStyle(
                     color = fg,
-                    fontSize = if (narrow) 13.sp else 16.sp,
+                    fontSize = if (narrow) 11.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
