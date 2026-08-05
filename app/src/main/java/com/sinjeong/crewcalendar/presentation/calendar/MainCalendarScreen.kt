@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.presentation.calendar
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -10,17 +11,16 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Today
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -32,6 +32,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -42,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
@@ -163,22 +166,25 @@ fun MainCalendarScreen(
                     ) {
                         Icon(Icons.Default.Share, "근무표 공유", modifier = Modifier.size(18.dp))
                     }
-                    IconButton(onClick = viewModel::goToday, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Default.Today, "오늘로", modifier = Modifier.size(18.dp))
-                    }
+                    // "오늘로" 버튼 제거(v1.6.11 사용자 요청). ViewModel.goToday는 남겨둠 — 되돌리기 쉽게
                     IconButton(
                         onClick = { openSafetyApp(context) },
                         modifier = Modifier.size(32.dp),
                     ) {
-                        Icon(Icons.Default.HealthAndSafety, "슬기로운 승무생활", modifier = Modifier.size(18.dp))
+                        // 벡터 아이콘 → 안전앱 실제 런처 아이콘(mascot). 원형 클립으로 런처처럼 보이게
+                        Image(
+                            painterResource(R.drawable.ic_safety_app),
+                            "슬기로운 승무생활",
+                            modifier = Modifier.size(22.dp).clip(CircleShape),
+                        )
                     }
                 }
             }
         },
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
-            // 펼침 비율 38:62 — 행로표에 폭을 더 몰아줌(v1.6.10). 좁아진 달력 칸은 nameBelow가 받아준다
-            Column(Modifier.weight(if (wide) 0.38f else 1f).fillMaxHeight()) {
+            // 펼침 비율 50:50 — "폴더 펼쳤을 때 화면 반반"(v1.6.11 사용자 선택). v1.6.10은 38:62
+            Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
                 // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
                 WeekdayHeader()
 
@@ -201,7 +207,7 @@ fun MainCalendarScreen(
             }
             // 펼침: 오른쪽 상세 패널 — 바텀시트와 같은 내용(DayDetailContent) 재사용
             if (wide) Surface(
-                Modifier.weight(0.62f).fillMaxHeight(),
+                Modifier.weight(0.5f).fillMaxHeight(),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
@@ -429,10 +435,11 @@ private fun CalendarGrid(
     BoxWithConstraints(modifier) {
         // 하한 60dp: 폴드 펼침 등 낮은 화면에서도 마지막 주가 짤리지 않게
         val cellHeight = ((maxHeight - (3.dp * (rows - 1))) / rows).coerceIn(60.dp, 150.dp)
-        // 칸 폭 = 가용폭 − 좌우 8dp − 칸 사이 3dp×6. 접힘 폰 ~54dp(411dp) / 펼침 38% 달력 ~32dp.
-        // 임계 60dp(v1.6.10): 폴더블 커버 320~411dp는 칸이 45~54dp라 45dp 임계에 안 걸려
-        // `광복절`이 여전히 잘렸다. 폰 폭 전 구간을 아랫줄로 넘긴다(세로는 남아돌아 아래를 안 민다).
-        val nameBelow = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7 < 60.dp
+        // 칸 폭 = 가용폭 − 좌우 8dp − 칸 사이 3dp×6. 접힘 폰 ~54dp(411dp) / 펼침 50% 달력 ~44dp.
+        // 임계 60dp(v1.6.10) → 34dp(v1.6.11): 사용자가 이름을 날짜 "옆 같은 줄"에 원함.
+        // 날짜 6sp + 알약 여백 축소 + HolidayTag 하한 4.5sp면 34dp 칸에도 `광복절`이 들어간다.
+        // 34dp 미만(계산상 실기기엔 없음)만 아랫줄 폴백으로 남겨둔다.
+        val nameBelow = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7 < 34.dp
         LazyVerticalGrid(
             columns = GridCells.Fixed(7),
             modifier = Modifier
@@ -510,7 +517,13 @@ private fun HolidayTag(name: String, size: TextUnit, color: Color, modifier: Mod
         name, fontSize = fit, lineHeight = fit * 1.1, maxLines = 1,
         softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
         color = color, modifier = modifier,
-        onTextLayout = { if (it.hasVisualOverflow && fit > 5.sp) fit *= 0.92f },
+        // hasVisualOverflow만 보면 안 된다(v1.6.11): 말줄임이 적용된 순간 "한 줄에 들어갔다"가 돼
+        // false로 떨어지고 축소가 멈춘다 — `광복절`이 6.5sp에서 `광복…`으로 굳던 원인.
+        // isLineEllipsized로 말줄임 자체를 감지해 안 잘릴 때까지 줄인다.
+        onTextLayout = {
+            val cut = it.hasVisualOverflow || (it.lineCount > 0 && it.isLineEllipsized(0))
+            if (cut && fit > 4.5.sp) fit *= 0.92f
+        },
     )
 }
 
@@ -527,8 +540,8 @@ private fun DayCell(
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
-    // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5sp)
-    val dateSize = if (big) 8.5.sp else 6.5.sp
+    // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5, v1.6.11 6.5→6sp)
+    val dateSize = if (big) 8.sp else 6.sp
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
@@ -575,15 +588,16 @@ private fun DayCell(
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
                 },
                 // 날짜 숫자 뒤 아주 옅은 사각형 — onSurface 알파라 라이트/다크 자동 대응
+                // 여백 축소(v1.6.11 start 2→1, horizontal 2→1): 같은 줄 공휴일 이름에 폭 양보
                 modifier = Modifier
-                    .padding(start = 2.dp)
+                    .padding(start = 1.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
-                    .padding(horizontal = 2.dp, vertical = 1.dp),
+                    .padding(horizontal = 1.dp, vertical = 1.dp),
             )
-            // 넓은 칸(접힘 폰 ~54dp)은 날짜 옆 남은 폭에 붙인다
+            // 이름은 날짜 옆 같은 줄에 붙인다(v1.6.11 사용자 요청). 넘치면 HolidayTag가 4.5sp까지 자동 축소
             if (!nameBelow) nameTag?.let {
-                HolidayTag(it, holSize, nameColor, Modifier.weight(1f).padding(start = 1.dp, end = 2.dp))
+                HolidayTag(it, holSize, nameColor, Modifier.weight(1f).padding(start = 1.dp, end = 1.dp))
             }
         }
         // 좁은 칸(펼침 44% 달력 ~37dp)은 아랫줄에서 칸 전체 폭을 쓴다 — 세로는 남아돌아 아래를 안 민다
@@ -600,7 +614,7 @@ private fun DayCell(
                 maxLines = 1,
             )
         }
-        if (day.duty.raw.isNotBlank()) {
+        if (day.duty.raw.isNotBlank()) Box {
             Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
                 // 칩 폭 통일(글자수 무관 동일) — 높이는 글자에 맞춰(시스템 글꼴 확대 시 짤림 방지)
                 val label = day.duty.display
@@ -621,6 +635,19 @@ private fun DayCell(
                     )
                 }
             }
+            // 야간 근무(본선/지선 야간 다이아)에만 노란 초승달 배지 — 다이아 왼쪽 위 모서리에 걸침.
+            // SPECIAL은 같은 보라색이지만 isNight=false라 자동 제외.
+            // 날짜 줄이 아니라 칩 위에 오프셋으로 얹는다 — 날짜·공휴일 이름 폭을 한 픽셀도 안 뺏는다.
+            if (day.duty.isNight) Icon(
+                Icons.Default.DarkMode, null,
+                // 라이트/다크 모두 보이는 노랑 — 배경 밝기로 고름(다이나믹 컬러에도 대응)
+                tint = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f)
+                    Color(0xFFE09600) else Color(0xFFFFD54F),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .offset(x = (-4).dp, y = (-2).dp)
+                    .size(if (big) 11.dp else 9.dp),
+            )
         }
         day.signOn?.let {
             Text(
