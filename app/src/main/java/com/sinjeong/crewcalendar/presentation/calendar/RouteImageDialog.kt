@@ -126,9 +126,18 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
  *        바깥에 보고하는 폭은 그대로라 형제 항목(제목·칩·메모·버튼)은 영향받지 않는다.
  * zoom:  1f = 가용 폭에 딱 맞춤(가로 스크롤 없음, 기존 동작). 1f 초과면 그 배율로 키우고
  *        넘치는 폭은 가로 스크롤. 행로표가 ~2.13:1 가로형이라 폭을 키워야 세로가 커진다.
+ * vStretch: 세로만 늘리는 배율(원본 비율 왜곡). 폭을 못 키우는 펼침 패널에서 줄 높이를 벌려고
+ *        쓴다(v1.6.10, 펼침 1.4f). 가로 스크롤이 안 생기니 "전체 폭 한눈에"가 유지된다.
+ *        전체화면 다이얼로그는 다른 컴포저블이라 왜곡이 새어나가지 않는다.
  */
 @Composable
-fun RouteImageInline(asset: String, bleed: Dp = 0.dp, zoom: Float = 1f, onExpand: () -> Unit) {
+fun RouteImageInline(
+    asset: String,
+    bleed: Dp = 0.dp,
+    zoom: Float = 1f,
+    vStretch: Float = 1f,
+    onExpand: () -> Unit,
+) {
     val context = LocalContext.current
     val bitmap = remember(asset) {
         runCatching {
@@ -146,7 +155,7 @@ fun RouteImageInline(asset: String, bleed: Dp = 0.dp, zoom: Float = 1f, onExpand
                 .clip(RoundedCornerShape(10.dp)),
         ) {
             val w = maxWidth * zoom
-            val h = w * bitmap.height / bitmap.width
+            val h = w * bitmap.height / bitmap.width * vStretch
             Box(Modifier.horizontalScroll(rememberScrollState())) {
                 Image(
                     bitmap = bitmap.asImageBitmap(),

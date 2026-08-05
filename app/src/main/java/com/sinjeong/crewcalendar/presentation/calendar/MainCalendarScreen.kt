@@ -177,8 +177,8 @@ fun MainCalendarScreen(
         },
     ) { padding ->
         Row(Modifier.padding(padding).fillMaxSize()) {
-            // 펼침 비율 44:56 — 달력은 접힘 폰 폭 수준(~370dp)을 유지하고 행로표에 폭을 몰아줌
-            Column(Modifier.weight(if (wide) 0.44f else 1f).fillMaxHeight()) {
+            // 펼침 비율 38:62 — 행로표에 폭을 더 몰아줌(v1.6.10). 좁아진 달력 칸은 nameBelow가 받아준다
+            Column(Modifier.weight(if (wide) 0.38f else 1f).fillMaxHeight()) {
                 // 오늘 요약 카드 제거 — 달력을 최대로 (오늘 정보는 오늘 칸 탭으로)
                 WeekdayHeader()
 
@@ -201,7 +201,7 @@ fun MainCalendarScreen(
             }
             // 펼침: 오른쪽 상세 패널 — 바텀시트와 같은 내용(DayDetailContent) 재사용
             if (wide) Surface(
-                Modifier.weight(0.56f).fillMaxHeight(),
+                Modifier.weight(0.62f).fillMaxHeight(),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
@@ -429,9 +429,10 @@ private fun CalendarGrid(
     BoxWithConstraints(modifier) {
         // 하한 60dp: 폴드 펼침 등 낮은 화면에서도 마지막 주가 짤리지 않게
         val cellHeight = ((maxHeight - (3.dp * (rows - 1))) / rows).coerceIn(60.dp, 150.dp)
-        // 칸 폭 = 가용폭 − 좌우 8dp − 칸 사이 3dp×6. 접힘 폰 ~54dp / 펼침 44% 달력 ~37dp.
-        // 좁은 쪽은 날짜 옆에 3글자가 절대 안 들어가서(`제헌절` → `제…`) 이름을 아랫줄로 내린다.
-        val nameBelow = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7 < 45.dp
+        // 칸 폭 = 가용폭 − 좌우 8dp − 칸 사이 3dp×6. 접힘 폰 ~54dp(411dp) / 펼침 38% 달력 ~32dp.
+        // 임계 60dp(v1.6.10): 폴더블 커버 320~411dp는 칸이 45~54dp라 45dp 임계에 안 걸려
+        // `광복절`이 여전히 잘렸다. 폰 폭 전 구간을 아랫줄로 넘긴다(세로는 남아돌아 아래를 안 민다).
+        val nameBelow = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7 < 60.dp
         LazyVerticalGrid(
             columns = GridCells.Fixed(7),
             modifier = Modifier
@@ -526,8 +527,8 @@ private fun DayCell(
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
-    // 날짜 숫자는 공휴일 이름에 폭을 양보하려고 한 단계 작게(v1.6.8)
-    val dateSize = if (big) 9.sp else 7.sp
+    // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5sp)
+    val dateSize = if (big) 8.5.sp else 6.5.sp
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
@@ -770,7 +771,13 @@ private fun DayDetailContent(
                 // 접힘은 폭을 키워 세로를 벌고 넘치는 폭은 가로 스크롤 — 펼침은 이미 커서 1f 유지.
                 // 본선 원본이 ~2.1:1로 지선(~1.41:1)보다 납작해 같은 배율이면 세로가 덜 커진다 → 본선만 1.8배(v1.6.8)
                 val zoom = if (!compact) 1f else if (day.duty.isBranch) 1.5f else 1.8f
-                RouteImageInline(routeAsset, bleed = if (compact) 15.dp else 10.dp, zoom = zoom) { showRoute = true }
+                // 펼침은 폭을 더 못 키우니(가로 스크롤 나면 "한눈에"가 깨짐) 세로만 1.4배 늘려 줄 높이를 번다(v1.6.10)
+                RouteImageInline(
+                    routeAsset,
+                    bleed = if (compact) 15.dp else 10.dp,
+                    zoom = zoom,
+                    vStretch = if (compact) 1f else 1.4f,
+                ) { showRoute = true }
             } else {
                 row?.let { r ->
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
