@@ -53,6 +53,7 @@ import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
+import com.sinjeong.crewcalendar.domain.model.ShiftTeam
 import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
@@ -884,15 +885,19 @@ internal fun DutyPickerSheet(
     currentOffset: Int,
     onPickGroup: (CrewGroup) -> Unit,
     onBack: () -> Unit,
-    onPick: (Int) -> Unit,
+    onPick: (CrewGroup, Int) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val duty = LocalDutyColors.current
     val dateLabel = picker.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
 
+    // 소속이 5종이라 1단계 카드가 화면을 넘는다 → 1단계에서만 세로 스크롤
+    // (2단계는 LazyVerticalGrid를 품고 있어 스크롤을 겹치면 안 된다)
+    val groupScroll = rememberScrollState()
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
-            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)
+                .then(if (picker.group == null) Modifier.verticalScroll(groupScroll) else Modifier),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (picker.group == null) {
@@ -905,30 +910,84 @@ internal fun DutyPickerSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 CrewGroup.entries.forEach { g ->
                     val isCurrent = g == currentGroup
+                    val pattern = Bundled.patternFor(g)
                     OutlinedCard(
-                        onClick = { onPickGroup(g) },
+                        // 통상근무는 조 구분이 없다(1칸 순환) → 소속만 고르면 바로 확정, 2단계 없음
+                        onClick = { if (pattern.length == 1) onPick(g, 0) else onPickGroup(g) },
                         border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                         else CardDefaults.outlinedCardBorder(),
                     ) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
                             Text(g.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text(
-                                "${Bundled.patternFor(g).length}칸 교번 순환" + if (isCurrent) " · 현재 선택" else "",
+                                when (g) {
+                                    CrewGroup.SHIFT_4_2 -> "운용조·기지관제 · 주간→야간→비번→휴무 · A~D조"
+                                    CrewGroup.OFFICE_DAY -> "사무실·소장·지도과·관리과 · 월~금 주간, 토·일·공휴일 휴무"
+                                    else -> "${pattern.length}칸 교번 순환"
+                                } + if (isCurrent) " · 현재 선택" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                     }
                 }
+            } else if (picker.group == CrewGroup.SHIFT_4_2) {
+                // 2단계(4조2교대): 29칸 다이아 대신 A·B·C·D 4개 조
+                val pattern = Bundled.SHIFT_PATTERN
+                val days = ChronoUnit.DAYS.between(pattern.anchorDate, picker.date).toInt()
+                Text(
+                    "근무선택  2/2 · 4조2교대",
+                    style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+                )
+                TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
+                Text(
+                    "내 조를 고르세요. 괄호는 $dateLabel 근무입니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ShiftTeam.entries.forEach { team ->
+                    val code = pattern.dutyOn(picker.date, team.ordinal)
+                    val isCurrent = picker.group == currentGroup && currentOffset == team.ordinal
+                    val (bg, fg) = dutyChipColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    OutlinedCard(
+                        // 조 번호 = offset. offsetFor(date, idx) == team.ordinal 이 되는 idx 를 역산해 넘긴다
+                        onClick = { onPick(CrewGroup.SHIFT_4_2, Math.floorMod(team.ordinal + days, pattern.length)) },
+                        border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                        else CardDefaults.outlinedCardBorder(),
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                team.label, modifier = Modifier.weight(1f),
+                                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold,
+                            )
+                            Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(9.dp)) {
+                                Text(
+                                    code.display,
+                                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                )
+                            }
+                            if (isCurrent) Text(
+                                "  현재 선택", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
             } else {
                 // 2단계: 근무 그리드
-                val pattern = Bundled.patternFor(picker.group)
+                val group = picker.group
+                val pattern = Bundled.patternFor(group)
                 val days = ChronoUnit.DAYS.between(pattern.anchorDate, picker.date).toInt()
-                val currentIndex = if (picker.group == currentGroup)
+                val currentIndex = if (group == currentGroup)
                     Math.floorMod(days + currentOffset, pattern.length) else -1
 
                 Text(
-                    "근무선택  2/2 · ${picker.group.label}",
+                    "근무선택  2/2 · ${group.label}",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
@@ -947,7 +1006,7 @@ internal fun DutyPickerSheet(
                         val code = DutyCode.parse(pattern.sequence[i])
                         val (bg, fg) = dutyChipColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                         Surface(
-                            onClick = { onPick(i) },
+                            onClick = { onPick(group, i) },
                             color = bg, contentColor = fg,
                             shape = RoundedCornerShape(9.dp),
                             border = if (i == currentIndex) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,

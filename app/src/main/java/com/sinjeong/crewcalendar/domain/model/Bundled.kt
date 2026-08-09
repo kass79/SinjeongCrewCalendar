@@ -8,6 +8,13 @@ enum class CrewGroup(val label: String, val role: CrewRole) {
     BRANCH("신정지선", CrewRole.DRIVER_BRANCH),
     MAIN_DRIVER("본선 기관사", CrewRole.DRIVER_MAIN),
     MAIN_CONDUCTOR("본선 차장", CrewRole.CONDUCTOR),
+    SHIFT_4_2("4조2교대", CrewRole.OPERATION),
+    OFFICE_DAY("통상근무", CrewRole.OFFICE_STAFF),
+}
+
+/** 4조2교대 근무조. ordinal = Pattern offset (A=0 · B=1 · C=2 · D=3) */
+enum class ShiftTeam { A, B, C, D;
+    val label: String get() = "${name}조"
 }
 
 /** 야간 다이아 당일→익일 조합 (토요일 = 휴일 시각 확정) */
@@ -60,14 +67,57 @@ object Bundled {
         revision = REVISION,
     )
 
+    /**
+     * 4조2교대 (운용조·기지관제) — 주간 → 야간 → 비번 → 휴무 4일 순환. A/B/C/D조 = offset 0/1/2/3.
+     *
+     * anchor 계산 근거: 사용자 확정 기준점이 "2026-08-10(월) A조 = 비번".
+     * anchorDate 를 2026-08-10 으로 두면 그 날 days=0, A조는 offset 0 이므로
+     * idx = floorMod(0 + 0, 4) = 0 → sequence[0] 이 곧 "비번"이어야 한다.
+     * 여기서 주간→야간→비번→휴무 순환을 "비번"부터 이어 적으면 [비번, 휴무, 주간, 야간].
+     * 검산: A조 8/10=비번(0) 8/11=휴무(1) 8/12=주간(2) 8/13=야간(3) 8/14=비번 → 주기 유지.
+     *      같은 8/10 에 B조=sequence[1]=휴무, C조=주간, D조=야간 (조가 하루씩 앞선다).
+     */
+    val SHIFT_PATTERN = Pattern(
+        id = "bundled-shift42",
+        name = "4조2교대",
+        role = CrewRole.OPERATION,
+        sequence = listOf("비번", "휴무", "주간", "야간"),
+        anchorDate = LocalDate.of(2026, 8, 10),
+        revision = REVISION,
+    )
+
+    /**
+     * 통상근무 (사무실·소장/부사업소장·지도과·관리과) — 월~금 주간, 토·일·공휴일 휴무.
+     * 순환은 "주간" 1칸뿐이고 쉬는 날은 `restOnHolidays`가 덮는다.
+     * 토·일 2칸을 시퀀스에 넣지 않은 이유: `isHolidayTimetable`이 이미 토·일+공휴일이라
+     * 7칸 시퀀스를 두면 주말 규칙이 두 군데로 갈라진다. 대체공휴일도 PUBLIC_HOLIDAYS만 갱신하면 따라온다.
+     * 조 구분이 없으므로 offset은 항상 0 (근무선택 2단계 없음).
+     */
+    val OFFICE_PATTERN = Pattern(
+        id = "bundled-office",
+        name = "통상근무",
+        role = CrewRole.OFFICE_STAFF,
+        sequence = listOf("주간"),
+        anchorDate = LocalDate.of(2026, 8, 10),
+        restOnHolidays = true,
+        revision = REVISION,
+    )
+
+    /** 내장 패턴 전체 — 패턴을 추가하면 여기만 늘리면 저장소 조회가 따라온다 */
+    val ALL_PATTERNS = listOf(BRANCH_PATTERN, MAIN_PATTERN, SHIFT_PATTERN, OFFICE_PATTERN)
+
     fun patternFor(group: CrewGroup): Pattern = when (group) {
         CrewGroup.BRANCH -> BRANCH_PATTERN
+        CrewGroup.SHIFT_4_2 -> SHIFT_PATTERN
+        CrewGroup.OFFICE_DAY -> OFFICE_PATTERN
         else -> MAIN_PATTERN
     }
 
     fun groupFor(patternId: String?): CrewGroup? = when (patternId) {
         BRANCH_PATTERN.id -> CrewGroup.BRANCH
         MAIN_PATTERN.id -> CrewGroup.MAIN_DRIVER
+        SHIFT_PATTERN.id -> CrewGroup.SHIFT_4_2
+        OFFICE_PATTERN.id -> CrewGroup.OFFICE_DAY
         else -> null
     }
 

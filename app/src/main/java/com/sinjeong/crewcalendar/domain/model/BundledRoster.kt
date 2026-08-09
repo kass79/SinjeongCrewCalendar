@@ -71,9 +71,32 @@ object BundledRoster {
         "황재기" to 2, "황진성" to 6,
     )
 
+    /**
+     * 4조2교대 (운용조). offset = 조 번호 A0 · B1 · C2 · D3.
+     * 배정 근거: 비상연락망(26.06.16) "운용과" 블록의 열 머리글이 운용(A조)/(B조)/(C조)/(D조)이고
+     * 지도과·신도림(주박지)·홍대입구(주박지) 세 행에 한 명씩 들어 있다 — 원본 열 위치 그대로.
+     * 같은 블록의 "관리/지도(통상)" 열 3명(권미자·이화경·정재헌)은 OFFICE_DAY로 보냈다.
+     * 김환(B조)은 26.08.07 사번표에 없어(퇴직·전출 추정) 뺐다.
+     */
+    val SHIFT_4_2: List<Pair<String, Int>> = listOf(
+        "한종한" to 0, "황태상" to 0, "신승국" to 0,
+        "박태호" to 1, "박희수" to 1,
+        "최용재" to 2, "윤종대" to 2, "정재원" to 2,
+        "임종호" to 3, "박형렬" to 3, "유충래" to 3,
+    )
+
+    /** 통상근무 (사무실·소장/부사업소장·지도과·관리과·운용과 관리지도). 조 구분 없음 → offset 0 고정 */
+    val OFFICE_DAY: List<Pair<String, Int>> = listOf(
+        "김진오" to 0, "김수간" to 0, "신성균" to 0, "차병철" to 0, "임석준" to 0,
+        "김득일" to 0, "최재훈" to 0,
+        "권미자" to 0, "이화경" to 0, "정재헌" to 0,
+    )
+
     fun forGroup(group: CrewGroup): List<Pair<String, Int>> = when (group) {
         CrewGroup.MAIN_DRIVER -> MAIN_DRIVER
         CrewGroup.MAIN_CONDUCTOR -> MAIN_CONDUCTOR
         CrewGroup.BRANCH -> BRANCH
+        CrewGroup.SHIFT_4_2 -> SHIFT_4_2
+        CrewGroup.OFFICE_DAY -> OFFICE_DAY
     }
 }

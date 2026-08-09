@@ -224,7 +224,7 @@ private fun MateCard(mate: Mate, onSetFav: (FavGroup?) -> Unit, onRemove: () -> 
 }
 
 /** 동료 추가: 이름 → 소속 → 오늘 근무 선택 (근무선택과 동일 원리로 전체 자동 계산) */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () -> Unit) {
     val duty = LocalDutyColors.current
@@ -241,12 +241,16 @@ private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () 
                 value = name, onValueChange = { name = it },
                 label = { Text("이름") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
             )
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                CrewGroup.entries.forEachIndexed { i, g ->
-                    SegmentedButton(
+            // 소속 5종이라 SegmentedButton 한 줄엔 글자가 안 들어간다 → 접히는 칩
+            FlowRow(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                CrewGroup.entries.forEach { g ->
+                    FilterChip(
                         selected = group == g, onClick = { group = g },
-                        shape = SegmentedButtonDefaults.itemShape(i, CrewGroup.entries.size),
-                    ) { Text(g.label, fontSize = 11.sp) }
+                        label = { Text(g.label, fontSize = 11.sp) },
+                    )
                 }
             }
             Text(

@@ -258,8 +258,7 @@ private fun MemberEditor(
             currentOffset = draft.offset,
             onPickGroup = { picker = p.copy(group = it) },
             onBack = { picker = p.copy(group = null) },
-            onPick = { index ->
-                val g = p.group ?: return@DutyPickerSheet
+            onPick = { g, index ->
                 onChange(draft.copy(group = g, offset = Bundled.patternFor(g).offsetFor(today, index)))
                 picker = null
             },

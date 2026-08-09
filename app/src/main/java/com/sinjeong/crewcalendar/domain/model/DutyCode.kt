@@ -44,6 +44,8 @@ data class DutyCode(
     /** 달력 셀 표시 텍스트 — 지선은 "지" 접두사를 떼고 표시 (기존 앱 방식) */
     val display: String
         get() = when {
+            // 4조2교대 비번은 승무 다이아가 아니라 낱말이므로 "~" 대신 글자 그대로
+            raw == "비번" -> "비번"
             type == DutyType.POST_NIGHT -> "~"
             isBranch && raw.startsWith("지") && type != DutyType.SPECIAL && type != DutyType.ETC ->
                 raw.removePrefix("지")
@@ -69,6 +71,8 @@ data class DutyCode(
             "충당" to DutyType.STANDBY, "대기충당" to DutyType.STANDBY, "교체" to DutyType.STANDBY,
             "운휴" to DutyType.POST_NIGHT, "비번" to DutyType.POST_NIGHT,
             "지근" to DutyType.BRANCH, "지휴" to DutyType.BRANCH_REST,
+            // 4조2교대·통상근무 (교번 번호가 없는 낱말 코드). "비번"·"휴무"는 위/아래에서 이미 처리됨
+            "주간" to DutyType.MAIN_DAY, "야간" to DutyType.MAIN_NIGHT,
         )
 
         fun parse(raw: String?): DutyCode {

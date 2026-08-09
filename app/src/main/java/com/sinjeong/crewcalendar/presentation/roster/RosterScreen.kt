@@ -174,8 +174,10 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
+            // 소속 5종 + 전체 + ★ 이라 한 줄에 안 들어간다 → 가로 스크롤
             Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                Modifier.horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 12.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -184,7 +186,6 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                     FilterChip(selected = filter == g, onClick = { filter = g }, label = { Text(g.label, fontSize = 11.sp) })
                 }
                 FilterChip(selected = favOnly, onClick = { favOnly = !favOnly }, label = { Text("★", fontSize = 12.sp) })
-                Spacer(Modifier.weight(1f))
             }
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
@@ -235,8 +236,11 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
             }
             HorizontalDivider()
 
-            val sections = listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH)
-                .filter { filter == null || filter == it }
+            // 그룹을 추가하면 여기도 늘어나야 한다 — 빠뜨리면 그 소속 인원이 화면에서 통째로 사라진다
+            val sections = listOf(
+                CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH,
+                CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY,
+            ).filter { filter == null || filter == it }
             LazyColumn {
                 sections.forEach { g ->
                     val q = query.trim()

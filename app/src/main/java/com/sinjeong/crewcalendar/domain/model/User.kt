@@ -1,7 +1,11 @@
 package com.sinjeong.crewcalendar.domain.model
 
 /** 직명 */
-enum class CrewRole { DRIVER_MAIN, CONDUCTOR, DRIVER_BRANCH, STANDBY_DRIVER, STANDBY_CONDUCTOR, OPERATION }
+enum class CrewRole {
+    DRIVER_MAIN, CONDUCTOR, DRIVER_BRANCH, STANDBY_DRIVER, STANDBY_CONDUCTOR,
+    /** 운용조·기지관제 (4조2교대) */ OPERATION,
+    /** 사무실·소장/부사업소장·지도과·관리과 (통상근무) */ OFFICE_STAFF,
+}
 
 data class User(
     val uid: String = "",

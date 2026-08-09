@@ -47,10 +47,9 @@ data class CalendarUiState(
     /** 현재 소속 (근무선택 1단계 기본 표시용) */
     val currentGroup: CrewGroup?
         get() = when {
-            user?.patternId == Bundled.BRANCH_PATTERN.id -> CrewGroup.BRANCH
             user?.patternId == Bundled.MAIN_PATTERN.id ->
                 if (user.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else CrewGroup.MAIN_DRIVER
-            else -> null
+            else -> Bundled.groupFor(user?.patternId)
         }
 }
 
@@ -123,9 +122,8 @@ class MainCalendarViewModel @Inject constructor(
     fun closeDutyPicker() { picker.value = null }
 
     /** 기준 날짜의 근무를 해당 소속 패턴의 patternIndex 칸으로 지정 → 전체 자동 재계산 */
-    fun confirmDutyPosition(patternIndex: Int) {
+    fun confirmDutyPosition(group: CrewGroup, patternIndex: Int) {
         val p = picker.value ?: return
-        val group = p.group ?: return
         viewModelScope.launch {
             runCatching { selectDutyPosition(p.date, group, patternIndex) }
                 .onFailure { error.value = it.message ?: "근무선택 실패" }

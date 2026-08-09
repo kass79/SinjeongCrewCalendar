@@ -148,16 +148,10 @@ class LocalScheduleRepository @Inject constructor(
 
 @Singleton
 class LocalPatternRepository @Inject constructor() : PatternRepository {
-    override fun observePattern(patternId: String): Flow<Pattern?> = flowOf(
-        when (patternId) {
-            Bundled.BRANCH_PATTERN.id -> Bundled.BRANCH_PATTERN
-            Bundled.MAIN_PATTERN.id -> Bundled.MAIN_PATTERN
-            else -> null
-        }
-    )
+    override fun observePattern(patternId: String): Flow<Pattern?> =
+        flowOf(Bundled.ALL_PATTERNS.firstOrNull { it.id == patternId })
 
-    override suspend fun getPatterns(role: CrewRole?): List<Pattern> =
-        listOf(Bundled.BRANCH_PATTERN, Bundled.MAIN_PATTERN)
+    override suspend fun getPatterns(role: CrewRole?): List<Pattern> = Bundled.ALL_PATTERNS
 
     override suspend fun save(pattern: Pattern) = Unit
 }
