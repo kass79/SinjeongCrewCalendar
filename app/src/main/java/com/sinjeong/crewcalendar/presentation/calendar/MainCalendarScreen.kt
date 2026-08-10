@@ -875,7 +875,10 @@ private fun KvRow(key: String, value: String, sub: Boolean = false) {
     }
 }
 
-/* ── 근무선택 시트: ① 소속 → ② 근무 그리드 ───────────────
+/** 1단계에서 카드 한 장으로 묶어 보여주는 사업소 근무형태 (enum은 분리 유지 — 동료근무 섹션 구분용) */
+private val SITE_GROUPS = listOf(CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_4_2)
+
+/* ── 근무선택 시트: ① 소속 → (사업소면 근무형태) → ② 근무 그리드 ───────────────
    관리자 화면(동료 대리등록)도 이 시트를 그대로 재사용한다 — patternOffset 계산 경로를 하나로 유지. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -891,9 +894,13 @@ internal fun DutyPickerSheet(
     val duty = LocalDutyColors.current
     val dateLabel = picker.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
 
-    // 소속이 5종이라 1단계 카드가 화면을 넘는다 → 1단계에서만 세로 스크롤
-    // (2단계는 LazyVerticalGrid를 품고 있어 스크롤을 겹치면 안 된다)
+    // 소속 카드가 화면을 넘는다 → 소속 단계에서만 세로 스크롤
+    // (근무 그리드 단계는 LazyVerticalGrid를 품고 있어 스크롤을 겹치면 안 된다)
     val groupScroll = rememberScrollState()
+    // 사업소 근무형태(통상근무·4조2교대)는 인원이 적어 1단계에선 카드 하나로 묶고,
+    // 그 카드를 누르면 여기서 둘 중 하나를 고른다 → 첫 화면이 정확히 4장.
+    // CrewGroup enum은 그대로 5종 — 동료근무 섹션 구분이 살아 있어야 한다.
+    var siteStep by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)
@@ -901,18 +908,25 @@ internal fun DutyPickerSheet(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (picker.group == null) {
-                // 1단계: 소속
+                // 1단계: 소속 (승무 3종 + 사업소 묶음) / siteStep이면 사업소 근무형태 2종
                 Text(
-                    "근무선택  1/2 · 소속",
+                    if (siteStep) "근무선택 · 근무형태" else "근무선택  1/2 · 소속",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
-                Text("먼저 소속을 고르세요.", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                CrewGroup.entries.forEach { g ->
+                if (siteStep) TextButton(onClick = { siteStep = false }, contentPadding = PaddingValues(0.dp)) {
+                    Text("‹ 소속 다시 선택")
+                }
+                Text(
+                    if (siteStep) "근무형태를 고르세요." else "먼저 소속을 고르세요.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val shown = if (siteStep) SITE_GROUPS else CrewGroup.entries.filter { it !in SITE_GROUPS }
+                shown.forEach { g ->
                     val isCurrent = g == currentGroup
                     val pattern = Bundled.patternFor(g)
                     OutlinedCard(
-                        // 통상근무는 조 구분이 없다(1칸 순환) → 소속만 고르면 바로 확정, 2단계 없음
+                        // 통상근무는 조 구분이 없다(1칸 순환) → 고르면 바로 확정, 조 선택 없음
                         onClick = { if (pattern.length == 1) onPick(g, 0) else onPickGroup(g) },
                         border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                         else CardDefaults.outlinedCardBorder(),
@@ -931,6 +945,27 @@ internal fun DutyPickerSheet(
                         }
                     }
                 }
+                if (!siteStep) {
+                    val isCurrent = currentGroup in SITE_GROUPS
+                    OutlinedCard(
+                        onClick = { siteStep = true },
+                        border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+                        else CardDefaults.outlinedCardBorder(),
+                    ) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                            Text(
+                                SITE_GROUPS.joinToString(" / ") { it.label },
+                                style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold,
+                            )
+                            Text(
+                                "사무실·지도과·관리과·운용조·기지관제" +
+                                    if (isCurrent) " · 현재 ${currentGroup?.label}" else "",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
             } else if (picker.group == CrewGroup.SHIFT_4_2) {
                 // 2단계(4조2교대): 29칸 다이아 대신 A·B·C·D 4개 조
                 val pattern = Bundled.SHIFT_PATTERN
@@ -939,7 +974,7 @@ internal fun DutyPickerSheet(
                     "근무선택  2/2 · 4조2교대",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
-                TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
+                TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 근무형태 다시 선택") }
                 Text(
                     "내 조를 고르세요. 괄호는 $dateLabel 근무입니다.",
                     style = MaterialTheme.typography.bodySmall,
