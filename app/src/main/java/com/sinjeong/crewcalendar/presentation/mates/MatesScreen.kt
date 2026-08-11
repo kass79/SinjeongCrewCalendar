@@ -56,8 +56,8 @@ class MatesViewModel @Inject constructor(
         viewModelScope.launch { mateRepo.upsert(mate.copy(favGroup = fav)) }
     }
 
-    fun remove(name: String) {
-        viewModelScope.launch { mateRepo.remove(name) }
+    fun remove(mate: Mate) {
+        viewModelScope.launch { mateRepo.remove(mate) }
     }
 }
 
@@ -115,11 +115,11 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 88.dp),
                 ) {
-                    items(visible.size, key = { visible[it].name }) { i ->
+                    items(visible.size, key = { "${visible[it].name}|${visible[it].group.name}" }) { i ->
                         MateCard(
                             mate = visible[i],
                             onSetFav = { viewModel.setFavGroup(visible[i], it) },
-                            onRemove = { viewModel.remove(visible[i].name) },
+                            onRemove = { viewModel.remove(visible[i]) },
                         )
                     }
                 }

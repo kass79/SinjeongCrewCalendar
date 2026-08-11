@@ -4,6 +4,8 @@ import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
+import com.sinjeong.crewcalendar.domain.model.DutyCode
+import com.sinjeong.crewcalendar.domain.model.NightCombo
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -98,5 +100,53 @@ class PatternTest {
     @Test fun no_duplicate_employee_numbers() {
         val all = BundledStaff.DRIVERS + BundledStaff.CONDUCTORS + BundledStaff.OFFICE
         assertEquals(all.size, all.map { it.second }.toSet().size)   // 사번 중복 0
+    }
+
+    /* ── v1.6.16: 6/3 지방선거일 · 7/17 제헌절을 휴일 다이아로 (현업 확정) ───────── */
+
+    private val election = LocalDate.of(2026, 6, 3)
+    private val constitution = LocalDate.of(2026, 7, 17)
+
+    @Test fun electionDay_and_constitutionDay_are_public_holidays() {
+        assertTrue(Bundled.PUBLIC_HOLIDAYS.containsKey(election))
+        assertTrue(Bundled.PUBLIC_HOLIDAYS.containsKey(constitution))
+        assertTrue(Bundled.isHolidayTimetable(election))
+        assertTrue(Bundled.isHolidayTimetable(constitution))
+        // 제헌절은 기념일 목록에서 빠졌다(양쪽에 있으면 이름이 두 번 붙는다)
+        assertTrue(Bundled.MEMORIAL_DAYS.isEmpty())
+    }
+
+    /** 두 날의 출근시각이 평일값이 아니라 휴일값이어야 한다 — 틀리면 지각·결근 */
+    @Test fun newHolidays_use_holiday_signOn_times() {
+        listOf(election, constitution).forEach { d ->
+            assertEquals("지4 $d", "9:45", Bundled.signOn(DutyCode.parse("지4"), d))
+            assertEquals("본선9 $d", "8:01", Bundled.signOn(DutyCode.parse("9"), d))
+        }
+        // 하루 전은 여전히 평일값
+        assertEquals("10:11", Bundled.signOn(DutyCode.parse("지4"), election.minusDays(1)))
+        assertEquals("7:02", Bundled.signOn(DutyCode.parse("9"), constitution.minusDays(1)))
+    }
+
+    /** 전날 야간 다이아의 평/휴 조합도 같이 바뀐다 */
+    @Test fun nightCombo_flips_around_new_holidays() {
+        assertEquals(NightCombo.PH, Bundled.comboOf(election.minusDays(1)))   // 6/2(화) → 6/3 휴일
+        assertEquals(NightCombo.HP, Bundled.comboOf(election))                // 6/3 휴일 → 6/4(목) 평일
+        assertEquals(NightCombo.PH, Bundled.comboOf(constitution.minusDays(1))) // 7/16(목) → 7/17 휴일
+        assertEquals(NightCombo.HH, Bundled.comboOf(constitution))            // 7/17 휴일 → 7/18(토)
+    }
+
+    @Test fun officePattern_rests_on_new_holidays() {
+        assertEquals("휴무", office.dutyOn(election, 0).display)
+        assertEquals("휴무", office.dutyOn(constitution, 0).display)
+        assertEquals("주간", office.dutyOn(election.minusDays(1), 0).display)
+    }
+
+    /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
+    @Test fun mainDay_26to29_have_no_holiday_timetable() {
+        assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)
+        (26..29).forEach { n ->
+            assertEquals("$n", null, Bundled.timeRowFor(DutyCode.parse("$n"), election))
+            assertNotNull("$n", Bundled.timeRowFor(DutyCode.parse("$n"), election.minusDays(1)))
+        }
     }
 }

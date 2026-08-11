@@ -650,10 +650,16 @@ private fun DayCell(
                     .size(if (big) 11.dp else 9.dp),
             )
         }
-        day.signOn?.let {
+        if (day.signOn != null) {
             Text(
-                it, fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
+                day.signOn, fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else if (day.duty.isWorkDay && day.duty.number != null && Bundled.isHolidayTimetable(day.date)) {
+            // 휴일 운휴 다이아(본선 주간 26~29) — 시각이 아예 없어 칸이 비어 보이던 자리를 채운다
+            Text(
+                "운휴", fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
+                color = duty.sunday,
             )
         }
         // 메모는 항상 한 줄 보이게 (칸이 작아도 잘리지 않도록 축소)
@@ -828,6 +834,33 @@ private fun DayDetailContent(
                                 KvRow("출근", r.signOn)
                                 KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
                             }
+                        }
+                    }
+                }
+                // 출근시각·행로표·열번이 모두 없는 다이아 = 그날 그 다이아 운행이 없음
+                // (본선 주간 26~29는 휴일 시각표에 아예 없다 — 종전엔 시트가 텅 빈 채 쪼그라들었다)
+                if (row == null && day.duty.number != null && day.duty.isWorkDay) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                        ) {
+                            Text(
+                                if (holiday) "휴일 운휴 · 근무 없음" else "운휴 · 근무 없음",
+                                fontWeight = FontWeight.ExtraBold, fontSize = 15.sp,
+                                color = duty.sunday,
+                            )
+                            Text(
+                                "${day.duty.display} 다이아는 " +
+                                    (if (holiday) "휴일에 " else "") +
+                                    "운행하지 않습니다. 실제 근무는 사업소 게시 근무표를 확인하세요.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }

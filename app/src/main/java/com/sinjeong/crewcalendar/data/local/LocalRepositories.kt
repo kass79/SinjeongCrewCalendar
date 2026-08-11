@@ -77,23 +77,13 @@ class LocalUserRepository @Inject constructor(
         upsert(cur.copy(patternId = patternId, patternOffset = offset))
     }
 
-    override fun hasPin(): Boolean = !prefs.getString("pin", null).isNullOrBlank()
-
-    override fun savedName(): String? = prefs.getString("name", null)?.takeIf { it.isNotBlank() }
-
-    override suspend fun registerWithPin(user: User, pin: String) {
-        prefs.edit().putString("pin", pin).apply()
+    override suspend fun register(user: User) {
         upsert(user)          // 이름·사번·패턴 저장
         unlocked.value = true
     }
 
-    override fun unlockWithPin(pin: String): Boolean {
-        val ok = prefs.getString("pin", null) == pin && pin.isNotBlank()
-        if (ok) unlocked.value = true
-        return ok
-    }
-
     override suspend fun signOut() {
+        // "pin"은 v1.6.15까지 쓰던 잔재 — 남아 있으면 같이 지운다
         prefs.edit().remove("name").remove("empNo").remove("pin").apply()
         unlocked.value = false
         state.value = null
@@ -207,12 +197,32 @@ class LocalMateRepository @Inject constructor(
 ) : MateRepository {
     private val prefs = context.getSharedPreferences("mates", Context.MODE_PRIVATE)
 
+    /**
+     * 저장 키 = "이름|소속". v1.6.15까지는 이름 하나였는데, 그룹 간 동명이인(김지환·박두원·이용석)에
+     * ★을 달면 같은 이름의 다른 소속 행을 덮어써 동료근무에서 사라졌다.
+     */
+    private fun key(mate: Mate) = "${mate.name}|${mate.group.name}"
+
+    /** 이름-only 옛 키를 이름|소속으로 1회 이관 — 기존 즐겨찾기·수동등록이 날아가지 않게 */
+    private fun migrateLegacyKeys() {
+        val legacy = prefs.all.filterKeys { !it.contains('|') }
+        if (legacy.isEmpty()) return
+        val e = prefs.edit()
+        legacy.forEach { (name, value) ->
+            val group = runCatching {
+                CrewGroup.valueOf(JSONObject(value as String).optString("group"))
+            }.getOrDefault(CrewGroup.BRANCH)
+            e.putString("$name|${group.name}", value as String).remove(name)
+        }
+        e.apply()
+    }
+
     private fun loadAll(): List<Mate> =
-        prefs.all.mapNotNull { (name, value) ->
+        prefs.all.mapNotNull { (k, value) ->
             runCatching {
                 val o = JSONObject(value as String)
                 Mate(
-                    name = name,
+                    name = k.substringBefore('|'),
                     group = runCatching { CrewGroup.valueOf(o.optString("group")) }
                         .getOrDefault(CrewGroup.BRANCH),
                     patternOffset = o.optInt("offset"),
@@ -222,7 +232,12 @@ class LocalMateRepository @Inject constructor(
             }.getOrNull()
         }.sortedBy { it.name }
 
-    private val state = MutableStateFlow(loadAll())
+    private val state: MutableStateFlow<List<Mate>>
+
+    init {
+        migrateLegacyKeys()
+        state = MutableStateFlow(loadAll())
+    }
 
     override fun observeMates(): Flow<List<Mate>> = state
 
@@ -231,12 +246,12 @@ class LocalMateRepository @Inject constructor(
             .put("group", mate.group.name)
             .put("offset", mate.patternOffset)
             .put("fav", mate.favGroup?.name ?: "")
-        prefs.edit().putString(mate.name, o.toString()).apply()
+        prefs.edit().putString(key(mate), o.toString()).apply()
         state.value = loadAll()
     }
 
-    override suspend fun remove(name: String) {
-        prefs.edit().remove(name).apply()
+    override suspend fun remove(mate: Mate) {
+        prefs.edit().remove(key(mate)).apply()
         state.value = loadAll()
     }
 }

@@ -76,14 +76,18 @@ class RosterViewModel @Inject constructor(
     /**
      * 즐겨찾기 지정/해제. 동료로 등록 안 된 사람(내장 명단·로그인 근무자)은 이 시점에 Mate로 만든다.
      * 해제는 favGroup=null — Mate는 지우지 않는다(수동 등록분 보호).
+     * 매칭은 **이름+소속** — 이름만으로 찾으면 동명이인(김지환 기관사/차장)이 서로를 덮어쓴다.
      */
     fun setFav(name: String, group: CrewGroup, offset: Int, fav: FavGroup?) {
-        val existing = mates.value.find { it.name == name }
+        val existing = mates.value.find { it.name == name && it.group == group }
         viewModelScope.launch {
             mateRepo.upsert(existing?.copy(favGroup = fav) ?: Mate(name, group, offset, fav))
         }
     }
 }
+
+/** 동료 식별 키 — 이름만으로는 그룹 간 동명이인 3쌍이 충돌한다 */
+private fun mateKey(name: String, group: CrewGroup) = "$name|${group.name}"
 
 private data class Person(
     val name: String,
@@ -96,6 +100,8 @@ private data class Person(
 
 /** 즐겨찾기·전화번호는 " (나)" 꼬리표 없는 실제 이름으로 매칭한다 */
 private val Person.cleanName: String get() = name.removeSuffix(" (나)").trim()
+
+private val Person.key: String get() = mateKey(cleanName, group)
 
 /**
  * 동료근무 — 사업소 전체 근무표 매트릭스 (가로 날짜 × 세로 이름 ㄱㄴㄷ).
@@ -114,34 +120,47 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     var query by remember { mutableStateOf("") }
     var favOnly by remember { mutableStateOf(false) }
     var dialTarget by remember { mutableStateOf<Person?>(null) }
-    // ★ = 동료 탭에서 즐겨찾기 그룹에 넣은 사람들
-    val favNames = remember(mates) { mates.filter { it.favGroup != null }.map { it.name }.toSet() }
+    // ★ = 동료 탭에서 즐겨찾기 그룹에 넣은 사람들 (이름+소속 키)
+    val favKeys = remember(mates) {
+        mates.filter { it.favGroup != null }.map { mateKey(it.name, it.group) }.toSet()
+    }
     val duty = LocalDutyColors.current
 
     val people = remember(user, mates, liveUsers) {
-        val me = user?.let {
-            val g = Bundled.groupFor(it.patternId)?.let { grp ->
+        val myGroup = user?.let {
+            Bundled.groupFor(it.patternId)?.let { grp ->
                 if (it.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else grp
             } ?: CrewGroup.BRANCH
-            Person("${it.name} (나)", g, it.patternOffset, isMe = true, uid = it.uid)
         }
-        // 우선순위: 나 → 로그인 근무자(실데이터) → 수동등록 동료 → 내장 명단. 이름으로 중복 제거
+        val me = user?.let {
+            Person("${it.name} (나)", myGroup!!, it.patternOffset, isMe = true, uid = it.uid)
+        }
+        // 우선순위: 나 → 로그인 근무자(실데이터) → 수동등록 동료 → 내장 명단.
+        // 중복 제거는 **이름+소속** — 이름만 보면 동명이인(기관사/차장 김지환)이 서로를 지운다.
         val taken = mutableSetOf<String>()
-        user?.let { taken += it.name }
-        val live = liveUsers.filter { it.name !in taken && it.uid != user?.uid }
-            .map { taken += it.name; Person(it.name, it.group, it.patternOffset, isMe = false, uid = it.uid) }
-        val manual = mates.filter { it.name !in taken }
-            .map { taken += it.name; Person(it.name, it.group, it.patternOffset, isMe = false) }
+        user?.let { taken += mateKey(it.name, myGroup!!) }
+        val live = liveUsers.filter { mateKey(it.name, it.group) !in taken && it.uid != user?.uid }
+            .map {
+                taken += mateKey(it.name, it.group)
+                Person(it.name, it.group, it.patternOffset, isMe = false, uid = it.uid)
+            }
+        val manual = mates.filter { mateKey(it.name, it.group) !in taken }
+            .map {
+                taken += mateKey(it.name, it.group)
+                Person(it.name, it.group, it.patternOffset, isMe = false)
+            }
         val bundled = CrewGroup.entries.flatMap { g ->
             BundledRoster.forGroup(g)
-                .filterNot { it.first in taken }
+                .filterNot { mateKey(it.first, g) in taken }
                 .map { (name, off) -> Person(name, g, off, isMe = false) }
         }
         listOfNotNull(me) + live + manual + bundled
     }
 
-    val cellW = 38.dp
-    val nameW = 64.dp
+    // v1.6.16: 한 화면에 날짜를 더 많이 담고(접힘 9일 → 14일) 근무 글자는 오히려 키웠다.
+    // 칸이 좁아진 만큼 긴 코드("대11비")는 PersonRow의 자동 축소가 받는다.
+    val cellW = 26.dp
+    val nameW = 52.dp
     val hScroll = rememberScrollState()
     val density = LocalDensity.current
 
@@ -201,7 +220,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
             val nDays = month.lengthOfMonth()
             // 헤더: 날짜/요일
             Row {
-                Box(Modifier.width(nameW).padding(4.dp)) {
+                Box(Modifier.width(nameW).padding(horizontal = 4.dp, vertical = 2.dp)) {
                     Text("이름", fontSize = 9.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
@@ -216,7 +235,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                                     if (isToday) MaterialTheme.colorScheme.primaryContainer
                                     else MaterialTheme.colorScheme.surfaceVariant
                                 )
-                                .padding(vertical = 2.dp),
+                                .padding(vertical = 1.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
                             val c = when {
@@ -247,8 +266,8 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                     val members = people.filter {
                         it.group == g &&
                             (q.isEmpty() || it.name.contains(q)) &&
-                            (!favOnly || it.isMe || it.cleanName in favNames)
-                    }.sortedWith(compareBy({ !it.isMe }, { it.cleanName !in favNames }, { it.name }))
+                            (!favOnly || it.isMe || it.key in favKeys)
+                    }.sortedWith(compareBy({ !it.isMe }, { it.key !in favKeys }, { it.name }))
                     if ((q.isNotEmpty() || favOnly) && members.isEmpty()) return@forEach
                     item(key = "sec-${g.name}") {
                         Text(
@@ -262,7 +281,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                     items(members.size, key = { "${g.name}-$it-${members[it].name}" }) { i ->
                         val p = members[i]
                         PersonRow(p, month, cellW, nameW, hScroll, duty,
-                            isFav = p.cleanName in favNames,
+                            isFav = p.key in favKeys,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
                             onNameClick = { dialTarget = p })
                     }
@@ -274,7 +293,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     dialTarget?.let { person ->
         DialSheet(
             person,
-            fav = mates.find { it.name == person.cleanName }?.favGroup,
+            fav = mates.find { it.name == person.cleanName && it.group == person.group }?.favGroup,
             onSetFav = { viewModel.setFav(person.cleanName, person.group, person.offset, it) },
             onDismiss = { dialTarget = null },
         )
@@ -359,6 +378,35 @@ private fun DialSheet(
     }
 }
 
+/**
+ * 칸 폭에 맞을 때까지 글자를 줄이는 한 줄 텍스트.
+ * 달력 칩(`MainCalendarScreen`)과 같은 방식 — 말줄임이 뜨는 순간 hasVisualOverflow가 false로
+ * 떨어지므로 `isLineEllipsized`도 같이 본다.
+ */
+@Composable
+private fun AutoFitText(
+    text: String,
+    base: androidx.compose.ui.unit.TextUnit,
+    min: androidx.compose.ui.unit.TextUnit,
+    color: Color,
+    modifier: Modifier = Modifier,
+    align: TextAlign = TextAlign.Start,
+) {
+    var fit by remember(text, base) { mutableStateOf(base) }
+    Text(
+        text,
+        modifier = modifier,
+        fontSize = fit, lineHeight = fit * 1.1,
+        fontWeight = FontWeight.ExtraBold,
+        color = color,
+        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = align,
+        onTextLayout = {
+            val cut = it.hasVisualOverflow || (it.lineCount > 0 && it.isLineEllipsized(0))
+            if (cut && fit > min) fit *= 0.92f
+        },
+    )
+}
+
 @Composable
 private fun PersonRow(
     p: Person,
@@ -375,15 +423,15 @@ private fun PersonRow(
     val pattern = Bundled.patternFor(p.group)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.width(nameW).clickable { onNameClick() }.padding(horizontal = 4.dp),
+            Modifier.width(nameW).clickable { onNameClick() }.padding(horizontal = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            // 이름 칸을 64→52dp로 줄였으므로 말줄임 대신 자동 축소 — `강민성 (나)`가 더는 안 잘린다
+            AutoFitText(
                 p.name,
-                fontSize = 10.sp, fontWeight = FontWeight.Bold,
+                base = 10.5.sp, min = 6.5.sp,
                 color = if (p.isMe) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f),
             )
             if (isFav) Text("★", fontSize = 8.sp, color = duty.onStandby)
         }
@@ -400,13 +448,15 @@ private fun PersonRow(
                     DutyType.BRANCH -> duty.main to duty.onMain
                     DutyType.ETC -> Color.Transparent to MaterialTheme.colorScheme.onSurfaceVariant
                 }
-                Box(Modifier.width(cellW).padding(1.dp)) {
+                Box(Modifier.width(cellW).padding(horizontal = 1.dp, vertical = 0.5.dp)) {
                     Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(5.dp)) {
-                        Text(
+                        // 대부분 코드는 11sp로 커지고, 드문 4글자("대11비")만 들어갈 때까지 줄어든다
+                        AutoFitText(
                             code.display.ifBlank { "·" },
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold,
-                            textAlign = TextAlign.Center, maxLines = 1,
+                            base = 11.sp, min = 6.5.sp,
+                            color = fg,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                            align = TextAlign.Center,
                         )
                     }
                 }

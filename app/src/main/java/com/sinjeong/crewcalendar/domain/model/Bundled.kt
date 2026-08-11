@@ -129,15 +129,20 @@ object Bundled {
     val PUBLIC_HOLIDAYS: Map<LocalDate, String> = mapOf(
         d(1, 1) to "신정", d(2, 16) to "설연휴", d(2, 17) to "설날", d(2, 18) to "설연휴",
         d(3, 1) to "삼일절", d(3, 2) to "대체휴일", d(5, 5) to "어린이날",
-        d(5, 24) to "부처님오신날", d(5, 25) to "대체휴일", d(6, 6) to "현충일",
+        d(5, 24) to "부처님오신날", d(5, 25) to "대체휴일",
+        d(6, 3) to "지방선거", d(6, 6) to "현충일", d(7, 17) to "제헌절",
         d(8, 15) to "광복절", d(8, 17) to "대체휴일",
         d(9, 24) to "추석연휴", d(9, 25) to "추석", d(9, 26) to "추석연휴",
         d(10, 3) to "개천절", d(10, 5) to "대체휴일", d(10, 9) to "한글날",
         d(12, 25) to "성탄절",
     )
 
-    /** 기념일: 이름만 빨강, 근무는 평일 (제헌절 등) */
-    val MEMORIAL_DAYS: Map<LocalDate, String> = mapOf(d(7, 17) to "제헌절")
+    /**
+     * 기념일: 이름만 빨강, 근무는 평일.
+     * 2026년은 해당 없음 — 제헌절(7/17)·지방선거일(6/3)은 현업 확인 결과 실제로 휴일 다이아로
+     * 운행해 v1.6.16에서 PUBLIC_HOLIDAYS로 옮겼다. 표시 경로(memorialName)는 그대로 남겨 둔다.
+     */
+    val MEMORIAL_DAYS: Map<LocalDate, String> = emptyMap()
 
     /** 절기/복날 표시 */
     val SEASONAL_TERMS: Map<LocalDate, String> = mapOf(

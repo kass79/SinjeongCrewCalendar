@@ -10,6 +10,7 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -19,9 +20,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -51,9 +54,9 @@ import androidx.compose.ui.window.DialogProperties
 /**
  * 행로표 원본 뷰어 — assets/routes/{asset}.webp, 핀치 확대(1~6배)·드래그 이동.
  *
- * 세로 화면 + 가로형 이미지면 비트맵을 90도 돌려 표의 긴 변을 화면 긴 변에 맞춘다.
- * 행로표가 본선 ~2.13:1 / 지선 ~1.41:1 가로형이라 세로 화면에선 폭맞춤만으로는
- * 표가 납작하게 눌린다(접힘 기준 본선 약 2배 커짐). 펼침은 화면이 가로로 넓어 조건에서 빠진다.
+ * v1.6.9에서 넣은 세로화면 자동 90도 회전은 **v1.6.16에서 기본 꺼짐**으로 바꿨다
+ * (사용자: "세로로 하면 보기 불편해"). 기본은 원본 방향 + 화면 폭 맞춤이고,
+ * 제목줄 오른쪽 회전 버튼으로 필요할 때만 돌린다. 가로형 이미지일 때만 버튼이 뜬다.
  */
 @Composable
 fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
@@ -67,12 +70,12 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             var scale by remember { mutableFloatStateOf(1f) }
             var offset by remember { mutableStateOf(Offset.Zero) }
+            var rotated by remember(asset) { mutableStateOf(false) }
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val portrait = maxHeight > maxWidth
+                val landscapeImage = src != null && src.width > src.height
                 // 원본(src)은 remember(asset)가 계속 붙들고 있으므로 recycle 하지 않는다.
-                // 접힘↔펼침 전환 때 회전본만 다시 만들면 된다.
-                val bitmap = remember(src, portrait) {
-                    if (src != null && portrait && src.width > src.height) {
+                val bitmap = remember(src, rotated) {
+                    if (src != null && rotated && src.width > src.height) {
                         Bitmap.createBitmap(
                             src, 0, 0, src.width, src.height,
                             Matrix().apply { postRotate(90f) }, true,
@@ -112,8 +115,20 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
                     fontWeight = FontWeight.ExtraBold,
                     modifier = Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 18.dp),
                 )
-                IconButton(onClick = onDismiss, modifier = Modifier.align(Alignment.TopEnd).padding(6.dp)) {
-                    Icon(Icons.Default.Close, "닫기")
+                Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
+                    // 가로형 표만 돌릴 값어치가 있다 — 세로형(근무시각표 등)은 버튼을 숨긴다
+                    if (landscapeImage) IconButton(onClick = {
+                        rotated = !rotated
+                        scale = 1f; offset = Offset.Zero
+                    }) {
+                        Icon(
+                            Icons.Default.ScreenRotation,
+                            if (rotated) "원래 방향으로" else "90도 회전",
+                            tint = if (rotated) MaterialTheme.colorScheme.primary
+                            else LocalContentColor.current,
+                        )
+                    }
+                    IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "닫기") }
                 }
             }
         }

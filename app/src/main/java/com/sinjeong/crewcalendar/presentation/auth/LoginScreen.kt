@@ -22,7 +22,6 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -42,8 +41,6 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-enum class AuthMode { CREDENTIAL, SET_PIN, PIN }
-
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val userRepo: UserRepository,
@@ -51,62 +48,31 @@ class AuthViewModel @Inject constructor(
     val user: StateFlow<User?> = userRepo.observeMe()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    val savedName: String? = userRepo.savedName()
-
-    private val _mode = MutableStateFlow(
-        if (userRepo.hasPin() && savedName != null) AuthMode.PIN else AuthMode.CREDENTIAL
-    )
-    val mode: StateFlow<AuthMode> = _mode.asStateFlow()
-
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    private var pendingUser: User? = null
-
-    /** 1단계: 이름+사번을 명단과 대조 → 통과 시 PIN 설정 화면으로 */
+    /**
+     * 로그인 = 이름+사번 명단 대조 한 단계가 전부(v1.6.16에서 PIN 만들기 제거).
+     * 통과하면 바로 저장·잠금해제 → observeMe가 user를 방출해 달력으로 넘어간다.
+     */
     fun submitCredential(name: String, empNo: String) {
         val staff = BundledStaff.validate(name, empNo)
         if (staff == null) {
             _error.value = "명단에 없는 이름·사번입니다. 사번을 확인해주세요."
             return
         }
-        pendingUser = User(
-            uid = empNo.trim(),
-            name = name.trim(),
-            role = if (staff.isConductor) CrewRole.CONDUCTOR else CrewRole.DRIVER_BRANCH,
-            patternId = if (staff.isConductor) Bundled.MAIN_PATTERN.id else Bundled.BRANCH_PATTERN.id,
-            patternOffset = 0,
-        )
         _error.value = null
-        _mode.value = AuthMode.SET_PIN
-    }
-
-    /** 2단계: 4자리 PIN 설정 → 저장 + 잠금해제 (observeMe가 user 방출 → 화면 전환) */
-    fun setPin(pin: String, pinConfirm: String) {
-        if (pin.length != 4 || !pin.all { it.isDigit() }) {
-            _error.value = "4자리 숫자를 입력하세요."
-            return
+        viewModelScope.launch {
+            userRepo.register(
+                User(
+                    uid = empNo.trim(),
+                    name = name.trim(),
+                    role = if (staff.isConductor) CrewRole.CONDUCTOR else CrewRole.DRIVER_BRANCH,
+                    patternId = if (staff.isConductor) Bundled.MAIN_PATTERN.id else Bundled.BRANCH_PATTERN.id,
+                    patternOffset = 0,
+                )
+            )
         }
-        if (pin != pinConfirm) {
-            _error.value = "비밀번호가 일치하지 않습니다."
-            return
-        }
-        val u = pendingUser ?: return
-        _error.value = null
-        viewModelScope.launch { userRepo.registerWithPin(u, pin) }
-    }
-
-    /** 재실행 시: PIN 검증 후 잠금해제 */
-    fun unlock(pin: String) {
-        if (userRepo.unlockWithPin(pin)) _error.value = null
-        else _error.value = "비밀번호가 일치하지 않습니다."
-    }
-
-    /** 다른 사람으로 로그인 → 신원·PIN 삭제 후 이름+사번부터 다시 */
-    fun useAnotherAccount() {
-        viewModelScope.launch { userRepo.signOut() }
-        _mode.value = AuthMode.CREDENTIAL
-        _error.value = null
     }
 
     fun clearError() { _error.value = null }
@@ -114,7 +80,6 @@ class AuthViewModel @Inject constructor(
 
 @Composable
 fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
-    val mode by viewModel.mode.collectAsState()
     val error by viewModel.error.collectAsState()
 
     // 키보드가 떴거나 세로가 짧은 화면(폴드 펼침·가로)에선 히어로·여백을 걷어내 입력칸 자리 확보
@@ -149,15 +114,9 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
                 color = Color(0xFF1D3FA8),
             )
 
-            when (mode) {
-                AuthMode.CREDENTIAL -> CredentialCard(error, viewModel::submitCredential)
-                AuthMode.SET_PIN -> SetPinCard(error, viewModel::setPin)
-                AuthMode.PIN -> PinCard(
-                    viewModel.savedName, error, viewModel::unlock, viewModel::useAnotherAccount,
-                )
-            }
+            CredentialCard(error, viewModel::submitCredential)
 
-            // 저작권은 세 화면(CREDENTIAL·SET_PIN·PIN) 모두에서 항상 표시한다.
+            // 저작권은 항상 표시한다.
             // compactTop(키보드·짧은 화면)에서는 지우지 않고 여백·자간만 줄여 자리만 아낀다.
             Spacer(Modifier.height(if (compactTop) 2.dp else 10.dp))
             Text(
@@ -224,9 +183,6 @@ private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) 
     ) { Text(label, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold) }
 }
 
-/** 4자리 숫자만 허용 */
-private fun pinFilter(s: String) = s.filter { it.isDigit() }.take(4)
-
 @Composable
 private fun ColumnScope.CredentialCard(
     error: String?,
@@ -236,7 +192,7 @@ private fun ColumnScope.CredentialCard(
     var empNo by remember { mutableStateOf("") }
     val valid = name.trim().length >= 2 && empNo.trim().length >= 4
 
-    HintText("이름과 사번으로 처음 로그인해요.")
+    HintText("이름과 사번만 넣으면 바로 시작해요.")
     OutlinedTextField(
         value = name, onValueChange = { name = it },
         label = { Text("이름") }, singleLine = true,
@@ -251,50 +207,5 @@ private fun ColumnScope.CredentialCard(
         modifier = Modifier.fillMaxWidth(),
     )
     ErrorText(error)
-    PrimaryButton("확인", valid) { onSubmit(name, empNo) }
-}
-
-@Composable
-private fun ColumnScope.SetPinCard(
-    error: String?,
-    onSet: (String, String) -> Unit,
-) {
-    var pin by remember { mutableStateOf("") }
-    var confirm by remember { mutableStateOf("") }
-
-    HintText("4자리 비밀번호를 만들어 주세요.\n다음부터 이 번호로 로그인해요.")
-    PinField("비밀번호", pin) { pin = it }
-    PinField("비밀번호 확인", confirm) { confirm = it }
-    ErrorText(error)
-    PrimaryButton("설정", pin.length == 4 && confirm.length == 4) { onSet(pin, confirm) }
-}
-
-@Composable
-private fun ColumnScope.PinCard(
-    savedName: String?,
-    error: String?,
-    onUnlock: (String) -> Unit,
-    onUseAnother: () -> Unit,
-) {
-    var pin by remember { mutableStateOf("") }
-
-    HintText("${savedName ?: ""}님, 비밀번호를 입력하세요.")
-    PinField("비밀번호", pin) { pin = it }
-    ErrorText(error)
-    PrimaryButton("로그인", pin.length == 4) { onUnlock(pin) }
-    TextButton(onClick = onUseAnother) {
-        Text("다른 사람으로 로그인", color = Color(0xFF1D3FA8))
-    }
-}
-
-@Composable
-private fun PinField(label: String, value: String, onChange: (String) -> Unit) {
-    OutlinedTextField(
-        value = value, onValueChange = { onChange(pinFilter(it)) },
-        label = { Text(label) }, singleLine = true,
-        visualTransformation = PasswordVisualTransformation(),
-        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.NumberPassword),
-        colors = loginFieldColors(), shape = RoundedCornerShape(14.dp),
-        modifier = Modifier.fillMaxWidth(),
-    )
+    PrimaryButton("시작하기", valid) { onSubmit(name, empNo) }
 }
