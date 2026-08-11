@@ -1,17 +1,97 @@
 rules_version = '2';
-// 신정승무 캘린더 — Firestore 보안 규칙
-// 정책: 앱에서 로그인(익명 인증)한 사용자만 읽기/쓰기.
-//  - users: 근무선택 공유 명단 (이름·소속·순환위치만, 사번은 문서 ID로만 존재)
-//  - rosterOverrides: 근무변경 공유 (전체 공개 — 사용자 확정)
-//  - 메모는 서버에 저장하지 않음 (앱이 폰에만 보관)
+
+// 신정승무 캘린더 — Firestore 보안 규칙  (이 파일이 진짜. firebase.json 이 여기를 가리킨다)
+//
+// 전제: 앱 인증은 **익명 로그인**이고 문서 ID 는 **사번**이다.
+//   → 서버는 "지금 쓰는 사람이 몇 번 사번인지" 알 방법이 없다.
+//   → 그래서 "본인 문서만 쓰기" 같은 규칙은 원리적으로 불가능하다(익명 uid 는 매번 랜덤).
+//
+// 목표는 완벽한 접근제어가 아니라 **실수·장난에 의한 파괴 방지**다.
+//   막는 것: 스키마 밖 쓰레기 데이터 / 남의 행 이름 바꿔치기(주인 교체) / 일반 사용자 문서 삭제 /
+//            문서ID와 내용 불일치 / 앱이 안 쓰는 컬렉션 전부
+//   못 막는 것: 명단 전체 읽기(동료근무 화면이 필요로 함), 남의 근무위치 덮어쓰기,
+//               남의 근무변경 삭제, 가짜 사번 문서 생성.
+//   → 진짜 해결은 사번 기반 계정(커스텀 토큰). 앱 구조 변경이 필요해 이번 범위 밖.
+//
+// 앱이 쓰는 컬렉션은 users / rosterOverrides **둘 뿐**이다(FirestoreRepositories.kt 전수 확인).
+// 메모는 서버에 안 올린다(폰에만 저장).
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{uid} {
-      allow read, write: if request.auth != null;
+
+    function signedIn() { return request.auth != null; }
+
+    // ── users/{사번} — 공용 명단 (동료근무 화면의 원본) ──────────────────
+    //  쓰기 주체 2곳:
+    //   1) FirestoreUserRepository.publish()      : name/role/patternId/patternOffset/updatedAt (5키)
+    //   2) FirestoreRosterRepository.adminUpsert(): 위 5키 + addedBy:"admin" (6키)
+    //  둘 다 set() = 통째 덮어쓰기라 create/update 양쪽에 같은 스키마를 건다.
+    match /users/{empNo} {
+
+      function shape(d) {
+        return d.keys().hasAll(['name', 'role', 'patternId', 'patternOffset', 'updatedAt'])
+            && d.keys().hasOnly(['name', 'role', 'patternId', 'patternOffset', 'updatedAt', 'addedBy'])
+            && d.name is string && d.name.size() > 0 && d.name.size() <= 20
+            && d.role is string && d.role.size() > 0 && d.role.size() <= 40
+            && d.patternId is string && d.patternId.size() > 0 && d.patternId.size() <= 40
+            && d.patternOffset is int && d.patternOffset >= 0 && d.patternOffset <= 200
+            && d.updatedAt is timestamp
+            // addedBy 는 있으면 반드시 "admin" (관리자 대리등록 표식)
+            && d.get('addedBy', 'admin') == 'admin';
+      }
+
+      // 동료근무 화면(observeUsers)이 컬렉션 전체를 구독한다.
+      // 익명 인증으로는 "우리 사업소 직원"을 구분할 수 없어 로그인만 확인하고 열어 둔다.
+      // → 앱을 깐 사람은 누구나 전 직원 명단을 볼 수 있다(알려진 한계, 위 주석 참고).
+      allow read: if signedIn();
+
+      allow create: if signedIn() && shape(request.resource.data);
+
+      // 이름 불변: 남의 사번 문서를 통째로 덮어써 "주인"을 바꿔치기하는 것을 막는다.
+      // 정상 흐름은 안 깨진다 — 로그인·관리자등록 모두 BundledStaff.validate 로
+      // 사번 하나당 이름이 한 개로 고정되므로 재로그인/재등록해도 같은 문자열이 온다.
+      // (관리자가 올린 행에 본인이 나중에 로그인하면 addedBy 만 빠진다 = 본인 소유 승격, 허용)
+      allow update: if signedIn()
+                    && shape(request.resource.data)
+                    && request.resource.data.name == resource.data.name;
+
+      // 삭제는 관리자가 대리등록한 행만. 실제 사용자가 직접 만든 행은 앱에서 못 지운다.
+      // 앱도 정확히 이 범위만 지운다 — AdminViewModel.members 가 addedBy != null 만 목록에 올린다.
+      // (Firebase 콘솔에서는 규칙과 무관하게 지울 수 있다. Tester/test 정리는 콘솔에서.)
+      // ponytail: publish() 안의 visibleToOthers=false → delete 경로는 현재 UI에 토글이 없어
+      //           도달 불가(dead). 나중에 "동료화면 숨기기"를 살리면 이 규칙을 풀어야 한다.
+      allow delete: if signedIn() && resource.data.get('addedBy', '') == 'admin';
     }
-    match /rosterOverrides/{id} {
-      allow read, write: if request.auth != null;
+
+    // ── rosterOverrides/{사번_yyyy-MM-dd} — 근무변경 공유 ────────────────
+    //  쓰기: FirestoreScheduleRepository.saveOverride() = uid/date/dutyRaw/originalDutyRaw (4키)
+    //  삭제: 패턴 복귀(dutyRaw 빈값) + deleteOverride()
+    //  읽기: observeMonthOverrides() = date 범위 쿼리
+    match /rosterOverrides/{docId} {
+
+      allow read: if signedIn();
+
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'date', 'dutyRaw', 'originalDutyRaw'])
+        && request.resource.data.keys().hasAll(['uid', 'date', 'dutyRaw', 'originalDutyRaw'])
+        && request.resource.data.uid is string
+        && request.resource.data.uid.size() > 0 && request.resource.data.uid.size() <= 20
+        && request.resource.data.date is string
+        && request.resource.data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && request.resource.data.dutyRaw is string
+        && request.resource.data.dutyRaw.size() > 0 && request.resource.data.dutyRaw.size() <= 16
+        && request.resource.data.originalDutyRaw is string
+        && request.resource.data.originalDutyRaw.size() <= 16
+        // 문서 ID 와 내용이 반드시 일치 — 남의 ID 자리에 내 uid 를 심은 유령 문서 차단
+        && docId == request.resource.data.uid + '_' + request.resource.data.date;
+
+      // 삭제는 열어 둘 수밖에 없다: "변경없음(원래 근무)"으로 되돌리기가 곧 삭제라
+      // 앱의 정상 동작이고, 익명 인증으로는 주인을 판별할 수 없다.
+      // 피해는 제한적 — 원본은 각자 폰(로컬)에 남아 있고 다음 수정 때 다시 올라간다.
+      allow delete: if signedIn();
     }
+
+    // 앱이 안 쓰는 나머지 전부 차단 (schedules/patterns/dias/holidays 등은 미사용)
     match /{document=**} {
       allow read, write: if false;
     }

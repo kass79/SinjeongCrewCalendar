@@ -23,9 +23,10 @@
 SinjeongCrewCalendar/
 ├── settings.gradle.kts / build.gradle.kts / gradle.properties
 ├── gradle/libs.versions.toml            # 버전 카탈로그
+├── firebase.json                        # hosting + firestore.rules 경로
+├── firestore.rules                      # ★ 배포되는 보안 규칙 (여기 하나뿐)
 ├── firestore/
-│   ├── schema.json                      # 컬렉션 구조 문서
-│   └── firestore.rules                  # 보안 규칙
+│   └── schema.json                      # 초기 설계 문서 (현재 앱은 users·rosterOverrides만 사용)
 └── app/src/main/
     ├── AndroidManifest.xml
     ├── res/                             # 테마, 위젯 정보, 아이콘
@@ -59,10 +60,11 @@ SinjeongCrewCalendar/
 1. **Firebase 프로젝트 생성** → Android 앱 등록 (`com.sinjeong.crewcalendar`)
    - `google-services.json`을 `app/` 폴더에 복사
    - Authentication: Google 로그인 활성화
-   - Firestore 생성 후 `firestore/firestore.rules` 배포:
+   - Firestore 생성 후 루트 `firestore.rules` 배포(`firebase.json`이 이 파일을 가리킨다):
      ```bash
      firebase deploy --only firestore:rules
      ```
+     비개발자용 콘솔 절차·되돌리기는 `Firestore규칙_적용안내.md` 참고.
 2. **Google Calendar API** — Google Cloud Console에서 Calendar API 활성화, OAuth 동의 화면 구성
 3. **빌드**
    ```bash
