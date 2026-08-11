@@ -187,6 +187,44 @@ CLAUDE.md에서 분리한 이력·이슈 목록. 레이아웃을 손대거나 �
   함). `RouteImageDialog`에 `rotated` 상태 + 제목줄 오른쪽 `ScreenRotation` 토글. 가로형 이미지일 때만
   버튼이 뜨고, 토글하면 확대·이동을 리셋한다. 핀치(1~6배)는 그대로.
 
+## v1.6.17 — 동료 탭을 날짜 매트릭스로 · 동료근무 가독성 회복 · 헤더 재조정
+
+**v1.6.16에서 요구사항을 잘못 짚었다.** 사용자가 말한 "동료로 즐겨찾기 하면 칸이 너무 크다"는
+하단 네비 **동료 탭(MatesScreen)** 얘기였는데 상단 헤더 **동료근무(RosterScreen)** 로 읽고
+셀을 26dp까지 조여버렸다. 그 결과 동료근무가 "작아서 못 읽겠다"가 됐다. 이번 판에서 둘 다 정정.
+
+- **매트릭스를 공용 컴포저블로 추출** → `presentation/roster/DutyMatrix.kt` (신규).
+  두 화면이 같은 코드를 쓰고 **크기 한 벌(`MatrixMetrics`)만 다르게** 넘긴다. 중복 구현하면
+  한쪽만 고치는 사고가 난다. 들어 있는 것: `MatrixPerson`·`mateKey`·`meAsPerson`·`MatrixMetrics`
+  ·`rememberMatrixScroll`·`dutyCellColors`·`MatrixDateHeader`·`MatrixRow`·`AutoFitText`·`PersonSheet`.
+  `RosterScreen`은 화면 조립(필터·섹션·명단 합성)만 남아 466 → 216줄.
+  `dutyCellColors`가 `MatesScreen`에만 있던 `DutyType.BRANCH -> duty.branch`(하늘색)를 흡수하며
+  달력·`MonthImage`와 같은 `duty.main`(초록)으로 통일됐다 — **지선 근무 칩 색이 바뀐 건 의도**다.
+- **동료근무 = `MatrixMetrics.Dense`**: `cellW 26 → 32dp`, `nameW 52 → 62dp`, 날짜 `9 → 10sp`,
+  이름 `10.5 → 11sp`, 칸 세로여백 `3 → 4dp`, 행 간격 `0.5 → 1dp`. AutoFit(11sp 기준)은 유지.
+  실측(1080x2400/420, 411dp): 보이는 날짜 **14일 → 11일**, 한 화면 인원 16 → 14명.
+  360dp(720x1980/320)에선 9.5일 / 17명, `대13`·`휴25`·`대12`·`휴27` 전부 말줄임 없음.
+  **판단 기준을 "며칠 보이나"가 아니라 "코드가 편히 읽히나"로 잡았다** — 26dp에서도 글자는
+  11sp였지만 행 높이가 ~17dp라 코드가 서로 붙어 보이는 게 진짜 원인이었다.
+- **동료 탭 = 카드 목록 → 날짜 × 사람 매트릭스**(`MatrixMetrics.Roomy`: cellW 44dp, nameW 80dp,
+  코드 15sp, 날짜 12.5sp). 대상은 **저장한 동료 + 본인**뿐이라 인원이 적고, 그래서 칸을 크게
+  잡을 수 있다 — 이게 동료근무(전체 명단)와의 차이점이자 이 화면의 존재 이유.
+  실측 411dp에서 7.5일 / 360dp에서 6.5일 / 펼침(2208x1840)에서 **17일**.
+  `MateCard`(이니셜 원·오늘 칩·7일 띠)는 통째로 삭제.
+- 동료 탭 기존 기능 이관: ★그룹 필터칩·이름 검색·`+` FAB는 그대로, **★그룹 변경·삭제는
+  카드 메뉴 → 이름 탭 시트**(`PersonSheet`)로 옮겼다. 시트를 공유한 덕에 동료 탭에도
+  전화·문자 버튼이 딸려왔다(`onRemove != null`일 때만 "동료 삭제"가 뜬다).
+  월 이동 화살표를 제목줄에 추가(동료근무와 같은 방식), 동료 0명 빈 상태 안내 유지.
+- `MatesViewModel`에 `UserRepository`·`RosterRepository`를 추가했다(본인 행 + 내 근무변경 반영).
+  `setFavGroup(mate,...)` → `setFav(name, group, offset, fav)`로 바꿔 `RosterViewModel`과 같은
+  규칙(Mate가 없으면 그 시점에 생성)을 쓴다 — 본인 행에도 ★을 달 수 있다.
+- **상단 헤더 재조정**(`MainCalendarScreen.kt`). 휴무 칩을 `Spacer(weight(1f))` **앞**으로 옮겨
+  "8월" 바로 옆에 붙이고 한 단계 축소(11 → 9.5sp, padding 9/3 → 7/2dp).
+  `근무선택`·`동료근무` 10.5 → 9.5sp, contentPadding 7 → 6dp(**높이 28dp는 유지** — 터치영역 하한).
+  아이콘 3종은 반대로 확대: IconButton 32 → **36dp**, 벡터 18 → **21dp**, 안전앱 이미지 22 → **26dp**.
+  360dp 실측 잔여 폭 ≈ 44dp라 잘림·겹침 없음. 44dp 헤더 높이(세로여백 2dp → 40dp 가용)에
+  36dp 버튼이 들어간다.
+
 ## 내장 명단 (BundledStaff.kt)
 
 - **명단 기준일: 사번표 2026-08-07 / 비상연락망 2026-06-16**(v1.6.13에서 갱신).

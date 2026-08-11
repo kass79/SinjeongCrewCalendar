@@ -126,32 +126,34 @@ fun MainCalendarScreen(
                         maxLines = 1,
                         softWrap = false,
                     )
-                    Spacer(Modifier.weight(1f))
+                    // 휴무 칩은 "8월" 바로 옆 — 월과 같이 읽는 정보라 오른쪽 버튼 무리에서 떼어냈다(v1.6.17)
+                    Spacer(Modifier.width(6.dp))
                     RestCountChip(state.restDayCount)
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.weight(1f))
                     FilledTonalButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
-                        contentPadding = PaddingValues(horizontal = 7.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp),
                         modifier = Modifier.height(28.dp),
-                    ) { Text("근무선택", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold) }
+                    ) { Text("근무선택", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
                     Spacer(Modifier.width(4.dp))
                     FilledTonalButton(
                         onClick = onOpenRoster,
-                        contentPadding = PaddingValues(horizontal = 7.dp),
+                        contentPadding = PaddingValues(horizontal = 6.dp),
                         modifier = Modifier.height(28.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(
                             containerColor = LocalDutyColors.current.branch,
                             contentColor = LocalDutyColors.current.onBranch,
                         ),
-                    ) { Text("동료근무", fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold) }
+                    ) { Text("동료근무", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
+                    // 아이콘 3종은 반대로 한 단계 키웠다(32→36dp, 아이콘 18→21dp) — 44dp 헤더에 아직 여유가 있다
                     IconButton(
                         onClick = { viewModel.toggleTheme(isDark) },
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                     ) {
                         Icon(
                             if (isDark) Icons.Default.LightMode else Icons.Default.DarkMode,
                             "다크/라이트 전환",
-                            modifier = Modifier.size(18.dp),
+                            modifier = Modifier.size(21.dp),
                         )
                     }
                     IconButton(
@@ -163,20 +165,20 @@ fun MainCalendarScreen(
                                 com.sinjeong.crewcalendar.util.shareMonthImage(context, uri)
                             }
                         },
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                     ) {
-                        Icon(Icons.Default.Share, "근무표 공유", modifier = Modifier.size(18.dp))
+                        Icon(Icons.Default.Share, "근무표 공유", modifier = Modifier.size(21.dp))
                     }
                     // "오늘로" 버튼 제거(v1.6.11 사용자 요청). ViewModel.goToday는 남겨둠 — 되돌리기 쉽게
                     IconButton(
                         onClick = { openSafetyApp(context) },
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                     ) {
                         // 벡터 아이콘 → 안전앱 실제 런처 아이콘(mascot). 원형 클립으로 런처처럼 보이게
                         Image(
                             painterResource(R.drawable.ic_safety_app),
                             "슬기로운 승무생활",
-                            modifier = Modifier.size(22.dp).clip(CircleShape),
+                            modifier = Modifier.size(26.dp).clip(CircleShape),
                         )
                     }
                 }
@@ -307,8 +309,8 @@ private fun RestCountChip(count: Int) {
     ) {
         Text(
             "휴 ${count}개",
-            modifier = Modifier.padding(horizontal = 9.dp, vertical = 3.dp),
-            fontSize = 11.sp, fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 7.dp, vertical = 2.dp),
+            fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
             maxLines = 1, softWrap = false,
         )
     }

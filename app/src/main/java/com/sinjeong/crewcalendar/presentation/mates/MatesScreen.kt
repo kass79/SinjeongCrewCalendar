@@ -1,21 +1,21 @@
 package com.sinjeong.crewcalendar.presentation.mates
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -26,23 +26,43 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.domain.model.*
 import com.sinjeong.crewcalendar.domain.repository.MateRepository
-import com.sinjeong.crewcalendar.presentation.theme.DutyColors
+import com.sinjeong.crewcalendar.domain.repository.RosterRepository
+import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.roster.*
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import javax.inject.Inject
 
 @HiltViewModel
 class MatesViewModel @Inject constructor(
     private val mateRepo: MateRepository,
+    userRepo: UserRepository,
+    rosterRepo: RosterRepository,
 ) : ViewModel() {
     val mates: StateFlow<List<Mate>> = mateRepo.observeMates()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    val user: StateFlow<User?> = userRepo.observeMe()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    private val monthFlow = MutableStateFlow(YearMonth.now())
+
+    /** 내 근무변경 실시간 반영 (Firebase 미연동이면 빈 맵) */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val monthOverrides: StateFlow<Map<String, Map<LocalDate, String>>> =
+        monthFlow.flatMapLatest { rosterRepo.observeMonthOverrides(it) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    fun setMonth(m: YearMonth) { monthFlow.value = m }
 
     /** 등록: 오늘 근무 위치(patternIndex)로 offset 계산 — 근무선택과 같은 원리 */
     fun addMate(name: String, group: CrewGroup, todayPatternIndex: Int) {
@@ -52,8 +72,12 @@ class MatesViewModel @Inject constructor(
         viewModelScope.launch { mateRepo.upsert(Mate(name.trim(), group, offset)) }
     }
 
-    fun setFavGroup(mate: Mate, fav: FavGroup?) {
-        viewModelScope.launch { mateRepo.upsert(mate.copy(favGroup = fav)) }
+    /** 동료근무 화면과 같은 규칙 — Mate가 없으면(=본인) 그 시점에 만든다 */
+    fun setFav(name: String, group: CrewGroup, offset: Int, fav: FavGroup?) {
+        val existing = mates.value.find { it.name == name && it.group == group }
+        viewModelScope.launch {
+            mateRepo.upsert(existing?.copy(favGroup = fav) ?: Mate(name, group, offset, fav))
+        }
     }
 
     fun remove(mate: Mate) {
@@ -61,16 +85,52 @@ class MatesViewModel @Inject constructor(
     }
 }
 
+/**
+ * 동료 탭 — 저장한 동료 + 본인을 **날짜별로 나란히** 비교하는 매트릭스.
+ * 동료근무(RosterScreen)와 같은 컴포저블(`DutyMatrix.kt`)을 쓰되, 인원이 적으므로
+ * `MatrixMetrics.Roomy`로 칸을 넉넉하게 잡는다 — 그게 이 화면의 존재 이유다.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     val mates by viewModel.mates.collectAsStateWithLifecycle()
+    val user by viewModel.user.collectAsStateWithLifecycle()
+    val monthOverrides by viewModel.monthOverrides.collectAsStateWithLifecycle()
+    var month by remember { mutableStateOf(YearMonth.now()) }
+    LaunchedEffect(month) { viewModel.setMonth(month) }
     var query by remember { mutableStateOf("") }
     var filter by remember { mutableStateOf<FavGroup?>(null) }
     var showAdd by remember { mutableStateOf(false) }
+    var sheetTarget by remember { mutableStateOf<MatrixPerson?>(null) }
+
+    val duty = LocalDutyColors.current
+    val m = MatrixMetrics.Roomy
+    val hScroll = rememberMatrixScroll(month, m.cellW)
+
+    val q = query.trim()
+    val me = meAsPerson(user)?.takeIf { q.isEmpty() || it.name.contains(q) }
+    // 본인은 ★필터에서 제외 — 동료근무 화면과 같은 규칙(내 근무가 기준선이라 항상 보여야 한다)
+    val rows = listOfNotNull(me) + mates
+        .filter { q.isEmpty() || it.name.contains(q) }
+        .filter { filter == null || it.favGroup == filter }
+        .filter { mateKey(it.name, it.group) != me?.key }
+        .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
+        .map { MatrixPerson(it.name, it.group, it.patternOffset) }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text("동료 근무", fontWeight = FontWeight.ExtraBold) }) },
+        topBar = {
+            TopAppBar(title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("동료 ${month.year}.${month.monthValue}", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                    IconButton(onClick = { month = month.minusMonths(1) }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "이전 달")
+                    }
+                    IconButton(onClick = { month = month.plusMonths(1) }) {
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 달")
+                    }
+                }
+            })
+        },
         floatingActionButton = {
             FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "동료 추가") }
         },
@@ -78,12 +138,18 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
         Column(Modifier.padding(padding).fillMaxSize()) {
             OutlinedTextField(
                 value = query, onValueChange = { query = it },
-                placeholder = { Text("이름으로 검색") }, singleLine = true,
+                placeholder = { Text("이름으로 검색", fontSize = 13.sp) }, singleLine = true,
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
+                trailingIcon = if (query.isNotEmpty()) {
+                    { TextButton(onClick = { query = "" }) { Text("지움", fontSize = 12.sp) } }
+                } else null,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
                 shape = RoundedCornerShape(999.dp),
             )
+            // ★그룹이 늘어나면 한 줄을 넘길 수 있다 → 가로 스크롤
             Row(
-                Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+                Modifier.horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 FilterChip(selected = filter == null, onClick = { filter = null },
@@ -95,36 +161,48 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 }
             }
 
-            val visible = mates
-                .filter { query.isBlank() || it.name.contains(query.trim()) }
-                .filter { filter == null || it.favGroup == filter }
-                .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
-
-            if (visible.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+            if (mates.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        if (mates.isEmpty()) "아직 등록된 동료가 없습니다.\n+ 버튼으로 추가하세요 — 이름·소속·오늘 근무만 알면 됩니다."
-                        else "조건에 맞는 동료가 없습니다",
+                        "아직 등록된 동료가 없습니다.\n+ 버튼으로 추가하세요 — 이름·소속·오늘 근무만 알면 됩니다.\n" +
+                            "추가하면 여기서 내 근무와 날짜별로 나란히 비교됩니다.",
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            } else if (rows.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text("조건에 맞는 동료가 없습니다", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             } else {
-                LazyColumn(
-                    Modifier.weight(1f).padding(horizontal = 12.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(bottom = 88.dp),
-                ) {
-                    items(visible.size, key = { "${visible[it].name}|${visible[it].group.name}" }) { i ->
-                        MateCard(
-                            mate = visible[i],
-                            onSetFav = { viewModel.setFavGroup(visible[i], it) },
-                            onRemove = { viewModel.remove(visible[i]) },
-                        )
+                MatrixDateHeader(month, m, hScroll, duty)
+                HorizontalDivider()
+                val favKeys = remember(mates) {
+                    mates.filter { it.favGroup != null }.map { mateKey(it.name, it.group) }.toSet()
+                }
+                LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+                    items(rows.size, key = { rows[it].key }) { i ->
+                        val p = rows[i]
+                        MatrixRow(p, month, m, hScroll, duty,
+                            isFav = p.key in favKeys,
+                            overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
+                            onNameClick = { sheetTarget = p })
                     }
                 }
             }
         }
+    }
+
+    sheetTarget?.let { person ->
+        val mate = mates.find { it.name == person.cleanName && it.group == person.group }
+        PersonSheet(
+            person,
+            fav = mate?.favGroup,
+            onSetFav = { viewModel.setFav(person.cleanName, person.group, person.offset, it) },
+            onDismiss = { sheetTarget = null },
+            // 본인 행은 지울 게 없다
+            onRemove = if (mate != null && !person.isMe) ({ viewModel.remove(mate) }) else null,
+        )
     }
 
     if (showAdd) {
@@ -132,94 +210,6 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             onAdd = { name, group, idx -> viewModel.addMate(name, group, idx); showAdd = false },
             onDismiss = { showAdd = false },
         )
-    }
-}
-
-private fun dutyColors(code: DutyCode, duty: DutyColors, fallback: Color): Pair<Color, Color> =
-    when (code.type) {
-        DutyType.MAIN_DAY, DutyType.OFFICE -> duty.main to duty.onMain
-        DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> duty.night to duty.onNight
-        DutyType.POST_NIGHT -> duty.off to duty.onOff
-        DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
-        DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
-        DutyType.BRANCH -> duty.branch to duty.onBranch
-        DutyType.ETC -> Color.Transparent to fallback
-    }
-
-@Composable
-private fun MateCard(mate: Mate, onSetFav: (FavGroup?) -> Unit, onRemove: () -> Unit) {
-    val duty = LocalDutyColors.current
-    var menu by remember { mutableStateOf(false) }
-    val today = LocalDate.now()
-    val todayDuty = mate.dutyOn(today)
-    val (bg, fg) = dutyColors(todayDuty, duty, MaterialTheme.colorScheme.onSurfaceVariant)
-
-    OutlinedCard {
-        Column(Modifier.padding(horizontal = 12.dp, vertical = 11.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                Surface(color = MaterialTheme.colorScheme.surfaceVariant, shape = CircleShape) {
-                    Box(Modifier.size(36.dp), contentAlignment = Alignment.Center) {
-                        Text(mate.name.take(1), fontWeight = FontWeight.ExtraBold)
-                    }
-                }
-                Column(Modifier.weight(1f)) {
-                    Text(mate.name, fontWeight = FontWeight.Bold)
-                    Text(
-                        mate.group.label + (mate.favGroup?.let { " · ★ ${it.label}" } ?: ""),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(8.dp)) {
-                    Text(
-                        todayDuty.display.ifBlank { "—" },
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        fontWeight = FontWeight.ExtraBold,
-                    )
-                }
-                Box {
-                    IconButton(onClick = { menu = true }) {
-                        Icon(
-                            if (mate.favGroup != null) Icons.Default.Star else Icons.Outlined.StarOutline,
-                            "즐겨찾기 그룹",
-                            tint = if (mate.favGroup != null) duty.onStandby else MaterialTheme.colorScheme.outline,
-                        )
-                    }
-                    DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        FavGroup.entries.forEach { g ->
-                            DropdownMenuItem(
-                                text = { Text("★ ${g.label}" + if (mate.favGroup == g) " ✓" else "") },
-                                onClick = { onSetFav(g); menu = false },
-                            )
-                        }
-                        if (mate.favGroup != null) DropdownMenuItem(
-                            text = { Text("즐겨찾기 해제") },
-                            onClick = { onSetFav(null); menu = false },
-                        )
-                        HorizontalDivider()
-                        DropdownMenuItem(
-                            text = { Text("동료 삭제", color = MaterialTheme.colorScheme.error) },
-                            onClick = { onRemove(); menu = false },
-                        )
-                    }
-                }
-            }
-            // 오늘부터 7일 미니 스트립
-            Row(Modifier.padding(top = 9.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                (0..6).forEach { d ->
-                    val code = mate.dutyOn(today.plusDays(d.toLong()))
-                    val (b, f) = dutyColors(code, duty, MaterialTheme.colorScheme.onSurfaceVariant)
-                    Surface(color = b, contentColor = f, shape = RoundedCornerShape(6.dp), modifier = Modifier.weight(1f)) {
-                        Text(
-                            code.display.ifBlank { "—" },
-                            modifier = Modifier.padding(vertical = 4.dp),
-                            fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center, maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -267,7 +257,7 @@ private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () 
             ) {
                 items(pattern.sequence.size) { i ->
                     val code = DutyCode.parse(pattern.sequence[i])
-                    val (bg, fg) = dutyColors(code, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     Surface(
                         onClick = { if (name.trim().length >= 2) onAdd(name, group, i) },
                         color = bg, contentColor = fg,

@@ -1,0 +1,338 @@
+package com.sinjeong.crewcalendar.presentation.roster
+
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.sinjeong.crewcalendar.domain.model.*
+import com.sinjeong.crewcalendar.presentation.theme.DutyColors
+import java.time.LocalDate
+import java.time.YearMonth
+
+/*
+ * 날짜 × 사람 근무 매트릭스 (공용).
+ *
+ * 두 화면이 같은 컴포저블을 쓰고 크기만 다르다 — 중복 구현하면 한쪽만 고치는 사고가 난다.
+ *   · 동료근무(RosterScreen) = 사업소 전체 명단     → MatrixMetrics.Dense
+ *   · 동료 탭(MatesScreen)   = 저장한 동료 + 본인   → MatrixMetrics.Roomy
+ */
+
+/** 동료 식별 키 — 이름만으로는 그룹 간 동명이인 3쌍(김지환·박두원·이용석)이 충돌한다 */
+fun mateKey(name: String, group: CrewGroup) = "$name|${group.name}"
+
+/** 매트릭스 한 행 = 사람 하나 */
+data class MatrixPerson(
+    val name: String,
+    val group: CrewGroup,
+    val offset: Int,
+    val isMe: Boolean = false,
+    /** 로그인 근무자(사번) — 근무변경 실시간 반영 대상 */
+    val uid: String? = null,
+)
+
+/** 즐겨찾기·전화번호는 " (나)" 꼬리표 없는 실제 이름으로 매칭한다 */
+val MatrixPerson.cleanName: String get() = name.removeSuffix(" (나)").trim()
+
+val MatrixPerson.key: String get() = mateKey(cleanName, group)
+
+/** 로그인 사용자를 매트릭스 행으로. 소속은 patternId + 차장 여부로 결정 */
+fun meAsPerson(user: User?): MatrixPerson? = user?.let { u ->
+    val group = Bundled.groupFor(u.patternId)?.let { grp ->
+        if (u.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else grp
+    } ?: CrewGroup.BRANCH
+    MatrixPerson("${u.name} (나)", group, u.patternOffset, isMe = true, uid = u.uid)
+}
+
+/**
+ * 칸·글자 크기 한 벌.
+ * 사람 수가 화면 밀도를 정한다 — 282명을 훑는 화면과 대여섯 명을 비교하는 화면은 달라야 한다.
+ */
+data class MatrixMetrics(
+    val cellW: Dp,
+    val nameW: Dp,
+    val codeSp: TextUnit,
+    val nameSp: TextUnit,
+    val daySp: TextUnit,
+    val dowSp: TextUnit,
+    val cellPadV: Dp,
+    val rowPadV: Dp,
+) {
+    companion object {
+        /** 동료근무 — 사업소 전체(282명). v1.6.16의 26dp는 "읽기 힘들다"는 피드백을 받았다 */
+        val Dense = MatrixMetrics(
+            cellW = 32.dp, nameW = 62.dp,
+            codeSp = 11.sp, nameSp = 11.sp, daySp = 10.sp, dowSp = 8.5.sp,
+            cellPadV = 4.dp, rowPadV = 1.dp,
+        )
+
+        /** 동료 탭 — 저장한 동료 + 본인. 인원이 적으니 칸을 넉넉히 잡아 날짜 비교가 편하게 */
+        val Roomy = MatrixMetrics(
+            cellW = 44.dp, nameW = 80.dp,
+            codeSp = 15.sp, nameSp = 13.5.sp, daySp = 12.5.sp, dowSp = 10.sp,
+            cellPadV = 9.dp, rowPadV = 2.5.dp,
+        )
+    }
+}
+
+/** 오늘 열 근처로 맞춰 두는 가로 스크롤 상태 — 헤더와 전 행이 하나를 공유해 같이 움직인다 */
+@Composable
+fun rememberMatrixScroll(month: YearMonth, cellW: Dp): ScrollState {
+    val scroll = rememberScrollState()
+    val density = LocalDensity.current
+    LaunchedEffect(month, cellW) {
+        if (month == YearMonth.now()) {
+            val px = with(density) { (cellW * (LocalDate.now().dayOfMonth - 3)).toPx() }
+            scroll.scrollTo(px.toInt().coerceAtLeast(0))
+        } else scroll.scrollTo(0)
+    }
+    return scroll
+}
+
+/** 근무 종별 색 — 달력 칩(`dutyChipColors`)·월 이미지와 같은 매핑 */
+fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Color, Color> =
+    when (type) {
+        DutyType.MAIN_DAY, DutyType.OFFICE -> duty.main to duty.onMain
+        DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> duty.night to duty.onNight
+        DutyType.POST_NIGHT -> duty.off to duty.onOff
+        DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
+        DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
+        DutyType.BRANCH -> duty.main to duty.onMain
+        DutyType.ETC -> Color.Transparent to fallback
+    }
+
+/** 헤더: 왼쪽 이름칸 + 가로 스크롤되는 날짜·요일 */
+@Composable
+fun MatrixDateHeader(
+    month: YearMonth,
+    m: MatrixMetrics,
+    hScroll: ScrollState,
+    duty: DutyColors,
+) {
+    Row {
+        Box(Modifier.width(m.nameW).padding(horizontal = 4.dp, vertical = 2.dp)) {
+            Text(
+                "이름", fontSize = m.dowSp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Row(Modifier.horizontalScroll(hScroll)) {
+            (1..month.lengthOfMonth()).forEach { d ->
+                val date = month.atDay(d)
+                val isToday = date == LocalDate.now()
+                val hol = Bundled.PUBLIC_HOLIDAYS.containsKey(date)
+                Column(
+                    Modifier.width(m.cellW)
+                        .background(
+                            if (isToday) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .padding(vertical = 1.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    val c = when {
+                        isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                        hol || date.dayOfWeek.value == 7 -> duty.sunday
+                        date.dayOfWeek.value == 6 -> duty.saturday
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                    Text("$d", fontSize = m.daySp, fontWeight = FontWeight.Bold, color = c)
+                    Text(
+                        listOf("월", "화", "수", "목", "금", "토", "일")[date.dayOfWeek.value - 1],
+                        fontSize = m.dowSp, color = c,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 한 사람의 한 달 근무 행 */
+@Composable
+fun MatrixRow(
+    p: MatrixPerson,
+    month: YearMonth,
+    m: MatrixMetrics,
+    hScroll: ScrollState,
+    duty: DutyColors,
+    isFav: Boolean = false,
+    /** 근무변경 실시간 반영 (날짜 → 변경 근무, Firebase 연동 시) */
+    overrides: Map<LocalDate, String> = emptyMap(),
+    onNameClick: () -> Unit = {},
+) {
+    val pattern = Bundled.patternFor(p.group)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.width(m.nameW).clickable { onNameClick() }.padding(horizontal = 3.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 말줄임 대신 자동 축소 — `강민성 (나)`가 잘리지 않는다
+            AutoFitText(
+                p.name,
+                base = m.nameSp, min = m.nameSp * 0.62f,
+                color = if (p.isMe) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+            )
+            if (isFav) Text("★", fontSize = m.dowSp, color = duty.onStandby)
+        }
+        Row(Modifier.horizontalScroll(hScroll)) {
+            (1..month.lengthOfMonth()).forEach { d ->
+                val date = month.atDay(d)
+                val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
+                val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                Box(Modifier.width(m.cellW).padding(horizontal = 1.dp, vertical = m.rowPadV)) {
+                    Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(5.dp)) {
+                        // 드문 4글자("대11비")만 들어갈 때까지 줄어든다
+                        AutoFitText(
+                            code.display.ifBlank { "·" },
+                            base = m.codeSp, min = m.codeSp * 0.6f,
+                            color = fg,
+                            modifier = Modifier.fillMaxWidth().padding(vertical = m.cellPadV),
+                            align = TextAlign.Center,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 칸 폭에 맞을 때까지 글자를 줄이는 한 줄 텍스트.
+ * 달력 칩(`MainCalendarScreen`)과 같은 방식 — 말줄임이 뜨는 순간 hasVisualOverflow가 false로
+ * 떨어지므로 `isLineEllipsized`도 같이 본다.
+ */
+@Composable
+fun AutoFitText(
+    text: String,
+    base: TextUnit,
+    min: TextUnit,
+    color: Color,
+    modifier: Modifier = Modifier,
+    align: TextAlign = TextAlign.Start,
+) {
+    var fit by remember(text, base) { mutableStateOf(base) }
+    Text(
+        text,
+        modifier = modifier,
+        fontSize = fit, lineHeight = fit * 1.1,
+        fontWeight = FontWeight.ExtraBold,
+        color = color,
+        maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = align,
+        onTextLayout = {
+            val cut = it.hasVisualOverflow || (it.lineCount > 0 && it.isLineEllipsized(0))
+            if (cut && fit > min) fit *= 0.92f
+        },
+    )
+}
+
+/**
+ * 이름을 탭했을 때 뜨는 시트 — 전화·문자·★그룹, 그리고 동료 탭에서는 삭제까지.
+ * 두 화면이 공유한다(`onRemove`가 null이면 삭제 항목이 안 뜬다).
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun PersonSheet(
+    person: MatrixPerson,
+    fav: FavGroup?,
+    onSetFav: (FavGroup?) -> Unit,
+    onDismiss: () -> Unit,
+    onRemove: (() -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val duty = com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors.current
+    val cleanName = person.cleanName
+    val phone = BundledStaff.phoneFor(cleanName, person.group == CrewGroup.MAIN_CONDUCTOR)
+    var favMenu by remember { mutableStateOf(false) }
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+                Box {
+                    IconButton(onClick = { favMenu = true }) {
+                        Icon(
+                            if (fav != null) Icons.Default.Star else Icons.Outlined.StarOutline,
+                            "즐겨찾기 그룹",
+                            tint = if (fav != null) duty.onStandby else MaterialTheme.colorScheme.outline,
+                        )
+                    }
+                    DropdownMenu(expanded = favMenu, onDismissRequest = { favMenu = false }) {
+                        FavGroup.entries.forEach { g ->
+                            DropdownMenuItem(
+                                text = { Text("★ ${g.label}" + if (fav == g) " ✓" else "") },
+                                onClick = { onSetFav(g); favMenu = false },
+                            )
+                        }
+                        if (fav != null) DropdownMenuItem(
+                            text = { Text("즐겨찾기 해제") },
+                            onClick = { onSetFav(null); favMenu = false },
+                        )
+                    }
+                }
+            }
+            Text(
+                person.group.label + (fav?.let { " · ★ ${it.label}" } ?: ""),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (phone != null) {
+                Text(
+                    phone, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.combinedClickable(
+                        onClick = {},
+                        onLongClick = {
+                            clipboard.setText(AnnotatedString(phone))
+                            android.widget.Toast.makeText(context, "복사됨", android.widget.Toast.LENGTH_SHORT).show()
+                        },
+                    ),
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(onClick = {
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse("tel:" + phone))) }
+                        onDismiss()
+                    }, modifier = Modifier.weight(1f)) { Text("전화") }
+                    OutlinedButton(onClick = {
+                        runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:" + phone))) }
+                        onDismiss()
+                    }, modifier = Modifier.weight(1f)) { Text("문자") }
+                }
+                Text("판독본 번호예요. 틀리면 관리자에게 알려주세요.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("등록된 전화번호가 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (onRemove != null) {
+                TextButton(onClick = { onRemove(); onDismiss() }) {
+                    Text("동료 삭제", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        }
+    }
+}
