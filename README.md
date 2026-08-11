@@ -64,7 +64,8 @@ SinjeongCrewCalendar/
      ```bash
      firebase deploy --only firestore:rules
      ```
-     비개발자용 콘솔 절차·되돌리기는 `Firestore규칙_적용안내.md` 참고.
+     콘솔에서 붙여넣는 비개발자용 절차·되돌리기 안내는 저장소 밖 별도 문서로 전달됨
+     (`Firestore규칙_적용안내.md`). 규칙을 고치면 `firestore/rules.test.mjs`를 돌릴 것.
 2. **Google Calendar API** — Google Cloud Console에서 Calendar API 활성화, OAuth 동의 화면 구성
 3. **빌드**
    ```bash
