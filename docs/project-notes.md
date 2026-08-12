@@ -225,6 +225,30 @@ CLAUDE.md에서 분리한 이력·이슈 목록. 레이아웃을 손대거나 �
   360dp 실측 잔여 폭 ≈ 44dp라 잘림·겹침 없음. 44dp 헤더 높이(세로여백 2dp → 40dp 가용)에
   36dp 버튼이 들어간다.
 
+## v1.6.18 — 플레이 비공개 테스트 제출 준비 (화면·기능 변경 없음)
+
+- **안 쓰는 권한 3개 삭제**: `READ_CALENDAR`·`WRITE_CALENDAR`·`VIBRATE`. 코드 호출 0건.
+  `aapt2 dump badging`으로 최종 APK에서 빠진 것 확인.
+- **메모 클라우드 백업 차단**. `allowBackup="false"`로 죽이지 않고
+  `res/xml/data_extraction_rules.xml`(API 31+)·`backup_rules.xml`(API 26~30)을 새로 두고
+  **메모가 든 `local_schedules.xml`만 `<cloud-backup>`에서 제외**했다.
+  `<device-transfer>` 규칙은 일부러 안 적었다 — 안 적으면 기본값이 "전부 이전"이라
+  **폰을 바꿀 때 메모는 따라간다**. 구글 서버에만 안 올라간다.
+- **`firebase-analytics` 의존성 제거**. 코드 호출 0건인데 매니페스트 병합으로
+  `AD_ID`·`ACCESS_ADSERVICES_AD_ID`·`ACCESS_ADSERVICES_ATTRIBUTION`·`BIND_GET_INSTALL_REFERRER`가
+  딸려와 데이터 세이프티에 "광고 ID 수집" 신고 의무가 생겼다. 제거 후 그 4개가 실제로 사라진 것 확인.
+- **targetSdk는 35 유지**. 구글 요구치는 2026-08-31부터 API 36이고 그 전까지는 35로 신규 업로드가
+  가능하다(공식 문서 확인). 올리지 않은 이유: 이 PC에 API 36 시스템 이미지가 없어
+  Android 16 동작변경(edge-to-edge 강제·대화면 방향/크기 제약)을 **검증할 방법이 없다**.
+  폴더블 대응 앱이라 미검증 상태로 올리는 위험이 크다. **8/31 전에 업로드하면 통과**, 그 뒤 업데이트는
+  API 36 + Android 16 에뮬레이터 회귀가 선행돼야 한다.
+- R8은 계속 끔(`isMinifyEnabled=false`). 비공개 테스트에서 난독화로 깨질 위험 > 27MB 줄이는 이득.
+- 안내 문서·산출물은 **저장소 밖**: `C:\Users\admin\Downloads\플레이스토어_등록안내.md`,
+  `플레이스토어_스샷_v1.6.18\`(1080x2160으로 자른 5장 — 폰 캡처 1080x2400은 세로가 가로의
+  2.22배라 플레이가 "2배 초과"로 거부한다).
+- `hosting/privacy.html` 갱신(개인 실명 제거, 광고·분석 없음, 캘린더 미접근, 내장 명단 고지).
+  주소는 `https://sinjeong-calendar.web.app/privacy` — **배포는 사용자 몫**.
+
 ## 내장 명단 (BundledStaff.kt)
 
 - **명단 기준일: 사번표 2026-08-07 / 비상연락망 2026-06-16**(v1.6.13에서 갱신).
@@ -278,6 +302,12 @@ CLAUDE.md에서 분리한 이력·이슈 목록. 레이아웃을 손대거나 �
    진짜 해결은 사번 기반 커스텀 토큰 인증. **콘솔 배포는 사용자 몫**(안내 문서
    `Firestore규칙_적용안내.md`는 저장소 밖으로 전달). 규칙 수정 시 `firestore/rules.test.mjs` 실행.
    앱 코드는 손대지 않았으므로 APK 재배포 불필요.
+8. **구글 캘린더 동기화는 화면에 없다 — `GoogleCalendarSyncManager`는 죽은 코드**(v1.6.18 확인).
+   `@Inject constructor`만 있고 **호출부가 저장소 전체에 0건**이라 설정 어디에도 진입점이 없다.
+   그래서 캘린더 권한 삭제가 회귀를 못 일으킨다(원래 `CalendarContract`가 아니라 REST API 방식이라
+   권한도 필요 없었다). 딸린 미사용 의존성이 큼 — `google-api-client-android`·`google-api-calendar`·
+   `androidx.credentials`·`googleid`·`play-services-auth` 전부 호출 0건.
+   **지우면 APK가 크게 준다**(현재 릴리스 27MB). 되살리려면 설정 화면에 진입점부터 붙여야 한다.
 6. 접힘 상세시트에서 메모 키보드가 뜨면 `padding(bottom = imeBottom)` + 스크롤 바닥고정 때문에
    버튼 아래로 빈 공간이 크게 남음(v1.6.7 완전 펼침 이후 더 눈에 띔). 동작은 정상 — 고치려면
    `70f59c4` 우회를 다시 설계해야 해서 미룸
