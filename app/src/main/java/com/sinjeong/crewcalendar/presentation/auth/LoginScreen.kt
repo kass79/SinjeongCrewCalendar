@@ -94,7 +94,11 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
         contentAlignment = Alignment.TopCenter,
     ) {
         Column(
+            // 로그인은 Scaffold 밖이라 인셋을 아무도 안 준다 — 키보드가 뜨거나 짧은 화면이면
+            // 히어로가 빠지면서 제목이 상태바 시계 위로 올라붙었다. 배경 그라데이션은
+            // Box에 있어 그대로 전체를 덮고, 내용만 안전영역 안으로 들인다.
             Modifier.widthIn(max = 400.dp)
+                .safeDrawingPadding()
                 .imePadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 32.dp)

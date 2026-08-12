@@ -460,7 +460,11 @@ private fun CalendarGrid(
                 },
             verticalArrangement = Arrangement.spacedBy(3.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
-            userScrollEnabled = false,
+            // 평소엔 스크롤 끔 — 한 달이 한 화면에 다 보여야 하고, 세로 스크롤이 켜져 있으면
+            // 월 이동 스와이프가 흔들린다. 다만 칸 하한 60dp 때문에 세로가 짧은 화면
+            // (가로화면·낮은 창)에선 마지막 주가 잘려 23~31일에 아예 손이 안 닿았다.
+            // 넘칠 때만 켠다 — 안 넘치는 기존 화면들은 동작이 그대로다.
+            userScrollEnabled = cellHeight * rows + 3.dp * (rows - 1) > maxHeight,
         ) {
             items(cells.size, key = { it }) { i ->
                 val day = cells[i]
