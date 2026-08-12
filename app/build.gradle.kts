@@ -21,8 +21,8 @@ android {
         applicationId = "com.sinjeong.crewcalendar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 29
-        versionName = "1.6.17"
+        versionCode = 30
+        versionName = "1.6.18"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -100,7 +100,9 @@ dependencies {
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.messaging)
-    implementation(libs.firebase.analytics)
+    // firebase-analytics 제거(v1.6.18): 코드 호출 0건인데 매니페스트 병합으로
+    // AD_ID·ACCESS_ADSERVICES_* 광고 권한이 딸려와 "광고 ID 수집" 신고 의무가 생겼다.
+    // 광고 없는 사내앱이라 데이터 세이프티를 단순하게 유지하려고 뺀다. 필요하면 되살릴 것.
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 백업 규칙.
+     메모는 local_schedules.xml(SharedPreferences)에 들어 있고 "서버에 안 올린다"가 설계라
+     구글 클라우드 백업에서만 제외합니다. 기기 교체(device-transfer)는 규칙을 안 적으면
+     기본값 = 전체 이전이라 새 폰으로 옮길 땐 메모가 따라갑니다. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="local_schedules.xml" />
+    </cloud-backup>
+</data-extraction-rules>

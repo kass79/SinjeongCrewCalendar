@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 이하(minSdk 26~30)용 자동 백업 규칙. data_extraction_rules.xml과 같은 취지 —
+     메모가 든 local_schedules.xml만 구글 드라이브 백업에서 제외. -->
+<full-backup-content>
+    <exclude domain="sharedpref" path="local_schedules.xml" />
+</full-backup-content>
