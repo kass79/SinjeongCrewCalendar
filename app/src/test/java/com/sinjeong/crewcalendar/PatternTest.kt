@@ -97,6 +97,32 @@ class PatternTest {
         }
     }
 
+    /**
+     * v1.6.19: 26년 8월 발행 근무표 전수 대조로 확정된 교번 표본.
+     * 승무 3종 224명 × 31일 오차 0 — 이 6칸이 어긋나면 offset 입력이 다시 틀어진 것이다.
+     */
+    @Test fun august2026_verified_offsets() {
+        val main = Bundled.MAIN_PATTERN
+        assertEquals("19", main.dutyOn(LocalDate.of(2026, 8, 15), 51).raw)   // 정정된 본선 차장
+        assertEquals("14", main.dutyOn(LocalDate.of(2026, 8, 2), 51).raw)
+        assertEquals("휴29", main.dutyOn(LocalDate.of(2026, 8, 1), 43).raw)  // 추가 3명(기관사)
+        assertEquals("휴25", main.dutyOn(LocalDate.of(2026, 8, 1), 28).raw)
+        assertEquals("휴19", main.dutyOn(LocalDate.of(2026, 8, 1), 83).raw)
+        assertEquals("17", main.dutyOn(LocalDate.of(2026, 8, 1), 88).raw)    // 추가 1명(차장)
+        assertEquals("49", main.dutyOn(LocalDate.of(2026, 8, 1), 89).raw)    // 4조2교대→본선 이동
+    }
+
+    /** 같은 소속에 같은 offset이 둘이면 둘 중 하나가 틀린 것 — 8월 대조에서 실제로 잡힌 유형 */
+    @Test fun no_duplicate_offsets_within_crew_group() {
+        listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH).forEach { g ->
+            val list = BundledRoster.forGroup(g)
+            val len = Bundled.patternFor(g).length
+            assertEquals("$g offset 중복", list.size, list.map { it.second }.toSet().size)
+            assertEquals("$g 이름 중복", list.size, list.map { it.first }.toSet().size)
+            assertTrue("$g offset 범위 초과", list.all { it.second in 0 until len })
+        }
+    }
+
     @Test fun no_duplicate_employee_numbers() {
         val all = BundledStaff.DRIVERS + BundledStaff.CONDUCTORS + BundledStaff.OFFICE
         assertEquals(all.size, all.map { it.second }.toSet().size)   // 사번 중복 0

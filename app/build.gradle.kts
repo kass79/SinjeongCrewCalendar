@@ -21,8 +21,8 @@ android {
         applicationId = "com.sinjeong.crewcalendar"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "1.6.18"
+        versionCode = 31
+        versionName = "1.6.19"
         vectorDrawables { useSupportLibrary = true }
     }
 
