@@ -15,14 +15,16 @@ if (file("google-services.json").exists()) {
 
 android {
     namespace = "com.sinjeong.crewcalendar"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.sinjeong.crewcalendar"
         minSdk = 26
-        targetSdk = 35
-        versionCode = 31
-        versionName = "1.6.19"
+        // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
+        // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
+        targetSdk = 36
+        versionCode = 32
+        versionName = "1.6.20"
         vectorDrawables { useSupportLibrary = true }
     }
 
