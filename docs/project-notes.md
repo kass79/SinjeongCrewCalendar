@@ -286,6 +286,55 @@ CLAUDE.md에서 분리한 이력·이슈 목록. 레이아웃을 손대거나 �
   앱이 모르는 게 정상이다. 조치 불필요, 다음 달 재확인만.
 - **월 근무표가 나올 때마다 이 대조를 돌리는 걸 권한다.** 1명짜리 offset 오류는 눈으로 못 잡는다.
 
+## v1.6.20 — targetSdk 36(안드로이드 16) + 인셋 3건 정리
+
+플레이가 2026-08-31까지 요구한 API 36 대응. **v1.6.18의 "targetSdk는 35 유지" 판단은 여기서 끝난다** —
+API 36 시스템 이미지(`system-images;android-36;google_apis;x86_64`)를 받아 실기 검증했다.
+
+- **compileSdk·targetSdk 35 → 36. 툴체인은 한 줄도 안 올렸다** — AGP 8.11.1 / Kotlin 2.2.0 /
+  composeBom 2024.12.01 그대로 `assembleDebug`·`bundleRelease` 통과. AGP 8.11은 SDK 36을 지원한다.
+  올릴 이유가 없어서 안 올렸다(대규모 업그레이드는 그 자체가 회귀 위험).
+- **Android 16 동작변경 중 이 앱에 실제로 걸리는 건 하나도 없었다.** 조사 결과:
+  - *edge-to-edge 강제(opt-out 제거)* — **이미 opt-in 상태였다.** `MainActivity.onCreate`가
+    `enableEdgeToEdge()`를 부르고 `windowOptOutEdgeToEdgeEnforcement`는 쓴 적이 없다.
+    없어질 opt-out이 애초에 없으니 무변경. 44dp 커스텀 헤더도 그대로 살아 있다 —
+    헤더는 `AppRoot`의 Scaffold가 주는 상태바 인셋 위에 얹혀서 **원래부터 안 겹쳤다**
+    (`MainCalendarScreen.kt` 118행 주석 "상태바와 겹쳐도 됨"은 실제 동작과 어긋난 낡은 주석).
+    **`statusBarsPadding()`을 새로 넣지 않았다** — 넣었으면 헤더가 그만큼 더 밀려 내려간다.
+  - *대화면 방향/크기 조정 강제* — `screenOrientation`·`resizableActivity`·`minAspectRatio`·
+    `setRequestedOrientation`을 매니페스트·코드 통틀어 **한 번도 안 쓴다**. 무시당할 설정이 없다.
+  - *predictive back 기본 켜짐* — `enableOnBackInvokedCallback="true"` 이미 켜짐 +
+    `BackHandler`·`onBackPressed` 호출 **0건**(전부 NavHost·Dialog·ModalBottomSheet 기본 경로).
+  - *elegantTextHeight 무시* / *`scheduleAtFixedRate` 밀린 실행 1회로 축소* — 둘 다 미사용.
+    위젯·브리핑은 WorkManager·AlarmManager라 무관(실기에서 위젯 배치·갱신 확인).
+- **다크모드에서 상태바 시계·배터리가 안 보이던 문제 = 근본원인 수정**(`MainActivity.kt`).
+  `enableEdgeToEdge()`는 인자 없이 부르면 아이콘 명암을 `resources.configuration.uiMode`로만 정한다.
+  그래서 (1)앱 안에서 고른 테마를 무시하고 (2)`onCreate`에서 한 번 정해진 뒤 안 바뀐다.
+  시스템 라이트 + 앱 다크면 어두운 배경에 어두운 아이콘이라 안 보였다.
+  → 테마를 그리는 값과 **같은 `dark`** 로 `WindowInsetsControllerCompat`를 `SideEffect`에서 매번 맞춘다.
+  상태바·제스처바 양쪽. API 35·36 라이트/다크 4조합 실기 확인.
+- **로그인 제목이 상태바를 파고들던 문제**(`LoginScreen.kt`). `LoginScreen`은 `AppRoot`에서
+  `user == null`일 때 **Scaffold 밖에서 early return으로** 그려져 인셋을 아무도 안 준다.
+  히어로 이미지가 있을 땐 우연히 안 겹쳤고, 키보드가 뜨거나 짧은 화면이면 `compactTop`이 켜지며
+  히어로가 빠져 제목이 시계 위로 올라붙었다(에뮬 재현). → 내용 Column에 `safeDrawingPadding()`.
+  배경 그라데이션은 `Box`에 있어 계속 전체를 덮는다.
+- **가로화면에서 23~31일에 손이 안 닿던 문제 = 근본원인 수정**(`MainCalendarScreen.kt` `CalendarGrid`).
+  범인은 `userScrollEnabled = false`였다. 칸 높이 하한이 60dp라 세로가 짧은 화면에선 6주치가
+  뷰포트를 넘는데, 스크롤이 꺼져 있으니 **넘친 주가 그냥 잘려 나갔다**(스크롤로도 못 감).
+  → **넘칠 때만 켠다**: `userScrollEnabled = cellHeight * rows + 3.dp * (rows - 1) > maxHeight`.
+  안 넘치는 세로·펼침 화면은 식이 false라 **동작이 완전히 종전과 같다**(월 이동 스와이프 흔들림 없음).
+  실측 — 가로 2400x1080에서 30일까지 도달·월 이동 가로 스와이프 정상, 세로 1080x2400에선 스크롤 안 됨.
+- 검증: **API 36 에뮬(test36, google_apis x86_64) + API 35 에뮬(test35) 양쪽**.
+  달력·상세시트·메모 키보드·근무선택 4카드·동료근무 매트릭스·동료 탭·설정·위젯 배치와 갱신
+  ·제스처 뒤로가기로 시트/키보드 닫기 / 접힘 1080x2400 · 펼침 2208x1840 · 좁은 화면 720x1980(320dpi)
+  · 가로 2400x1080. **logcat FATAL·ANR 0건**, 에뮬 원복 완료.
+  `aapt2 dump badging` 최종 확인: `targetSdkVersion:'36'`, `compileSdkVersion='36'`, versionCode 32.
+- **미해결로 남긴 것**: `RosterScreen`·`MatesScreen`·`SettingsScreen` 등 M3 `TopAppBar`를 쓰는
+  화면은 상단 여백이 한 번 더 들어간다 — `AppRoot`의 Scaffold가 이미 상태바 인셋을 준 상태에서
+  `TopAppBar`가 `statusBars`를 또 적용하기 때문. **기존 동작 그대로이고 안 깨진다**(잘림·겹침 없음).
+  고치려면 그 화면들 `TopAppBar(windowInsets = WindowInsets(0))`인데, 손대면 v1.6.17에서 맞춰 둔
+  세로 수치가 전부 움직여서 이번엔 안 건드렸다.
+
 ## 내장 명단 (BundledStaff.kt)
 
 - **명단 기준일: 사번표 2026-08-07 / 비상연락망 2026-06-16**(v1.6.13에서 갱신).
