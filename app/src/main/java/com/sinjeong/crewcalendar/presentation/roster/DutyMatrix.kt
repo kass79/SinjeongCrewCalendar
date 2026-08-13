@@ -17,6 +17,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -139,9 +140,32 @@ private fun columnTint(date: LocalDate, today: LocalDate, duty: DutyColors): Col
     else -> Color.Transparent
 }
 
-/** 이름 열과 본문 사이 경계선 — 가로로 스크롤해도 "어느 행인지"를 붙잡아 주는 고정 기둥 */
-private fun Modifier.nameColumnEdge(color: Color) = drawBehind {
-    drawLine(color, Offset(size.width, 0f), Offset(size.width, size.height), 1.dp.toPx())
+/**
+ * 열 배경 + 오늘 열 좌우 세로 레일.
+ * 칩이 칸을 거의 꽉 채워서 반투명 밴드만으론 오늘이 잘 안 보인다 — 레일을 같이 그어
+ * 헤더부터 마지막 행까지 이어지는 세로 기둥을 만든다.
+ */
+@Composable
+private fun Modifier.columnBand(date: LocalDate, today: LocalDate, duty: DutyColors): Modifier {
+    val tint = columnTint(date, today, duty)
+    val rail = MaterialTheme.colorScheme.primary
+    val isToday = date == today
+    return this.drawBehind {
+        if (tint != Color.Transparent) drawRect(tint)
+        if (isToday) {
+            val w = 1.5.dp.toPx()
+            drawRect(rail, topLeft = Offset(0f, 0f), size = Size(w, size.height))
+            drawRect(rail, topLeft = Offset(size.width - w, 0f), size = Size(w, size.height))
+        }
+    }
+}
+
+/**
+ * 이름 열과 본문 사이 경계선 — 가로로 스크롤해도 "어느 행인지"를 붙잡아 주는 고정 기둥.
+ * 이름 Row가 아니라 **행 전체**에 그린다. 이름 Row는 글자 높이라 칸보다 짧아 선이 점선처럼 끊긴다.
+ */
+private fun Modifier.nameColumnEdge(color: Color, x: Float) = drawBehind {
+    drawLine(color, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
 }
 
 /** 헤더: 왼쪽 이름칸 + 가로 스크롤되는 날짜·요일 */
@@ -154,11 +178,12 @@ fun MatrixDateHeader(
 ) {
     val today = LocalDate.now()
     val edge = MaterialTheme.colorScheme.outline
+    val nameEdgeX = with(LocalDensity.current) { m.nameW.toPx() }
     Row {
         Box(
             Modifier.width(m.nameW)
                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                .nameColumnEdge(edge)
+                .nameColumnEdge(edge, nameEdgeX)
                 .padding(horizontal = 4.dp, vertical = 2.dp),
         ) {
             Text(
@@ -178,7 +203,7 @@ fun MatrixDateHeader(
                             else MaterialTheme.colorScheme.surfaceVariant
                         )
                         // 주말·공휴일은 헤더에도 같은 띠를 얹어 본문 밴드와 하나로 이어진다
-                        .background(if (isToday) Color.Transparent else columnTint(date, today, duty))
+                        .columnBand(date, today, duty)
                         .padding(vertical = 1.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -223,10 +248,13 @@ fun MatrixRow(
         zebra -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f)
         else -> Color.Transparent
     }
-    Row(Modifier.background(rowTint), verticalAlignment = Alignment.CenterVertically) {
+    val nameEdgeX = with(LocalDensity.current) { m.nameW.toPx() }
+    Row(
+        Modifier.background(rowTint).nameColumnEdge(edge, nameEdgeX),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Row(
-            Modifier.width(m.nameW).clickable { onNameClick() }
-                .nameColumnEdge(edge).padding(horizontal = 3.dp),
+            Modifier.width(m.nameW).clickable { onNameClick() }.padding(horizontal = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 말줄임 대신 자동 축소 — `강민성 (나)`가 잘리지 않는다
@@ -246,7 +274,7 @@ fun MatrixRow(
                 val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
                     Modifier.width(m.cellW)
-                        .background(columnTint(date, today, duty))
+                        .columnBand(date, today, duty)
                         .padding(horizontal = 1.dp, vertical = m.rowPadV),
                 ) {
                     Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(5.dp)) {
