@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
@@ -23,6 +24,8 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,6 +33,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.*
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import java.time.LocalDate
@@ -323,6 +327,49 @@ fun AutoFitText(
 }
 
 /**
+ * 나눔손글씨 펜(OFL 1.1). 이 라벨 전용 — 앱 전체 글꼴은 그대로 둔다.
+ * 손글씨체라 같은 sp에서도 본문보다 작아 보여 18sp로 잡았다(labelMedium 12sp 대비).
+ */
+private val PenFamily = FontFamily(Font(R.font.nanum_pen_script))
+
+/** `★ 즐겨찾기 ▾` — 지정돼 있으면 `★ 즐겨찾기 · 우리 조 ▾` */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FavLabel(fav: FavGroup?, onClick: () -> Unit) {
+    val duty = com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors.current
+    val on = fav != null
+    val tint = if (on) duty.onStandby else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (on) duty.standby else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = tint,
+    ) {
+        Row(
+            Modifier.padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Icon(
+                if (on) Icons.Default.Star else Icons.Outlined.StarOutline,
+                null,
+                Modifier.size(18.dp),
+                tint = tint,
+            )
+            Text(
+                "즐겨찾기" + (fav?.let { " · ${it.label}" } ?: ""),
+                fontFamily = PenFamily,
+                fontSize = 18.sp,
+                lineHeight = 20.sp,
+                fontWeight = FontWeight.Normal,
+                maxLines = 1,
+            )
+            Icon(Icons.Default.ArrowDropDown, "즐겨찾기 그룹 선택", Modifier.size(20.dp), tint = tint)
+        }
+    }
+}
+
+/**
  * 이름을 탭했을 때 뜨는 시트 — 전화·문자·★그룹, 그리고 동료 탭에서는 삭제까지.
  * 두 화면이 공유한다(`onRemove`가 null이면 삭제 항목이 안 뜬다).
  */
@@ -347,32 +394,25 @@ fun PersonSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
-                Box {
-                    IconButton(onClick = { favMenu = true }) {
-                        Icon(
-                            if (fav != null) Icons.Default.Star else Icons.Outlined.StarOutline,
-                            "즐겨찾기 그룹",
-                            tint = if (fav != null) duty.onStandby else MaterialTheme.colorScheme.outline,
+            Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Box {
+                // 별 아이콘만 있으면 "이게 즐겨찾기"라는 걸 알 수 없다 → 글자와 화살표를 한 덩어리로.
+                FavLabel(fav = fav, onClick = { favMenu = true })
+                DropdownMenu(expanded = favMenu, onDismissRequest = { favMenu = false }) {
+                    FavGroup.entries.forEach { g ->
+                        DropdownMenuItem(
+                            text = { Text("★ ${g.label}" + if (fav == g) " ✓" else "") },
+                            onClick = { onSetFav(g); favMenu = false },
                         )
                     }
-                    DropdownMenu(expanded = favMenu, onDismissRequest = { favMenu = false }) {
-                        FavGroup.entries.forEach { g ->
-                            DropdownMenuItem(
-                                text = { Text("★ ${g.label}" + if (fav == g) " ✓" else "") },
-                                onClick = { onSetFav(g); favMenu = false },
-                            )
-                        }
-                        if (fav != null) DropdownMenuItem(
-                            text = { Text("즐겨찾기 해제") },
-                            onClick = { onSetFav(null); favMenu = false },
-                        )
-                    }
+                    if (fav != null) DropdownMenuItem(
+                        text = { Text("즐겨찾기 해제") },
+                        onClick = { onSetFav(null); favMenu = false },
+                    )
                 }
             }
             Text(
-                person.group.label + (fav?.let { " · ★ ${it.label}" } ?: ""),
+                person.group.label,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

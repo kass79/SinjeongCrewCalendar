@@ -1,7 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  minWidth/minHeight 은 "이 아래로는 못 줄인다"는 하한이다. 250dp 였을 땐 2칸(≈160dp)으로
+  줄일 수 없어 2x1 배치가 아예 불가능했다. 110x40dp 로 내려 2x1 을 허용하고,
+  좁아진 구간은 DutyWidget 의 TINY 레이아웃(오늘 근무 + 출근시각)이 받는다.
+  기본 배치 크기는 targetCell 4x1 그대로 — 처음 놓으면 지금까지와 같은 7일 스트립이다.
+-->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
-    android:minWidth="250dp"
-    android:minHeight="60dp"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
     android:targetCellWidth="4"
     android:targetCellHeight="1"
     android:updatePeriodMillis="1800000"
