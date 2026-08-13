@@ -66,9 +66,9 @@ class DutyWidget : GlanceAppWidget() {
         /** 2x1 — 7칸 스트립이 안 들어간다. 오늘 근무 + 출근시각만 */
         private val TINY = DpSize(120.dp, 44.dp)
 
-        /** 3x1 — 칸 34dp라 요일을 떼고 날짜만 */
-        private val MID_SHORT = DpSize(240.dp, 48.dp)
-        private val MID = DpSize(240.dp, 84.dp)
+        /** 3x1 — 칸 27dp라 요일을 떼고 날짜만. 실측 Pixel 5열 그리드에서 3칸 = 약 200dp */
+        private val MID_SHORT = DpSize(190.dp, 48.dp)
+        private val MID = DpSize(190.dp, 84.dp)
 
         /** 4x1 이상 — 칸 48dp라 "월 13"이 들어간다 */
         private val WIDE_SHORT = DpSize(340.dp, 48.dp)
