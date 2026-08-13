@@ -15,6 +15,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -123,6 +125,25 @@ fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Colo
         DutyType.ETC -> Color.Transparent to fallback
     }
 
+/**
+ * 열 강조 밴드 — 헤더와 모든 데이터 행에 같은 색을 깔아 **세로로 관통하는 띠**를 만든다(v1.6.21).
+ * 종전엔 헤더 글자색만 달라서 "오늘 이 사람 뭐 하지"를 눈으로 세로 추적해야 했다.
+ * 반투명이라 근무 칩 색을 덮지 않고 칩 사이 여백에만 얹힌다. 폭 비용 0dp.
+ */
+@Composable
+private fun columnTint(date: LocalDate, today: LocalDate, duty: DutyColors): Color = when {
+    date == today -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    Bundled.PUBLIC_HOLIDAYS.containsKey(date) || date.dayOfWeek.value == 7 ->
+        duty.sunday.copy(alpha = 0.09f)
+    date.dayOfWeek.value == 6 -> duty.saturday.copy(alpha = 0.09f)
+    else -> Color.Transparent
+}
+
+/** 이름 열과 본문 사이 경계선 — 가로로 스크롤해도 "어느 행인지"를 붙잡아 주는 고정 기둥 */
+private fun Modifier.nameColumnEdge(color: Color) = drawBehind {
+    drawLine(color, Offset(size.width, 0f), Offset(size.width, size.height), 1.dp.toPx())
+}
+
 /** 헤더: 왼쪽 이름칸 + 가로 스크롤되는 날짜·요일 */
 @Composable
 fun MatrixDateHeader(
@@ -131,8 +152,15 @@ fun MatrixDateHeader(
     hScroll: ScrollState,
     duty: DutyColors,
 ) {
+    val today = LocalDate.now()
+    val edge = MaterialTheme.colorScheme.outline
     Row {
-        Box(Modifier.width(m.nameW).padding(horizontal = 4.dp, vertical = 2.dp)) {
+        Box(
+            Modifier.width(m.nameW)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .nameColumnEdge(edge)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        ) {
             Text(
                 "이름", fontSize = m.dowSp, fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -141,7 +169,7 @@ fun MatrixDateHeader(
         Row(Modifier.horizontalScroll(hScroll)) {
             (1..month.lengthOfMonth()).forEach { d ->
                 val date = month.atDay(d)
-                val isToday = date == LocalDate.now()
+                val isToday = date == today
                 val hol = Bundled.PUBLIC_HOLIDAYS.containsKey(date)
                 Column(
                     Modifier.width(m.cellW)
@@ -149,6 +177,8 @@ fun MatrixDateHeader(
                             if (isToday) MaterialTheme.colorScheme.primaryContainer
                             else MaterialTheme.colorScheme.surfaceVariant
                         )
+                        // 주말·공휴일은 헤더에도 같은 띠를 얹어 본문 밴드와 하나로 이어진다
+                        .background(if (isToday) Color.Transparent else columnTint(date, today, duty))
                         .padding(vertical = 1.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
@@ -180,12 +210,23 @@ fun MatrixRow(
     isFav: Boolean = false,
     /** 근무변경 실시간 반영 (날짜 → 변경 근무, Firebase 연동 시) */
     overrides: Map<LocalDate, String> = emptyMap(),
+    /** 홀짝 줄무늬 — 사람이 많을 때 가로로 눈이 미끄러지는 걸 막는다 */
+    zebra: Boolean = false,
     onNameClick: () -> Unit = {},
 ) {
     val pattern = Bundled.patternFor(p.group)
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    val today = LocalDate.now()
+    val edge = MaterialTheme.colorScheme.outline
+    // 본인 행은 모든 비교의 기준선이라 행 전체를 옅게 깐다(종전엔 이름 글자만 파랑)
+    val rowTint = when {
+        p.isMe -> MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+        zebra -> MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f)
+        else -> Color.Transparent
+    }
+    Row(Modifier.background(rowTint), verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.width(m.nameW).clickable { onNameClick() }.padding(horizontal = 3.dp),
+            Modifier.width(m.nameW).clickable { onNameClick() }
+                .nameColumnEdge(edge).padding(horizontal = 3.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // 말줄임 대신 자동 축소 — `강민성 (나)`가 잘리지 않는다
@@ -203,7 +244,11 @@ fun MatrixRow(
                 val date = month.atDay(d)
                 val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
-                Box(Modifier.width(m.cellW).padding(horizontal = 1.dp, vertical = m.rowPadV)) {
+                Box(
+                    Modifier.width(m.cellW)
+                        .background(columnTint(date, today, duty))
+                        .padding(horizontal = 1.dp, vertical = m.rowPadV),
+                ) {
                     Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(5.dp)) {
                         // 드문 4글자("대11비")만 들어갈 때까지 줄어든다
                         AutoFitText(

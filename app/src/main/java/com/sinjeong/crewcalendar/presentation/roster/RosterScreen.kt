@@ -188,20 +188,40 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                             (!favOnly || it.isMe || it.key in favKeys)
                     }.sortedWith(compareBy({ !it.isMe }, { it.key !in favKeys }, { it.name }))
                     if ((q.isNotEmpty() || favOnly) && members.isEmpty()) return@forEach
+                    // 섹션 경계를 또렷하게(v1.6.21): 위 구분선 + 왼쪽 색막대 + 인원수.
+                    // 종전엔 surfaceVariant 배경뿐이라 스크롤 중 소속이 바뀐 걸 놓치기 쉬웠다.
                     item(key = "sec-${g.name}") {
-                        Text(
-                            g.label,
-                            fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .padding(horizontal = 8.dp, vertical = 3.dp),
-                        )
+                        Column {
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                            Row(
+                                Modifier.fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Box(
+                                    Modifier.padding(start = 6.dp).width(3.dp).height(11.dp)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                )
+                                Text(
+                                    g.label,
+                                    fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold,
+                                    modifier = Modifier.padding(start = 5.dp),
+                                )
+                                Text(
+                                    " ${members.size}명",
+                                    fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
                     }
                     items(members.size, key = { "${g.name}-$it-${members[it].name}" }) { i ->
                         val p = members[i]
                         MatrixRow(p, month, m, hScroll, duty,
                             isFav = p.key in favKeys,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
+                            zebra = i % 2 == 1,
                             onNameClick = { dialTarget = p })
                     }
                 }

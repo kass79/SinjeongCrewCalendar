@@ -186,6 +186,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                         MatrixRow(p, month, m, hScroll, duty,
                             isFav = p.key in favKeys,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
+                            zebra = i % 2 == 1,
                             onNameClick = { sheetTarget = p })
                     }
                 }
