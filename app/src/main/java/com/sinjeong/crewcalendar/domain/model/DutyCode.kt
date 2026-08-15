@@ -66,10 +66,24 @@ data class DutyCode(
             "돌봄휴가", "동행휴가", "교육", "병가", "공가", "회행", "가연차", "작연차",
         )
 
+        /**
+         * 근무변경 항목 중 **실제로 쉬는 것** — 전부 `REST`(옅은 붉은색)로 묶는다.
+         * 종전엔 `CHANGE_OPTIONS` 폴백에 걸려 `SPECIAL`(야간 보라)로 빠져서
+         * 연차·병가·돌봄휴가가 달력·동료근무·공유 이미지에서 야간과 같은 보라로 보였다.
+         *
+         * 일부러 뺀 것:
+         *  · `충당`·`대기충당`·`교체`(대기 근무)·`지근`(지선 근무)·`교육`·`회행` — 출근하는 날이다
+         *  · `비번` — 야간 다음날이라 야간과 한 덩어리로 읽혀야 해서 보라 유지 (v1.6.21 사용자 선택)
+         */
+        private val REST_OPTIONS = setOf(
+            "운휴", "연차", "보상", "촉연", "대휴", "장휴", "청휴", "학습", "만휴",
+            "돌봄휴가", "동행휴가", "병가", "공가", "가연차", "작연차",
+        )
+
         /** 근무변경 항목 → 타입 매핑 (목록에 없으면 일반 파싱) */
         private val OVERRIDE_TYPES = mapOf(
             "충당" to DutyType.STANDBY, "대기충당" to DutyType.STANDBY, "교체" to DutyType.STANDBY,
-            "운휴" to DutyType.POST_NIGHT, "비번" to DutyType.POST_NIGHT,
+            "비번" to DutyType.POST_NIGHT,
             "지근" to DutyType.BRANCH, "지휴" to DutyType.BRANCH_REST,
             // 4조2교대·통상근무 (교번 번호가 없는 낱말 코드). "비번"·"휴무"는 위/아래에서 이미 처리됨
             "주간" to DutyType.MAIN_DAY, "야간" to DutyType.MAIN_NIGHT,
@@ -79,6 +93,7 @@ data class DutyCode(
             val s = raw?.trim()?.removeSuffix(".0") ?: return DutyCode("", DutyType.ETC)
             if (s.isEmpty()) return DutyCode("", DutyType.ETC)
             OVERRIDE_TYPES[s]?.let { return DutyCode(s, it, isBranch = s.startsWith("지")) }
+            if (s in REST_OPTIONS) return DutyCode(s, DutyType.REST)
             if (s in CHANGE_OPTIONS) return DutyCode(s, DutyType.SPECIAL)
             return when {
                 s == "~" -> DutyCode(s, DutyType.POST_NIGHT)

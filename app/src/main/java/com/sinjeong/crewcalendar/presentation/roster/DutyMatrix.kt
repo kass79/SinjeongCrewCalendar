@@ -84,22 +84,34 @@ data class MatrixMetrics(
     val nameSp: TextUnit,
     val daySp: TextUnit,
     val dowSp: TextUnit,
-    val cellPadV: Dp,
+    /**
+     * 근무 칩 높이 — **고정**이다(v1.6.23). 종전엔 글자 높이 + 위아래 여백이라
+     * 글자가 줄어든 칸만 칩이 짧아져서 한 행 안에서 칩 크기가 들쭉날쭉했다.
+     */
+    val cellH: Dp,
     val rowPadV: Dp,
 ) {
+    /** 칩 안에서 글자가 실제로 쓸 수 있는 폭 = 칸 − 칸 좌우 여백 − 칩 안쪽 여백 */
+    val codeAvailW: Dp get() = cellW - CELL_GAP * 2 - CHIP_PAD_H * 2
+
     companion object {
+        /** 칩 사이 간격 — 라운드가 커진 만큼 붙어 보이지 않게 1 → 1.5dp */
+        val CELL_GAP = 1.5.dp
+        /** 칩 안쪽 좌우 여백 */
+        val CHIP_PAD_H = 2.dp
+
         /** 동료근무 — 사업소 전체(282명). v1.6.16의 26dp는 "읽기 힘들다"는 피드백을 받았다 */
         val Dense = MatrixMetrics(
             cellW = 32.dp, nameW = 62.dp,
             codeSp = 11.sp, nameSp = 11.sp, daySp = 10.sp, dowSp = 8.5.sp,
-            cellPadV = 4.dp, rowPadV = 1.dp,
+            cellH = 22.dp, rowPadV = 1.5.dp,
         )
 
         /** 동료 탭 — 저장한 동료 + 본인. 인원이 적으니 칸을 넉넉히 잡아 날짜 비교가 편하게 */
         val Roomy = MatrixMetrics(
             cellW = 44.dp, nameW = 80.dp,
             codeSp = 15.sp, nameSp = 13.5.sp, daySp = 12.5.sp, dowSp = 10.sp,
-            cellPadV = 9.dp, rowPadV = 2.5.dp,
+            cellH = 36.dp, rowPadV = 2.5.dp,
         )
     }
 }
@@ -277,22 +289,65 @@ fun MatrixRow(
                 val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
-                    Modifier.width(m.cellW)
+                    Modifier.width(m.cellW).height(m.cellH + m.rowPadV * 2)
                         .columnBand(date, today, duty)
-                        .padding(horizontal = 1.dp, vertical = m.rowPadV),
+                        .padding(
+                            horizontal = MatrixMetrics.CELL_GAP,
+                            vertical = m.rowPadV,
+                        ),
                 ) {
-                    Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(5.dp)) {
-                        // 드문 4글자("대11비")만 들어갈 때까지 줄어든다
-                        AutoFitText(
-                            code.display.ifBlank { "·" },
-                            base = m.codeSp, min = m.codeSp * 0.6f,
-                            color = fg,
-                            modifier = Modifier.fillMaxWidth().padding(vertical = m.cellPadV),
-                            align = TextAlign.Center,
-                        )
-                    }
+                    DutyChip(code.display.ifBlank { "·" }, bg, fg, m)
                 }
             }
+        }
+    }
+}
+
+/**
+ * 근무 코드 칩 — 표 전체가 **같은 크기의 알약**이고 글자는 그 안에 세로 가운데 정렬된다(v1.6.23).
+ *
+ * 종전 문제("텍스트가 최적화 안 되어 있다"):
+ *  1. 칩 높이가 글자 높이를 따라가서 줄어든 칸만 칩이 짧고 위로 붙어 보였다.
+ *  2. `AutoFitText`가 칸마다 **따로** 측정해 줄여서 같은 표 안에 서너 가지 글자 크기가 섞였다.
+ *     게다가 한 번 줄면 되돌아오지 않아(`fit`은 감소만 한다) LazyColumn이 행을 재활용하거나
+ *     가로 스크롤 중 폭 0으로 한 번 측정되면 그 칸만 영구히 작아졌다 — 재현이 들쭉날쭉했던 이유.
+ *
+ * 그래서 **측정 대신 계산**한다. 글자 폭을 한글 1em · 숫자/기호 0.56em으로 근사해 필요한 폭을
+ * 구하고 칸에 들어가면 그냥 기준 크기를 쓴다. 실제 근무코드는 길어야 3글자(`휴16`·`대13`)라
+ * **표의 거의 모든 칸이 정확히 같은 크기**가 된다. 4글자짜리 근무변경 코드(`돌봄휴가`·`대기충당`)만
+ * 한 줄로 찌그러뜨리는 대신 **두 줄**로 접어 훨씬 크게 읽힌다.
+ */
+@Composable
+private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics) {
+    // sp ↔ dp 환산을 Density에 맡겨야 시스템 글자 크기 배율(fontScale)이 반영된다
+    val availSp = with(LocalDensity.current) { m.codeAvailW.toSp().value }
+    // 한글·한자는 정사각(1em), 숫자·`~`·영문은 그 절반 남짓
+    val units = text.sumOf { if (it.code >= 0x1100) 1.0 else 0.56 }.toFloat()
+    val needed = units * m.codeSp.value
+    val (size, lines) = when {
+        needed <= availSp -> m.codeSp to 1
+        // 3글자 이상이 안 들어가면 두 줄이 한 줄로 줄이는 것보다 크게 읽힌다
+        units >= 3f -> minOf(m.codeSp.value * 0.75f, availSp / (units / 2f)).sp to 2
+        else -> (availSp / units).sp to 1
+    }
+    // 자동 줄바꿈에 맡기면 `돌봄휴가`가 `돌봄휴 / 가`로 3:1이 된다 → 반씩 직접 끊는다
+    val shown = if (lines == 2) text.chunked((text.length + 1) / 2).joinToString("\n") else text
+    Surface(
+        color = bg, contentColor = fg,
+        // 라운드 5dp → 알약(높이의 절반). 칸이 좁아 각진 사각형은 표가 딱딱해 보였다.
+        shape = RoundedCornerShape(percent = 50),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        Box(Modifier.padding(horizontal = MatrixMetrics.CHIP_PAD_H), contentAlignment = Alignment.Center) {
+            Text(
+                shown,
+                fontSize = size, lineHeight = size * 1.05,
+                fontWeight = FontWeight.ExtraBold,
+                color = fg,
+                maxLines = lines, softWrap = lines > 1,
+                overflow = TextOverflow.Visible,
+                textAlign = TextAlign.Center,
+            )
         }
     }
 }
