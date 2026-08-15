@@ -97,8 +97,11 @@ data class MatrixMetrics(
     companion object {
         /** 칩 사이 간격 — 라운드가 커진 만큼 붙어 보이지 않게 1 → 1.5dp */
         val CELL_GAP = 1.5.dp
-        /** 칩 안쪽 좌우 여백 */
-        val CHIP_PAD_H = 2.dp
+        /**
+         * 칩 안쪽 좌우 여백. 알약이라 좌우 끝은 어차피 곡선이라 글자가 못 오고,
+         * 가장 넓은 3글자 코드(`대34` — 굵은 숫자 두 개)까지 기준 크기로 들어가야 해서 1dp다.
+         */
+        val CHIP_PAD_H = 1.dp
 
         /** 동료근무 — 사업소 전체(282명). v1.6.16의 26dp는 "읽기 힘들다"는 피드백을 받았다 */
         val Dense = MatrixMetrics(
@@ -321,8 +324,8 @@ fun MatrixRow(
 private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics) {
     // sp ↔ dp 환산을 Density에 맡겨야 시스템 글자 크기 배율(fontScale)이 반영된다
     val availSp = with(LocalDensity.current) { m.codeAvailW.toSp().value }
-    // 한글·한자는 정사각(1em), 숫자·`~`·영문은 그 절반 남짓
-    val units = text.sumOf { if (it.code >= 0x1100) 1.0 else 0.56 }.toFloat()
+    // 한글·한자는 정사각(1em), 숫자·`~`·영문은 그 절반 남짓(ExtraBold라 넉넉히 잡는다)
+    val units = text.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 }.toFloat()
     val needed = units * m.codeSp.value
     val (size, lines) = when {
         needed <= availSp -> m.codeSp to 1
