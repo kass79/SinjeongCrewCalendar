@@ -306,9 +306,10 @@ object Bundled {
     fun timeRowFor(duty: DutyCode, date: LocalDate): TimeRow? {
         val hol = isHolidayTimetable(date)
         return when (duty.type) {
+            // diaRaw = 충당 계열이면 대신 뛰는 다이아("충당 지3" → "지3"), 아니면 raw 그대로
             DutyType.BRANCH, DutyType.BRANCH_NIGHT, DutyType.BRANCH_STANDBY ->
-                (if (hol) BRANCH_HOLIDAY else BRANCH_WEEKDAY)[duty.raw]
-            DutyType.STANDBY -> STANDBY[duty.raw]
+                (if (hol) BRANCH_HOLIDAY else BRANCH_WEEKDAY)[duty.diaRaw]
+            DutyType.STANDBY -> STANDBY[duty.diaRaw]
             DutyType.MAIN_NIGHT -> duty.number?.let { n ->
                 MAIN_NIGHT[n]?.get(comboOf(date))?.let { (on, off) -> TimeRow(on, off, overnight = true) }
             }

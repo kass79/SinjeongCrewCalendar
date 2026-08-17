@@ -258,7 +258,7 @@ private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () 
             ) {
                 items(pattern.sequence.size) { i ->
                     val code = DutyCode.parse(pattern.sequence[i])
-                    val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     Surface(
                         onClick = { if (name.trim().length >= 2) onAdd(name, group, i) },
                         color = bg, contentColor = fg,

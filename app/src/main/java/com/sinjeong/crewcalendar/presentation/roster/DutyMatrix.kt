@@ -292,7 +292,7 @@ fun MatrixRow(
             (1..month.lengthOfMonth()).forEach { d ->
                 val date = month.atDay(d)
                 val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
-                val (bg, fg) = dutyCellColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
                     Modifier.width(m.cellW).height(m.cellH + m.rowPadV * 2)
                         .columnBand(date, today, duty)

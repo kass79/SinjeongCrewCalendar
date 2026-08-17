@@ -546,7 +546,7 @@ private fun DayCell(
 ) {
     val duty = LocalDutyColors.current
     val isToday = day.date == LocalDate.now()
-    val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    val (chipBg, chipFg) = dutyChipColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
     // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5, v1.6.11 6.5→6sp)
     val dateSize = if (big) 8.sp else 6.sp
@@ -703,7 +703,7 @@ private fun DayDetailContent(
     var memo by remember(day.date) { mutableStateOf(day.memo) }
     val row = Bundled.timeRowFor(day.duty, day.date)
     val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
-    val (chipBg, chipFg) = dutyChipColors(day.duty.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    val (chipBg, chipFg) = dutyChipColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     val isDia = day.duty.type in setOf(DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
     Column(
@@ -729,7 +729,8 @@ private fun DayDetailContent(
                         Text(
                             buildString {
                                 append(day.duty.displayLong.ifBlank { "근무 없음" })
-                                if (isDia) append(" Dia")
+                                // "충당 9 다이아 대행" — 대신 뛰는 다이아라는 걸 시트에서 못 놓치게
+                                if (isDia) append(if (day.duty.fill != null) " 다이아 대행" else " Dia")
                                 combo?.let { append(" (${it.label})") }
                             },
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
@@ -1077,36 +1078,46 @@ internal fun DutyPickerSheet(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(6),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    modifier = Modifier.heightIn(max = 340.dp),
-                ) {
-                    items(pattern.sequence.size) { i ->
-                        val code = DutyCode.parse(pattern.sequence[i])
-                        val (bg, fg) = dutyChipColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
-                        Surface(
-                            onClick = { onPick(group, i) },
-                            color = bg, contentColor = fg,
-                            shape = RoundedCornerShape(9.dp),
-                            border = if (i == currentIndex) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                        ) {
-                            Text(
-                                code.display,
-                                modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth(),
-                                textAlign = TextAlign.Center,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                maxLines = 1,
-                            )
-                        }
-                    }
-                }
+                DutySequenceGrid(pattern.sequence, currentIndex) { i -> onPick(group, i) }
                 Text(
                     "※ 언제든 다시 선택 가능 — 근무가 밀렸을 때 그 날짜 기준으로 다시 찍으면 됩니다.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 교번 순환 한 벌을 6열 칩 그리드로. 근무선택 2단계와 **근무변경의 충당 계열 다이아 선택**이 같이 쓴다.
+ * 두 벌로 나누면 색·크기가 갈라지므로 한 벌만 둔다.
+ */
+@Composable
+private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: (Int) -> Unit) {
+    val duty = LocalDutyColors.current
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(6),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        modifier = Modifier.heightIn(max = 340.dp),
+    ) {
+        items(sequence.size) { i ->
+            val code = DutyCode.parse(sequence[i])
+            val (bg, fg) = dutyChipColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                onClick = { onPick(i) },
+                color = bg, contentColor = fg,
+                shape = RoundedCornerShape(9.dp),
+                border = if (i == currentIndex) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+            ) {
+                Text(
+                    code.display,
+                    modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.ExtraBold,
+                    maxLines = 1,
                 )
             }
         }
@@ -1125,6 +1136,10 @@ private fun DutyChangeSheet(
     val duty = LocalDutyColors.current
     var manualMode by remember { mutableStateOf(false) }
     var manualText by remember { mutableStateOf("") }
+    // 충당·대기충당·교체는 "그 다이아를 대신 뛰는 근무"라 다이아를 함께 받는다 → 소속 → 다이아 2단계.
+    // 시트를 닫았다 열면 remember가 초기화돼 다시 목록부터 시작한다.
+    var fillFor by remember { mutableStateOf<String?>(null) }
+    var fillGroup by remember { mutableStateOf<CrewGroup?>(null) }
     val dateLabel = day.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
     val originalLabel = DutyCode.parse(day.originalDutyRaw ?: day.duty.raw).display
 
@@ -1134,6 +1149,49 @@ private fun DutyChangeSheet(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+        val fill = fillFor
+        if (fill != null) {
+            Text(
+                "$fill · 다이아 선택",
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+            )
+            TextButton(
+                onClick = { if (fillGroup != null) fillGroup = null else fillFor = null },
+                contentPadding = PaddingValues(0.dp),
+            ) { Text(if (fillGroup != null) "‹ 소속 다시 선택" else "‹ 근무변경 다시 선택") }
+            Text(
+                "대신 뛰는 다이아를 고르면 출근시각·행로표·열번이 그 다이아 기준으로 나옵니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedCard(onClick = { onChange(fill) }) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text("다이아 없이 저장", fontWeight = FontWeight.ExtraBold)
+                    Text("어떤 다이아인지 모를 때 — \"$fill\"만 기록합니다",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            val g = fillGroup
+            if (g == null) {
+                // 사업소 근무형태(통상·4조2교대)는 다이아가 없어 뺀다 — 승무 3종만 대행 대상이다
+                CrewGroup.entries.filter { it !in SITE_GROUPS }.forEach { grp ->
+                    OutlinedCard(onClick = { fillGroup = grp }) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                            Text(grp.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                            Text("${Bundled.patternFor(grp).length}칸 교번 순환",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            } else {
+                val seq = Bundled.patternFor(g).sequence
+                DutySequenceGrid(seq, -1) { i -> onChange("$fill ${seq[i]}") }
+            }
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }
+            return@Column
+        }
             Text(
                 "근무변경  $dateLabel 하루만 · 패턴 유지",
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
@@ -1176,10 +1234,15 @@ private fun DutyChangeSheet(
                     val parsed = DutyCode.parse(code)
                     val (bg, fg) = dutyChipColors(parsed.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     Surface(
-                        onClick = { onChange(code) },
+                        // 충당 계열은 바로 확정하지 않고 다이아 선택 단계로 넘어간다
+                        onClick = {
+                            if (code in DutyCode.FILL_OPTIONS) { fillFor = code; fillGroup = null }
+                            else onChange(code)
+                        },
                         color = bg, contentColor = fg,
                         shape = RoundedCornerShape(9.dp),
-                        border = if (code == day.duty.raw) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+                        border = if (code == (day.duty.fill ?: day.duty.raw))
+                            BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     ) {
                         Text(
                             code,

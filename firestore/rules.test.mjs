@@ -1,4 +1,4 @@
-// 신정승무 캘린더 — 루트 firestore.rules 단위 테스트 (허용 11 / 차단 23 = 34건)
+// 신정승무 캘린더 — 루트 firestore.rules 단위 테스트 (허용 14 / 차단 24 = 38건)
 //
 // 규칙을 고치면 반드시 이걸 돌려라. 통과 = "앱이 안 멈춘다"의 근거다.
 // 앱이 실제로 보내는 페이로드는 data/remote/FirestoreRepositories.kt 에서 그대로 베꼈다.
@@ -95,6 +95,20 @@ await t('rosterOverrides: 야간 다음날 자동 비번 "~" 저장', () =>
 await t('rosterOverrides: 패턴 복귀 = 문서 삭제', () =>
   assertSucceeds(deleteDoc(doc(anonA, 'rosterOverrides/1001_2026-08-12'))));
 
+// v1.6.25 — 충당 계열이 다이아를 함께 담는다("충당 9"). 한글 4자 + 다이아가 16바이트를 넘어
+// 상한을 32로 올렸다. 이 3건이 막히면 근무변경이 폰에만 남고 동료화면에 안 뜬다.
+await t('rosterOverrides: 충당 + 본선 다이아 ("충당 9")', () =>
+  assertSucceeds(setDoc(doc(anonA, 'rosterOverrides/1001_2026-08-18'),
+    overrideDoc('1001', '2026-08-18', '충당 9'))));
+
+await t('rosterOverrides: 대기충당 + 지선 야간 다이아 (최장 조합)', () =>
+  assertSucceeds(setDoc(doc(anonA, 'rosterOverrides/1001_2026-08-19'),
+    { uid: '1001', date: '2026-08-19', dutyRaw: '대기충당 지대11비', originalDutyRaw: '대기충당 지대11비' })));
+
+await t('rosterOverrides: 교체 + 야간 다이아 ("교체 45")', () =>
+  assertSucceeds(setDoc(doc(anonA, 'rosterOverrides/1001_2026-08-20'),
+    overrideDoc('1001', '2026-08-20', '교체 45'))));
+
 await t('rosterOverrides: observeMonthOverrides 월 범위 쿼리', () =>
   assertSucceeds(getDocs(query(collection(anonB, 'rosterOverrides'),
     where('date', '>=', '2026-08-01'), where('date', '<=', '2026-08-31')))));
@@ -167,6 +181,10 @@ await t('rosterOverrides: 임의 필드 추가', () =>
 await t('rosterOverrides: dutyRaw 가 문자열이 아님', () =>
   assertFails(setDoc(doc(anonA, 'rosterOverrides/1001_2026-08-14'),
     { uid: '1001', date: '2026-08-14', dutyRaw: 14, originalDutyRaw: '' })));
+
+await t('rosterOverrides: dutyRaw 33자 (상한 32 초과)', () =>
+  assertFails(setDoc(doc(anonA, 'rosterOverrides/1001_2026-08-21'),
+    { uid: '1001', date: '2026-08-21', dutyRaw: 'x'.repeat(33), originalDutyRaw: '' })));
 
 await t('rosterOverrides: dutyRaw 에 초장문 삽입', () =>
   assertFails(setDoc(doc(anonA, 'rosterOverrides/1001_2026-08-15'),

@@ -202,6 +202,54 @@ class PatternTest {
         assertEquals("주간", office.dutyOn(election.minusDays(1), 0).display)
     }
 
+    /**
+     * v1.6.25 — 충당 계열 + 다이아 저장 형식("충당 9"). 깨지면 출근시각·행로표·열번이 통째로 사라진다.
+     * 핵심은 **타입·번호는 다이아 기준, 색만 대기(STANDBY)** 라는 두 갈래다.
+     */
+    @Test fun fillCode_inherits_dia_but_keeps_standby_color() {
+        val main = DutyCode.parse("충당 9")
+        assertEquals(DutyType.MAIN_DAY, main.type)
+        assertEquals(DutyType.STANDBY, main.colorType)      // 색은 대기 노랑 유지
+        assertEquals(9, main.number)
+        assertEquals("충당", main.fill)
+        assertEquals("9", main.diaRaw)
+        assertEquals("충당9", main.display)                  // 좁은 칸
+        assertEquals("충당 9", main.displayLong)             // 상세시트·알림
+        assertTrue(main.isWorkDay)
+
+        val branch = DutyCode.parse("대기충당 지3")
+        assertEquals(DutyType.BRANCH, branch.type)
+        assertEquals(DutyType.STANDBY, branch.colorType)
+        assertTrue(branch.isBranch)
+        assertEquals("지3", branch.diaRaw)
+
+        // 야간 다이아 대행 → 익일 자동 비번(UpdateDayUseCase.isOvernight)이 살아 있어야 한다
+        val night = DutyCode.parse("교체 45")
+        assertEquals(DutyType.MAIN_NIGHT, night.type)
+        assertTrue(night.isOvernight)
+        assertEquals(DutyType.STANDBY, night.colorType)
+
+        // 출근시각이 실제로 다이아 기준으로 붙는다
+        val weekday = LocalDate.of(2026, 8, 18)             // 화요일(평일)
+        assertEquals(
+            Bundled.signOn(DutyCode.parse("9"), weekday),
+            Bundled.signOn(main, weekday),
+        )
+        assertNotNull(Bundled.signOn(branch, weekday))
+
+        // 이전 형식 호환: 다이아 없는 "충당"·기존 서버 데이터 "대3 4"는 종전 그대로
+        val bare = DutyCode.parse("충당")
+        assertEquals(DutyType.STANDBY, bare.type)
+        assertEquals(null, bare.fill)
+        assertEquals("충당", bare.display)
+        val legacy = DutyCode.parse("대3 4")
+        assertEquals(DutyType.STANDBY, legacy.type)
+        assertEquals(null, legacy.fill)
+        assertEquals("대3 4", legacy.display)
+        // 알 수 없는 다이아가 붙어도 충당 색·표기는 유지(깨진 데이터 방어)
+        assertEquals(DutyType.STANDBY, DutyCode.parse("충당 없는다이아").type)
+    }
+
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
     @Test fun mainDay_26to29_have_no_holiday_timetable() {
         assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)

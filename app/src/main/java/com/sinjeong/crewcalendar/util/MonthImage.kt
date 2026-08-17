@@ -74,7 +74,7 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
         // 근무 칩
         val label = day.duty.display
         if (label.isNotBlank()) {
-            val (bg, fg) = dutyColors(day.duty.type)
+            val (bg, fg) = dutyColors(day.duty.colorType)
             val chipW = cellW * 0.62f; val chipH = 52f
             val cx = left + cellW / 2; val cy = top + 82f
             if (bg != 0) {

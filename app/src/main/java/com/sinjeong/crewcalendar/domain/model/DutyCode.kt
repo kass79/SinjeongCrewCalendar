@@ -25,6 +25,12 @@ data class DutyCode(
     val number: Int? = null,
     /** 지선 여부 */
     val isBranch: Boolean = false,
+    /**
+     * 충당 계열 접두어(`충당`·`대기충당`·`교체`). null이 아니면 raw는 `"충당 9"` 꼴이고
+     * **타입·번호·지선여부는 뒤따르는 다이아 기준**이다(출근시각·행로표·열번이 그대로 따라온다).
+     * 색만 대기(노랑)로 되돌린다 → [colorType].
+     */
+    val fill: String? = null,
 ) {
     val isWorkDay: Boolean
         get() = type in setOf(
@@ -41,9 +47,20 @@ data class DutyCode(
         get() = isNight ||
             ((type == DutyType.STANDBY || type == DutyType.BRANCH_STANDBY) && (number ?: 0) >= 11)
 
+    /**
+     * 색 기준 타입. 충당 계열은 어떤 다이아를 대신 뛰든 **대기(노랑)** 로 보여야 한다 —
+     * 달력·동료근무·동료 탭·공유 이미지 색 매핑은 전부 이 값을 쓴다.
+     */
+    val colorType: DutyType get() = if (fill != null) DutyType.STANDBY else type
+
+    /** 시각표·행로표 조회용 원본. 충당 계열이면 대신 뛰는 다이아 쪽("지3")만 남긴다 */
+    val diaRaw: String get() = if (fill != null) raw.substringAfter(' ').trim() else raw
+
     /** 달력 셀 표시 텍스트 — 지선은 "지" 접두사를 떼고 표시 (기존 앱 방식) */
     val display: String
         get() = when {
+            // "충당 9" → "충당9". 달력 칸·동료근무 칸이 좁아 공백 한 칸도 아깝다
+            fill != null -> raw.replace(" ", "")
             // 4조2교대·통상근무 낱말 코드는 한 글자로 (v1.6.24 사용자 요청).
             // 달력·동료근무 칸이 좁아 "주간/야간/비번/휴무"는 답답했다. 비번 `~`는 승무 3종 표기와 같다.
             raw in SHORT_LABELS -> SHORT_LABELS.getValue(raw)
@@ -54,7 +71,7 @@ data class DutyCode(
         }
 
     /** 공간이 넉넉한 곳(상단 요약·상세 시트)용 — 한 글자로 줄인 낱말 코드만 원래대로 되돌린다 */
-    val displayLong: String get() = if (raw in SHORT_LABELS) raw else display
+    val displayLong: String get() = if (raw in SHORT_LABELS || fill != null) raw else display
 
     companion object {
 
@@ -91,6 +108,12 @@ data class DutyCode(
         )
 
         /** 근무변경 항목 → 타입 매핑 (목록에 없으면 일반 파싱) */
+        /**
+         * 다이아를 붙여 저장할 수 있는 근무변경 항목 — 실제로는 "그 다이아를 대신 뛰는" 근무다.
+         * `"충당 9"`·`"대기충당 지3"`·`"교체 45"` 꼴로 저장하고 [parse]가 다이아 부분을 그대로 해석한다.
+         */
+        val FILL_OPTIONS = setOf("충당", "대기충당", "교체")
+
         private val OVERRIDE_TYPES = mapOf(
             "충당" to DutyType.STANDBY, "대기충당" to DutyType.STANDBY, "교체" to DutyType.STANDBY,
             "비번" to DutyType.POST_NIGHT,
@@ -102,6 +125,18 @@ data class DutyCode(
         fun parse(raw: String?): DutyCode {
             val s = raw?.trim()?.removeSuffix(".0") ?: return DutyCode("", DutyType.ETC)
             if (s.isEmpty()) return DutyCode("", DutyType.ETC)
+            // "충당 9" = 9번 다이아 대행 → 다이아를 그대로 파싱해 타입·번호·지선여부를 물려받는다.
+            // 그래야 출근시각·행로표·열번·야간 익일 비번이 자동으로 따라온다. 색만 colorType이 대기로 돌린다.
+            // 첫 토큰이 FILL_OPTIONS 일 때만 걸리므로 옛 데이터("충당" 단독, "대3 4")는 아래 경로 그대로.
+            if (' ' in s) {
+                val head = s.substringBefore(' ')
+                val dia = s.substringAfter(' ').trim()
+                if (head in FILL_OPTIONS && dia.isNotEmpty()) {
+                    val d = parse(dia)
+                    return if (d.type == DutyType.ETC) DutyCode(s, DutyType.STANDBY, fill = head)
+                    else d.copy(raw = s, fill = head)
+                }
+            }
             OVERRIDE_TYPES[s]?.let { return DutyCode(s, it, isBranch = s.startsWith("지")) }
             if (s in REST_OPTIONS) return DutyCode(s, DutyType.REST)
             if (s in CHANGE_OPTIONS) return DutyCode(s, DutyType.SPECIAL)
