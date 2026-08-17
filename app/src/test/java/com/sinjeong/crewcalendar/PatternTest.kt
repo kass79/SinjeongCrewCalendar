@@ -5,7 +5,9 @@ import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DutyCode
+import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.NightCombo
+import com.sinjeong.crewcalendar.domain.model.ShiftTeam
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -31,7 +33,7 @@ class PatternTest {
 
     /** 사용자 확정 기준점: 2026-08-10(월) A조 = 비번 */
     @Test fun shiftTeamA_isPostNight_on_2026_08_10() {
-        assertEquals("비번", shift.dutyOn(LocalDate.of(2026, 8, 10), 0).display)
+        assertEquals("비번", shift.dutyOn(LocalDate.of(2026, 8, 10), ShiftTeam.A.offset).raw)
     }
 
     @Test fun shiftPattern_cycles_every_4_days() {
@@ -39,7 +41,7 @@ class PatternTest {
         (0..11).forEach { i ->
             assertEquals(
                 expected[i % 4],
-                shift.dutyOn(LocalDate.of(2026, 8, 10).plusDays(i.toLong()), 0).display,
+                shift.dutyOn(LocalDate.of(2026, 8, 10).plusDays(i.toLong()), 0).raw,
             )
         }
     }
@@ -48,27 +50,60 @@ class PatternTest {
         val date = LocalDate.of(2026, 8, 10)
         (1..3).forEach { team ->
             assertEquals(
-                shift.dutyOn(date.plusDays(team.toLong()), 0).display,
-                shift.dutyOn(date, team).display,
+                shift.dutyOn(date.plusDays(team.toLong()), 0).raw,
+                shift.dutyOn(date, team).raw,
             )
         }
         // 같은 날 네 조가 서로 다른 근무 = 4조2교대 성립 조건
-        assertEquals(4, (0..3).map { shift.dutyOn(date, it).display }.toSet().size)
+        assertEquals(4, (0..3).map { shift.dutyOn(date, it).raw }.toSet().size)
+    }
+
+    /**
+     * ★ v1.6.24 핵심 고정값 — 사용자가 직접 확인해 준 2026-08-16 실근무.
+     * 종전 배치(A0·B1·C2·D3)는 B·D가 뒤바뀌어 이 표를 못 맞췄다.
+     */
+    @Test fun shiftTeams_match_user_verified_2026_08_16() {
+        val d = LocalDate.of(2026, 8, 16)
+        mapOf(
+            ShiftTeam.A to "주간", ShiftTeam.B to "휴무",
+            ShiftTeam.C to "비번", ShiftTeam.D to "야간",
+        ).forEach { (team, expected) ->
+            assertEquals(team.label, expected, shift.dutyOn(d, team.offset).raw)
+        }
+        // 4조2교대 명단도 같은 offset 을 써야 동료근무 표가 근무선택과 일치한다
+        val byTeam = BundledRoster.SHIFT_4_2.groupBy({ it.second }, { it.first })
+        listOf(ShiftTeam.A to "황태상", ShiftTeam.B to "윤종대",
+               ShiftTeam.C to "최용재", ShiftTeam.D to "임종호").forEach { (team, name) ->
+            assertTrue("$name ${team.label}", byTeam[team.offset]?.contains(name) == true)
+        }
+    }
+
+    /** 좁은 칸 표기(v1.6.24): 낱말 코드는 한 글자. 색을 정하는 `type`·원본 `raw`는 그대로다 */
+    @Test fun wordCodes_display_as_single_char() {
+        mapOf("주간" to "주", "야간" to "야", "비번" to "~", "휴무" to "휴").forEach { (raw, short) ->
+            val code = DutyCode.parse(raw)
+            assertEquals(raw, short, code.display)
+            assertEquals(raw, raw, code.displayLong)
+        }
+        assertEquals(DutyType.MAIN_DAY, DutyCode.parse("주간").type)
+        assertEquals(DutyType.MAIN_NIGHT, DutyCode.parse("야간").type)
+        assertEquals(DutyType.POST_NIGHT, DutyCode.parse("비번").type)   // 보라
+        assertEquals(DutyType.REST, DutyCode.parse("휴무").type)         // 빨강
     }
 
     @Test fun officePattern_weekday_day_weekend_rest() {
         // 2026-08-10(월) ~ 08-14(금) 주간, 08-15(토)·08-16(일) 휴무
         (0..4).forEach {
-            assertEquals("주간", office.dutyOn(LocalDate.of(2026, 8, 10).plusDays(it.toLong()), 0).display)
+            assertEquals("주간", office.dutyOn(LocalDate.of(2026, 8, 10).plusDays(it.toLong()), 0).raw)
         }
-        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 8, 16), 0).display)
+        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 8, 16), 0).raw)
     }
 
     @Test fun officePattern_rests_on_public_and_substitute_holidays() {
-        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 8, 15), 0).display) // 광복절(토)
-        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 8, 17), 0).display) // 대체휴일(월)
-        assertEquals("주간", office.dutyOn(LocalDate.of(2026, 8, 18), 0).display) // 화요일 정상근무
-        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 3, 2), 0).display)  // 삼일절 대체휴일(월)
+        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 8, 15), 0).raw) // 광복절(토)
+        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 8, 17), 0).raw) // 대체휴일(월)
+        assertEquals("주간", office.dutyOn(LocalDate.of(2026, 8, 18), 0).raw) // 화요일 정상근무
+        assertEquals("휴무", office.dutyOn(LocalDate.of(2026, 3, 2), 0).raw)  // 삼일절 대체휴일(월)
     }
 
     /** 회귀: 승무원 3종 패턴은 restOnHolidays=false 라 공휴일에도 그대로 돌아야 한다 */

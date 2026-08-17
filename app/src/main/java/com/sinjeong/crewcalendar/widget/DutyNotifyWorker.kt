@@ -48,7 +48,7 @@ class DutyNotifyWorker @AssistedInject constructor(
             if (!day.duty.isWorkDay) return Result.success()
 
             val text = buildString {
-                append(day.duty.display)
+                append(day.duty.displayLong)
                 day.signOn?.let { append("  ·  출근 $it") }
             }
             val open = PendingIntent.getActivity(

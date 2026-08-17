@@ -44,15 +44,25 @@ data class DutyCode(
     /** 달력 셀 표시 텍스트 — 지선은 "지" 접두사를 떼고 표시 (기존 앱 방식) */
     val display: String
         get() = when {
-            // 4조2교대 비번은 승무 다이아가 아니라 낱말이므로 "~" 대신 글자 그대로
-            raw == "비번" -> "비번"
+            // 4조2교대·통상근무 낱말 코드는 한 글자로 (v1.6.24 사용자 요청).
+            // 달력·동료근무 칸이 좁아 "주간/야간/비번/휴무"는 답답했다. 비번 `~`는 승무 3종 표기와 같다.
+            raw in SHORT_LABELS -> SHORT_LABELS.getValue(raw)
             type == DutyType.POST_NIGHT -> "~"
             isBranch && raw.startsWith("지") && type != DutyType.SPECIAL && type != DutyType.ETC ->
                 raw.removePrefix("지")
             else -> raw
         }
 
+    /** 공간이 넉넉한 곳(상단 요약·상세 시트)용 — 한 글자로 줄인 낱말 코드만 원래대로 되돌린다 */
+    val displayLong: String get() = if (raw in SHORT_LABELS) raw else display
+
     companion object {
+
+        /** 낱말 근무코드 → 한 글자 표기. `parse` 결과 타입(색)은 그대로 두고 **표시만** 바꾼다 */
+        private val SHORT_LABELS = mapOf(
+            "주간" to "주", "야간" to "야", "비번" to "~", "휴무" to "휴",
+        )
+
         /** 본선 야간 다이아 번호 범위 (익일 비번 발생) */
         val NIGHT_RANGE = 33..51
 

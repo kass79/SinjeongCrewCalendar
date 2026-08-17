@@ -100,7 +100,7 @@ object BriefingAlarm {
         val on = signOnAt(today, day.signOn) ?: return
 
         val text = buildString {
-            append("오늘 ${day.duty.display} · ${day.signOn} 출근")
+            append("오늘 ${day.duty.displayLong} · ${day.signOn} 출근")
             withContext(Dispatchers.IO) { fetchWeather(on) }?.let { append(" · $it") }
         }
         val open = PendingIntent.getActivity(

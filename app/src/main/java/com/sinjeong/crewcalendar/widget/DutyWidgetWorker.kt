@@ -82,7 +82,7 @@ internal fun subLine(today: LocalDate, byDate: Map<LocalDate, com.sinjeong.crewc
     return when {
         t.duty.type == DutyType.POST_NIGHT -> "내일 비번"
         t.duty.isRest -> "내일 휴무"
-        t.duty.display.isNotBlank() -> "내일 ${t.duty.display}"
+        t.duty.display.isNotBlank() -> "내일 ${t.duty.displayLong}"
         else -> ""
     }
 }

@@ -360,7 +360,8 @@ private fun TodaySummaryCard(today: TodayDuty, groupLabel: String?, onClick: () 
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(
-                        "${today.duty.display.ifBlank { "근무 없음" }} 근무",
+                        // 상단 요약은 폭이 넉넉하다 → 한 글자 코드 대신 "주간 근무"처럼 풀어 쓴다
+                        "${today.duty.displayLong.ifBlank { "근무 없음" }} 근무",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                     )
@@ -561,9 +562,11 @@ private fun DayCell(
             .clip(RoundedCornerShape(10.dp))
             .then(
                 when {
+                    // 오늘: 테두리만으론 약해서 칸 바탕까지 primaryContainer로 물들인다(v1.6.24).
+                    // surfaceVariant는 "선택된 칸"과 같은 색이라 오늘이 묻혔다.
                     isToday -> Modifier
-                        .background(MaterialTheme.colorScheme.surfaceVariant)
-                        .border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .border(2.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
                     isSelected -> Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
                     // 칸 구분: 희미한 라운드 사각형
                     else -> Modifier
@@ -589,7 +592,8 @@ private fun DayCell(
                 fontSize = dateSize, lineHeight = dateSize * 1.05,
                 fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.SemiBold,
                 color = when {
-                    isToday -> MaterialTheme.colorScheme.primary
+                    // 오늘은 숫자를 꽉 찬 primary 배지로 — 구글 캘린더식 "오늘 점"
+                    isToday -> MaterialTheme.colorScheme.onPrimary
                     day.holidayName != null || day.date.dayOfWeek == DayOfWeek.SUNDAY -> duty.sunday
                     day.date.dayOfWeek == DayOfWeek.SATURDAY -> duty.saturday
                     else -> MaterialTheme.colorScheme.onSurfaceVariant
@@ -599,8 +603,11 @@ private fun DayCell(
                 modifier = Modifier
                     .padding(start = 1.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f))
-                    .padding(horizontal = 1.dp, vertical = 1.dp),
+                    .background(
+                        if (isToday) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
+                    )
+                    .padding(horizontal = if (isToday) 3.dp else 1.dp, vertical = 1.dp),
             )
             // 이름은 날짜 옆 같은 줄에 붙인다(v1.6.11 사용자 요청). 넘치면 HolidayTag가 4.5sp까지 자동 축소
             if (!nameBelow) nameTag?.let {
@@ -721,7 +728,7 @@ private fun DayDetailContent(
                     Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(10.dp)) {
                         Text(
                             buildString {
-                                append(day.duty.display.ifBlank { "근무 없음" })
+                                append(day.duty.displayLong.ifBlank { "근무 없음" })
                                 if (isDia) append(" Dia")
                                 combo?.let { append(" (${it.label})") }
                             },
@@ -1020,12 +1027,12 @@ internal fun DutyPickerSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 ShiftTeam.entries.forEach { team ->
-                    val code = pattern.dutyOn(picker.date, team.ordinal)
-                    val isCurrent = picker.group == currentGroup && currentOffset == team.ordinal
+                    val code = pattern.dutyOn(picker.date, team.offset)
+                    val isCurrent = picker.group == currentGroup && currentOffset == team.offset
                     val (bg, fg) = dutyChipColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedCard(
-                        // 조 번호 = offset. offsetFor(date, idx) == team.ordinal 이 되는 idx 를 역산해 넘긴다
-                        onClick = { onPick(CrewGroup.SHIFT_4_2, Math.floorMod(team.ordinal + days, pattern.length)) },
+                        // offsetFor(date, idx) == team.offset 이 되는 idx 를 역산해 넘긴다
+                        onClick = { onPick(CrewGroup.SHIFT_4_2, Math.floorMod(team.offset + days, pattern.length)) },
                         border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                         else CardDefaults.outlinedCardBorder(),
                     ) {

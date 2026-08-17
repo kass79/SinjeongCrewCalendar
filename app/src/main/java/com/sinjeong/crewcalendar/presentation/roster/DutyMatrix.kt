@@ -152,7 +152,8 @@ fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Colo
  */
 @Composable
 private fun columnTint(date: LocalDate, today: LocalDate, duty: DutyColors): Color = when {
-    date == today -> MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)
+    // 0.16 → 0.24 (v1.6.24). 칩이 칸을 거의 채워서 옅은 띠는 스크롤 중에 놓치기 쉬웠다.
+    date == today -> MaterialTheme.colorScheme.primary.copy(alpha = 0.24f)
     Bundled.PUBLIC_HOLIDAYS.containsKey(date) || date.dayOfWeek.value == 7 ->
         duty.sunday.copy(alpha = 0.09f)
     date.dayOfWeek.value == 6 -> duty.saturday.copy(alpha = 0.09f)
@@ -172,7 +173,7 @@ private fun Modifier.columnBand(date: LocalDate, today: LocalDate, duty: DutyCol
     return this.drawBehind {
         if (tint != Color.Transparent) drawRect(tint)
         if (isToday) {
-            val w = 1.5.dp.toPx()
+            val w = 2.5.dp.toPx()
             drawRect(rail, topLeft = Offset(0f, 0f), size = Size(w, size.height))
             drawRect(rail, topLeft = Offset(size.width - w, 0f), size = Size(w, size.height))
         }
@@ -217,8 +218,9 @@ fun MatrixDateHeader(
                 val hol = Bundled.PUBLIC_HOLIDAYS.containsKey(date)
                 Column(
                     Modifier.width(m.cellW)
+                        // 오늘 열 머리는 꽉 찬 primary — 세로 레일이 시작되는 지점을 못 놓치게(v1.6.24)
                         .background(
-                            if (isToday) MaterialTheme.colorScheme.primaryContainer
+                            if (isToday) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.surfaceVariant
                         )
                         // 주말·공휴일은 헤더에도 같은 띠를 얹어 본문 밴드와 하나로 이어진다
@@ -227,7 +229,7 @@ fun MatrixDateHeader(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     val c = when {
-                        isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                        isToday -> MaterialTheme.colorScheme.onPrimary
                         hol || date.dayOfWeek.value == 7 -> duty.sunday
                         date.dayOfWeek.value == 6 -> duty.saturday
                         else -> MaterialTheme.colorScheme.onSurfaceVariant

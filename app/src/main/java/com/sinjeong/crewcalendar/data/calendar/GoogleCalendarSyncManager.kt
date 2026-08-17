@@ -102,7 +102,7 @@ class GoogleCalendarSyncManager @Inject constructor(
 
     private fun dutyTitle(day: DaySchedule): String? {
         if (day.duty.raw.isBlank()) return null
-        return "[신정] ${day.duty.display}" + if (day.memo.isNotBlank()) " · ${day.memo}" else ""
+        return "[신정] ${day.duty.displayLong}" + if (day.memo.isNotBlank()) " · ${day.memo}" else ""
     }
 
     private fun buildAllDayEvent(date: LocalDate, title: String): Event = Event().apply {

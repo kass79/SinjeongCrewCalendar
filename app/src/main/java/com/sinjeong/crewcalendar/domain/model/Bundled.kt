@@ -12,8 +12,17 @@ enum class CrewGroup(val label: String, val role: CrewRole) {
     OFFICE_DAY("통상근무", CrewRole.OFFICE_STAFF),
 }
 
-/** 4조2교대 근무조. ordinal = Pattern offset (A=0 · B=1 · C=2 · D=3) */
-enum class ShiftTeam { A, B, C, D;
+/**
+ * 4조2교대 근무조.
+ *
+ * offset은 **ordinal이 아니다** — A0 · B3 · C2 · D1 이다(v1.6.24).
+ * 근거: 사용자 제공 2026-08-16 실근무표 (A=주간 · B=휴무 · C=비번 · D=야간).
+ * anchor(2026-08-10)에서 6일 뒤, sequence=[비번,휴무,주간,야간] 이므로
+ * floorMod(6 + off, 4) 가 각 조의 근무를 가리켜야 한다 →
+ *   A 주간=idx2 → off 0 / B 휴무=idx1 → off 3 / C 비번=idx0 → off 2 / D 야간=idx3 → off 1.
+ * 종전 0/1/2/3 배치는 A·C만 맞고 B·D가 서로 뒤바뀌어 있었다.
+ */
+enum class ShiftTeam(val offset: Int) { A(0), B(3), C(2), D(1);
     val label: String get() = "${name}조"
 }
 
@@ -68,14 +77,15 @@ object Bundled {
     )
 
     /**
-     * 4조2교대 (운용조·기지관제) — 주간 → 야간 → 비번 → 휴무 4일 순환. A/B/C/D조 = offset 0/1/2/3.
+     * 4조2교대 (운용조·기지관제) — 주간 → 야간 → 비번 → 휴무 4일 순환.
+     * 조별 offset은 `ShiftTeam.offset` (A0·B3·C2·D1) — ordinal이 아니다.
      *
      * anchor 계산 근거: 사용자 확정 기준점이 "2026-08-10(월) A조 = 비번".
      * anchorDate 를 2026-08-10 으로 두면 그 날 days=0, A조는 offset 0 이므로
      * idx = floorMod(0 + 0, 4) = 0 → sequence[0] 이 곧 "비번"이어야 한다.
      * 여기서 주간→야간→비번→휴무 순환을 "비번"부터 이어 적으면 [비번, 휴무, 주간, 야간].
      * 검산: A조 8/10=비번(0) 8/11=휴무(1) 8/12=주간(2) 8/13=야간(3) 8/14=비번 → 주기 유지.
-     *      같은 8/10 에 B조=sequence[1]=휴무, C조=주간, D조=야간 (조가 하루씩 앞선다).
+     * 8/16 검산(사용자 실데이터): A=주간 · B=휴무 · C=비번 · D=야간 — `ShiftTeam` 주석 참조.
      */
     val SHIFT_PATTERN = Pattern(
         id = "bundled-shift42",
