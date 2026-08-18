@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -245,21 +244,17 @@ fun MainCalendarScreen(
     // 접힘: 날짜 탭 → 상세 시트 (출근시간·전반/후반사업·근무시간·메모·근무변경)
     if (!wide) state.selectedDate?.let { date ->
         state.days.firstOrNull { it.date == date }?.let { day ->
-            // 시트 윈도우는 키보드가 떠도 위치·크기가 그대로다(바닥 883px이 키보드에 덮임).
-            // 시트 높이를 키우는 보정(imePadding 등)은 M3 1.3.1 앵커가 리사이즈를 반영하지
-            // 못해 실패한다(에뮬 실측). 대신 스크롤 '안쪽' 끝에 키보드 높이만큼 패딩을 넣어
-            // 시트 기하는 그대로 두고, 키보드가 열리는 동안 스크롤을 바닥에 붙여
-            // 메모·버튼을 키보드 위로 끌어올린다.
+            // 키보드가 뜨면 **시트 윈도우가 스스로 줄어든다**(v1.6.28 에뮬 실측 — API 36).
+            // v1.6.12에 넣었던 우회책(스크롤 안쪽 끝에 키보드 높이만큼 패딩 + 바닥고정)은
+            // 그때는 시트가 안 줄어서 필요했지만 지금은 **보정이 두 번 걸려** 저장 버튼 아래로
+            // 키보드 높이만큼(1080x2400/420에서 실측 ~950px) 빈 공간이 생겼다 = 남은 이슈 6번.
+            // → 우회책을 걷어내고 펼침 패널(위 `imePadding().verticalScroll(...)`)과 같은 방식으로 통일한다.
+            //   메모 TextField는 `verticalScroll` 안에서 bringIntoView로 알아서 보이는 영역에 들어온다.
             // 시트는 처음부터 완전히 펼쳐 연다 — 50% 부분전개면 커진 행로표가 화면을 다 먹어 메모가 안 보인다.
             ModalBottomSheet(
                 onDismissRequest = { viewModel.selectDate(null) },
                 sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             ) {
-                val scroll = rememberScrollState()
-                val imeBottom = with(LocalDensity.current) { WindowInsets.ime.getBottom(this).toDp() }
-                LaunchedEffect(imeBottom > 0.dp) {
-                    if (imeBottom > 0.dp) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
-                }
                 DayDetailContent(
                     day = day,
                     onSaveMemo = { viewModel.saveMemo(date, it) },
@@ -267,7 +262,7 @@ fun MainCalendarScreen(
                     onChangeDuty = { viewModel.openDutyChange(date) },
                     onRevert = { viewModel.changeDuty(date, null) },
                     onClose = { viewModel.selectDate(null) },
-                    modifier = Modifier.verticalScroll(scroll).padding(bottom = imeBottom),
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
                 )
             }
         }
