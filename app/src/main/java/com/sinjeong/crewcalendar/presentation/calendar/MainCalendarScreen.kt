@@ -219,6 +219,13 @@ fun MainCalendarScreen(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
+                // 접힘 바텀시트와 같은 규칙 — 키보드가 떠 있는 동안 스크롤을 바닥에 붙여
+                // 메모와 버튼 줄이 함께 키보드 바로 위에 오게 한다.
+                val panelScroll = rememberScrollState()
+                val panelImeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                LaunchedEffect(panelImeOpen, day?.date) {
+                    if (panelImeOpen) snapshotFlow { panelScroll.maxValue }.collect { panelScroll.scrollTo(it) }
+                }
                 if (day == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("날짜를 선택하세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -233,9 +240,15 @@ fun MainCalendarScreen(
                         onClose = { panelEpochDay = null },
                         compact = false,
                         // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
-                        // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다
-                        modifier = Modifier.fillMaxSize().imePadding()
-                            .verticalScroll(rememberScrollState()).padding(top = 14.dp),
+                        // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다.
+                        //
+                        // ⚠ **`fillMaxSize`가 아니라 `fillMaxWidth`다**(v1.6.28에 고침). `fillMaxSize`면
+                        // 내용 Column이 뷰포트 높이에 **딱 맞춰져** `maxValue`가 0이 되고, 그러면
+                        // 스크롤이 아예 안 먹는다. 키보드가 떠서 뷰포트가 줄면 넘친 버튼 줄이
+                        // 잘려 나가 **스크롤로도 못 가는 상태**가 됐다(펼침 실측).
+                        // 높이를 감싸게 두면 내용이 뷰포트를 넘을 때 정상적으로 스크롤된다.
+                        modifier = Modifier.fillMaxWidth().imePadding()
+                            .verticalScroll(panelScroll).padding(top = 14.dp),
                     )
                 }
             }
