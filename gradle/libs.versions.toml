@@ -13,11 +13,6 @@ firebaseBom = "33.7.0"
 googleServices = "4.4.2"
 glance = "1.1.1"
 coroutines = "1.9.0"
-credentials = "1.3.0"
-googleid = "1.1.1"
-playServicesAuth = "21.3.0"
-googleApiClient = "2.7.0"
-googleCalendarApi = "v3-rev20241101-2.0.0"
 workManager = "2.10.0"
 hiltWork = "1.2.0"
 desugar = "2.1.3"
@@ -57,13 +52,6 @@ glance-material3 = { group = "androidx.glance", name = "glance-material3", versi
 
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
-
-androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
-androidx-credentials-play-services = { group = "androidx.credentials", name = "credentials-play-services-auth", version.ref = "credentials" }
-googleid = { group = "com.google.android.libraries.identity.googleid", name = "googleid", version.ref = "googleid" }
-play-services-auth = { group = "com.google.android.gms", name = "play-services-auth", version.ref = "playServicesAuth" }
-google-api-client-android = { group = "com.google.api-client", name = "google-api-client-android", version.ref = "googleApiClient" }
-google-api-calendar = { group = "com.google.apis", name = "google-api-services-calendar", version.ref = "googleCalendarApi" }
 
 androidx-work-runtime = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }

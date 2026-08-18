@@ -17,6 +17,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.AlarmOn
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
@@ -46,6 +48,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.BundledTimetable
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.DutyCode
@@ -59,8 +62,10 @@ import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
+import com.sinjeong.crewcalendar.widget.DeadheadAlarm
 import java.time.DayOfWeek
 import java.time.LocalDate
+import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -879,6 +884,9 @@ private fun DayDetailContent(
                     }
                 }
             }
+            // 편승 알람 — 출근시각이 정확히 나오는 근무에만 뜬다(row가 곧 그 조건).
+            // 4조2교대·통상근무는 `Bundled.timeRowFor`가 null이라 여기서 자연히 빠진다.
+            row?.let { DeadheadAlarmChip(day.date, it.signOn) }
             if (showRoute && routeAsset != null) {
                 RouteImageDialog(
                     asset = routeAsset,
@@ -903,6 +911,98 @@ private fun DayDetailContent(
                 }
             }
     }
+}
+
+/**
+ * 편승 알람 버튼 (행로표 바로 아래, 오른쪽 정렬).
+ *
+ * **앱은 어느 다이아가 실제로 편승이 필요한지 판별할 수 없다** — 행로표가 스캔 이미지라
+ * 역명이 구조화 데이터로 없다. 그래서 출근시각만 있으면 무조건 버튼을 띄우고,
+ * 사용자가 눌러 확인해야만 알람이 걸린다. 앱이 "이 근무는 필요없다"고 숨기지 않는다.
+ *
+ * 근무변경으로 다이아가 바뀌면 예약해 둔 시각이 안 맞을 수 있으므로,
+ * 시트를 열 때(=`at`이 바뀔 때) 예약이 살아 있으면 새 시각으로 다시 걸거나 해제한다.
+ */
+@Composable
+private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
+    val ctx = LocalContext.current
+    val at = remember(date, signOn) { BundledTimetable.recommend(date, signOn) }
+    val past = at != null && !LocalDateTime.of(date, at).isAfter(LocalDateTime.now())
+    var booked by remember(date) { mutableStateOf<java.time.LocalTime?>(null) }
+    var ask by remember(date) { mutableStateOf(false) }
+
+    LaunchedEffect(date, at) {
+        val cur = DeadheadAlarm.scheduledAt(ctx, date)
+        booked = when {
+            cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, date); null }
+            cur != at -> if (DeadheadAlarm.schedule(ctx, date, at)) at else null
+            else -> cur
+        }
+    }
+
+    fun hm(t: java.time.LocalTime) = "%d:%02d".format(t.hour, t.minute)
+    val on = booked != null
+    val disabled = at == null || past
+
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+        Surface(
+            onClick = { ask = true },
+            shape = RoundedCornerShape(999.dp),
+            color = if (on) MaterialTheme.colorScheme.primaryContainer
+            else MaterialTheme.colorScheme.surfaceVariant,
+            contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer
+            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (disabled) 0.45f else 1f),
+        ) {
+            Row(
+                Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                Icon(
+                    if (on) Icons.Default.AlarmOn else Icons.Default.Alarm,
+                    "편승 알람", Modifier.size(16.dp),
+                )
+                Text(
+                    when {
+                        at == null -> "편승 정보 없음"
+                        past -> "편승 ${hm(at)} 지남"
+                        on -> "편승 ${hm(at)} 예약됨"
+                        else -> "편승 ${hm(at)}"
+                    },
+                    fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                )
+            }
+        }
+    }
+
+    if (ask) AlertDialog(
+        onDismissRequest = { ask = false },
+        title = { Text("편승 알람") },
+        text = {
+            Text(
+                when {
+                    at == null ->
+                        "출근 $signOn 기준 ${BundledTimetable.LEAD_MAX}~${BundledTimetable.LEAD_MIN}분 전에 " +
+                            "양천구청역을 지나는 신도림행 열차가 없습니다. 이 시간대엔 편승 정보 없음."
+                    past -> "권장 편승 시각은 ${hm(at)}인데 이미 지났습니다. 알림을 예약할 수 없어요."
+                    on -> "${hm(at)} 양천구청역 편승 탑승으로 예약돼 있습니다. 해제할까요?"
+                    else ->
+                        "${hm(at)} 양천구청역에서 신도림행 편승 탑승을 권합니다.\n" +
+                            "(출근 $signOn 기준 ${BundledTimetable.LEAD_MAX}~${BundledTimetable.LEAD_MIN}분 전 열차)\n\n" +
+                            "이 시각에 알림을 받을까요?"
+                },
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        },
+        confirmButton = {
+            if (at != null && !past) TextButton(onClick = {
+                booked = if (on) { DeadheadAlarm.cancel(ctx, date); null }
+                else if (DeadheadAlarm.schedule(ctx, date, at)) at else null
+                ask = false
+            }) { Text(if (on) "예약 해제" else "알림 예약") }
+        },
+        dismissButton = { TextButton(onClick = { ask = false }) { Text("닫기") } },
+    )
 }
 
 @Composable

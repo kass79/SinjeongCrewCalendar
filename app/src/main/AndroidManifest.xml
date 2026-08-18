@@ -59,6 +59,11 @@
             </intent-filter>
         </receiver>
 
+        <!-- 편승 알람(사용자가 상세시트에서 켠 그 날짜 1회성). 부팅 재등록은 BriefingReceiver가 겸한다 -->
+        <receiver
+            android:name=".widget.DeadheadReceiver"
+            android:exported="false" />
+
         <!-- FCM: 교환 요청 / 근무 변경 알림 -->
         <service
             android:name=".fcm.CrewMessagingService"

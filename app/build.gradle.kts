@@ -23,8 +23,8 @@ android {
         // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
         // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
         targetSdk = 36
-        versionCode = 37
-        versionName = "1.6.25"
+        versionCode = 38
+        versionName = "1.6.26"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -62,14 +62,9 @@ android {
     }
 }
 
-// google-api-client 계열이 grpc-api만 1.66으로 올려 Firestore(grpc 1.62)와 어긋나면
-// 런타임 NoClassDefFoundError(io.grpc.InternalGlobalInterceptors)로 크래시 → 전 부품 버전 통일
-configurations.all {
-    resolutionStrategy.force(
-        "io.grpc:grpc-api:1.62.2",
-        "io.grpc:grpc-context:1.62.2",
-    )
-}
+// grpc 버전 강제(force)는 google-api-client 계열이 grpc-api만 1.66으로 끌어올려 Firestore와
+// 어긋나던 문제 때문이었다. v1.6.26에서 그 의존성을 통째로 뺐으므로 강제도 같이 걷어낸다
+// (Firebase BOM이 주는 grpc 조합을 그대로 쓴다).
 
 dependencies {
     coreLibraryDesugaring(libs.desugar.jdk.libs)
@@ -110,13 +105,10 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.play.services)
 
-    // Google Sign-In (Credential Manager) + Calendar API
-    implementation(libs.androidx.credentials)
-    implementation(libs.androidx.credentials.play.services)
-    implementation(libs.googleid)
-    implementation(libs.play.services.auth)
-    implementation(libs.google.api.client.android) { exclude(group = "org.apache.httpcomponents") }
-    implementation(libs.google.api.calendar) { exclude(group = "org.apache.httpcomponents") }
+    // 구글 캘린더 동기화 의존성 전부 제거(v1.6.26): credentials·googleid·play-services-auth·
+    // google-api-client-android·google-api-services-calendar. GoogleCalendarSyncManager가
+    // 어느 화면에서도 안 불려 죽은 코드였고, 이 5개가 앱 용량의 큰 몫이었다.
+    // 로그인은 Firebase 익명 인증이라 구글 로그인 부품이 필요 없다 — 되살리려면 설정에 진입점부터.
 
     // Widget (Glance)
     implementation(libs.glance.appwidget)

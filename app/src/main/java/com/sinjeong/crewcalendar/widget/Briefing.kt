@@ -179,6 +179,8 @@ private fun fetchWeather(from: LocalDateTime): String? = runCatching {
 /** 알람 발화 + 부팅 재등록. 스케줄 조회·네트워크는 기존 HiltWorker 경로로 넘긴다. */
 class BriefingReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
+        // 재부팅하면 편승 알람도 같이 날아간다 — 여기가 이미 BOOT_COMPLETED를 받으므로 얹어서 복구
+        runCatching { DeadheadAlarm.rearmAll(context) }
         WorkManager.getInstance(context).enqueue(
             OneTimeWorkRequestBuilder<BriefingWorker>()
                 .setInputData(workDataOf("notify" to (intent.action == BriefingAlarm.ACTION)))

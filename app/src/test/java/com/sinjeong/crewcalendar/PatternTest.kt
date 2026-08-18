@@ -3,6 +3,7 @@ package com.sinjeong.crewcalendar
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
+import com.sinjeong.crewcalendar.domain.model.BundledTimetable
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
@@ -13,6 +14,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.time.LocalTime
 
 /**
  * v1.6.14에서 추가된 두 근무형태의 계산 근거를 고정한다. 깨지면 근무표가 통째로 틀어진다.
@@ -248,6 +250,37 @@ class PatternTest {
         assertEquals("대3 4", legacy.display)
         // 알 수 없는 다이아가 붙어도 충당 색·표기는 유지(깨진 데이터 방어)
         assertEquals(DutyType.STANDBY, DutyCode.parse("충당 없는다이아").type)
+    }
+
+    /**
+     * 편승 알람 계산 규칙 (v1.6.26, 사용자 확정):
+     * 양천구청역 **탑승** 기준으로 출근 10~19분 전 창, 그중 출근에 가장 가까운(=가장 늦은) 열차.
+     */
+    @Test fun deadhead_recommend_takes_latest_train_in_10_to_19_min_window() {
+        val weekday = LocalDate.of(2026, 8, 18)    // 화요일
+        val saturday = LocalDate.of(2026, 8, 22)   // 토요일 → 휴일 시각표
+
+        // 지3 평일 출근 7:52 → 창 7:33~7:42, 7시대 [5,15,24,34,44,53] 중 34 (44는 창 밖)
+        assertEquals(LocalTime.of(7, 34), BundledTimetable.recommend(weekday, "7:52"))
+        // 지4 평일 출근 10:11 → 창 9:52~10:01, 10:01이 딱 10분 전 = 가장 가까움
+        assertEquals(LocalTime.of(10, 1), BundledTimetable.recommend(weekday, "10:11"))
+        // 같은 지4라도 휴일은 출근 9:45 → 창 9:26~9:35 → 9:30 (평일/휴일 표가 갈린다)
+        assertEquals(LocalTime.of(9, 30), BundledTimetable.recommend(saturday, "9:45"))
+
+        // 창 안에 열차가 없으면 null — 본선 1번 평일 6:27 → 창 6:08~6:17, 6시대는 [6,20,37,54]
+        assertEquals(null, BundledTimetable.recommend(weekday, "6:27"))
+        // 첫차(5:36)보다 이른 출근 = 표 밖 → null (아이콘 비활성 사유)
+        assertEquals(null, BundledTimetable.recommend(weekday, "5:00"))
+        assertEquals(null, BundledTimetable.recommend(weekday, null))
+
+        // 실제 다이아의 출근시각이 그대로 들어간다 (상세시트가 넘기는 값과 같은 경로)
+        assertEquals(
+            LocalTime.of(7, 34),
+            BundledTimetable.recommend(weekday, Bundled.signOn(DutyCode.parse("지3"), weekday)),
+        )
+        // 4조2교대·통상근무는 출근시각 자체가 없어 상세시트에 아이콘이 아예 안 뜬다
+        assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주간"), weekday))
+        assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주"), weekday))
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
