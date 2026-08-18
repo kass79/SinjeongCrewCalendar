@@ -7,6 +7,7 @@ import com.sinjeong.crewcalendar.domain.model.BundledTimetable
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
+import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
 import org.junit.Assert.assertEquals
@@ -14,7 +15,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
-import java.time.LocalTime
+
 
 /**
  * v1.6.14에서 추가된 두 근무형태의 계산 근거를 고정한다. 깨지면 근무표가 통째로 틀어진다.
@@ -252,35 +253,47 @@ class PatternTest {
         assertEquals(DutyType.STANDBY, DutyCode.parse("충당 없는다이아").type)
     }
 
-    /**
-     * 편승 알람 계산 규칙 (v1.6.26, 사용자 확정):
-     * 양천구청역 **탑승** 기준으로 출근 10~19분 전 창, 그중 출근에 가장 가까운(=가장 늦은) 열차.
-     */
-    @Test fun deadhead_recommend_takes_latest_train_in_10_to_19_min_window() {
-        val weekday = LocalDate.of(2026, 8, 18)    // 화요일
-        val saturday = LocalDate.of(2026, 8, 22)   // 토요일 → 휴일 시각표
-
-        // 지3 평일 출근 7:52 → 창 7:33~7:42, 7시대 [5,15,24,34,44,53] 중 34 (44는 창 밖)
-        assertEquals(LocalTime.of(7, 34), BundledTimetable.recommend(weekday, "7:52"))
-        // 지4 평일 출근 10:11 → 창 9:52~10:01, 10:01이 딱 10분 전 = 가장 가까움
-        assertEquals(LocalTime.of(10, 1), BundledTimetable.recommend(weekday, "10:11"))
-        // 같은 지4라도 휴일은 출근 9:45 → 창 9:26~9:35 → 9:30 (평일/휴일 표가 갈린다)
-        assertEquals(LocalTime.of(9, 30), BundledTimetable.recommend(saturday, "9:45"))
-
-        // 창 안에 열차가 없으면 null — 본선 1번 평일 6:27 → 창 6:08~6:17, 6시대는 [6,20,37,54]
-        assertEquals(null, BundledTimetable.recommend(weekday, "6:27"))
-        // 첫차(5:36)보다 이른 출근 = 표 밖 → null (아이콘 비활성 사유)
-        assertEquals(null, BundledTimetable.recommend(weekday, "5:00"))
+    /** 편승 권장시각은 기준 확정 대기 — 규칙을 채우기 전까지 항상 null이어야 한다 (v1.6.26) */
+    @Test fun deadhead_recommend_is_parked_until_rule_confirmed() {
+        val weekday = LocalDate.of(2026, 8, 18)
+        assertEquals(null, BundledTimetable.recommend(weekday, "7:52"))
         assertEquals(null, BundledTimetable.recommend(weekday, null))
-
-        // 실제 다이아의 출근시각이 그대로 들어간다 (상세시트가 넘기는 값과 같은 경로)
-        assertEquals(
-            LocalTime.of(7, 34),
-            BundledTimetable.recommend(weekday, Bundled.signOn(DutyCode.parse("지3"), weekday)),
-        )
-        // 4조2교대·통상근무는 출근시각 자체가 없어 상세시트에 아이콘이 아예 안 뜬다
+        // 4조2교대·통상근무는 출근시각 자체가 없다 = 규칙이 확정돼도 아이콘이 안 뜨는 근거
         assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주간"), weekday))
         assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주"), weekday))
+    }
+
+    /**
+     * 편승 기준시각 후보 데이터의 성질을 고정한다 (사용자 규칙 확정용 근거, v1.6.26 실측).
+     *
+     *  · 지선 `firstLeg` 시작 = **출근 +30분 정확히** (평일·휴일 13개 다이아 전부, 예외 0건)
+     *  · 본선 `MainLegs` 전반시작 − 출근 = **45분 또는 60분** → 출근시각으로 역산 불가
+     */
+    @Test fun deadhead_basis_candidates_have_expected_shape() {
+        fun mins(t: String) = t.split(":").let { it[0].toInt() * 60 + it[1].toInt() }
+
+        listOf(Bundled.BRANCH_WEEKDAY, Bundled.BRANCH_HOLIDAY).forEach { table ->
+            table.forEach { (dia, row) ->
+                val start = row.firstLeg?.substringBefore('#')
+                if (start == null) {
+                    assertTrue("$dia 은 대기 계열이라 사업시각이 없어야", dia.startsWith("지대"))
+                } else {
+                    assertEquals("$dia 출근+30 규칙", 30, mins(start) - mins(row.signOn))
+                }
+            }
+        }
+
+        val gaps = listOf(
+            Bundled.MAIN_DAY_WEEKDAY to MainLegs.WEEKDAY,
+            Bundled.MAIN_DAY_HOLIDAY to MainLegs.HOLIDAY,
+        ).flatMap { (times, legs) ->
+            times.map { (n, row) ->
+                val leg = legs[n]
+                assertNotNull("본선 $n 사업시각", leg)
+                mins(leg!![0]) - mins(row.signOn)
+            }
+        }
+        assertEquals("본선은 간격이 45/60 두 갈래", setOf(45, 60), gaps.toSet())
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */

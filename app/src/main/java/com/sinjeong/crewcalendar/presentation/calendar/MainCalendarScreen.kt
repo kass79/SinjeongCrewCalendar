@@ -884,9 +884,10 @@ private fun DayDetailContent(
                     }
                 }
             }
-            // 편승 알람 — 출근시각이 정확히 나오는 근무에만 뜬다(row가 곧 그 조건).
-            // 4조2교대·통상근무는 `Bundled.timeRowFor`가 null이라 여기서 자연히 빠진다.
-            row?.let { DeadheadAlarmChip(day.date, it.signOn) }
+            // 편승 알람 — 권장시각 **기준**(신도림 근무시작 출발시각 기준)이 사용자 확정 대기라 꺼 둔 상태.
+            // 아이콘·다이얼로그·예약/취소·부팅복구는 전부 완성돼 동작 확인까지 마쳤다(v1.6.26).
+            // `BundledTimetable.recommend()`를 채우고 아래 한 줄을 되살리면 그대로 켜진다.
+            // row?.let { DeadheadAlarmChip(day.date, it.signOn) }
             if (showRoute && routeAsset != null) {
                 RouteImageDialog(
                     asset = routeAsset,
@@ -923,6 +924,7 @@ private fun DayDetailContent(
  * 근무변경으로 다이아가 바뀌면 예약해 둔 시각이 안 맞을 수 있으므로,
  * 시트를 열 때(=`at`이 바뀔 때) 예약이 살아 있으면 새 시각으로 다시 걸거나 해제한다.
  */
+@Suppress("unused") // 규칙 확정 대기로 호출부를 잠시 주석 처리해 둠 (위 DayDetailContent 참조)
 @Composable
 private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
     val ctx = LocalContext.current
@@ -982,13 +984,13 @@ private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
             Text(
                 when {
                     at == null ->
-                        "출근 $signOn 기준 ${BundledTimetable.LEAD_MAX}~${BundledTimetable.LEAD_MIN}분 전에 " +
-                            "양천구청역을 지나는 신도림행 열차가 없습니다. 이 시간대엔 편승 정보 없음."
+                        "출근 $signOn 근무는 맞춰 탈 수 있는 양천구청역 신도림행 열차가 없습니다. " +
+                            "이 시간대엔 편승 정보 없음."
                     past -> "권장 편승 시각은 ${hm(at)}인데 이미 지났습니다. 알림을 예약할 수 없어요."
                     on -> "${hm(at)} 양천구청역 편승 탑승으로 예약돼 있습니다. 해제할까요?"
                     else ->
                         "${hm(at)} 양천구청역에서 신도림행 편승 탑승을 권합니다.\n" +
-                            "(출근 $signOn 기준 ${BundledTimetable.LEAD_MAX}~${BundledTimetable.LEAD_MIN}분 전 열차)\n\n" +
+                            "(출근 $signOn 근무 기준)\n\n" +
                             "이 시각에 알림을 받을까요?"
                 },
                 style = MaterialTheme.typography.bodyMedium,
