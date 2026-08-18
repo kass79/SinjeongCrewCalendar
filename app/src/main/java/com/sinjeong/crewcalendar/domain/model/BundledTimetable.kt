@@ -30,24 +30,100 @@ object BundledTimetable {
         Row(23, listOf(2,17,31,48), listOf(8,23,39,53)),
     )
 
+    /** 알람 권장 결과. [at]이 null이면 알람을 걸 수 없고 [text]가 그 사유다. */
+    data class Advice(val at: LocalTime?, val text: String)
+
     /**
-     * 편승 권장 **탑승** 시각 — 규칙 확정 대기 중이라 지금은 항상 null이다(v1.6.26).
+     * 본선에서 "출근 → 전반시작" 간격이 이 값이면 **신도림역에서 교대**하는 근무다(= 편승 필요).
      *
-     * ⚠ 처음엔 "출근시각 −10~−19분"으로 구현했다가 되돌렸다. 사용자 정정:
-     * 기준은 출근시각이 아니라 **행로표의 신도림역 근무시작 출발시각**이고,
-     * 지선은 그 출발 5분 전이 기준이다. 정확한 규칙은 확정 대기.
+     * ⚠ 이 45분이 B(편승 알람)와 C(기지 출고 — 알람 없음)를 가르는 **유일한 판별 기준**이다.
+     * 행로표가 스캔 이미지라 역명을 코드로 읽을 수 없어서 데이터에서 찾아낸 대리 지표이고,
+     * v1.6.27에서 아래 네 갈래로 검증했다(전 다이아 127건 = 주간 평일29·휴일25 + 야간 73):
      *
-     * 확정되면 여기만 채우고 `MainCalendarScreen`의 `DeadheadAlarmChip` 호출 한 줄을 되살리면 된다.
-     * 예약·취소·부팅복구 인프라(`DeadheadAlarm`)와 UI는 이미 완성돼 있다.
+     *  ① 행로표 스캔 직접 판독 — 45분인 `wd_12`(8:07)·`wd_20`(9:49)·`pp_38`(19:53)·
+     *     `hp_43`(20:12)·`pp_45`(21:03)는 전부 그 시각이 **신도림** 열에 찍혀 있고,
+     *     60분인 `wd_9`(8:02)·`hol_4`(8:30)는 **신정기지** 열에 ○(출고) 표시다.
+     *  ② 열번 상관 — `RouteTable`의 전반 첫 열번이 5xxx·6xxx(회송=출고)인 다이아와
+     *     간격 60분인 다이아가 **127건 전부 일치**(불일치 0건). 45분 쪽은 전부 2xxx 영업열차.
+     *  ③ 행로표의 편승 점선은 전부 **정확히 15분**(양천구청↔신도림)이고 통계칸 `편승` 합계와
+     *     맞아떨어진다(`wd_12` = 15분×3 = 0:45). 15분은 사용자 확정 창 10~19분의 정중앙이다.
+     *  ④ 45분 다이아의 편승 탑승시각(전반시작 −10~19분)은 출근 +26~35분인데,
+     *     이는 지선의 "출근 +30분에 양천구청 출발"과 같은 준비시간 구조다.
      *
-     * 채울 때 쓸 수 있는 기준시각 데이터 (v1.6.26 실측):
-     *  · 지선  `Bundled.BRANCH_WEEKDAY/HOLIDAY[다이아].firstLeg` = `"8:13#10:41"` 의 앞부분.
-     *          13개 다이아 평일·휴일 전부 **출근 +30분 정확히** (예외 0건).
-     *  · 본선  `MainLegs.forDay(n, holiday)[0]` / `MainLegs.forNight(n, combo)[0]`.
-     *          출근과의 간격이 **45분 또는 60분으로 갈린다** — 출근시각으로 역산하면 안 된다.
-     *  · 기준시각이 없는 근무: 대기 계열 12종(지대1·2·11, 대1~6·11~13)과
-     *          본선 야간 33·34·35의 휴휴 조합(운휴대기).
+     * "동대문승무원과 교대"·"대림승무원과 교대"는 교대 **장소**가 아니라 상대 사업소 이름이다
+     * (①에서 `wd_12`·`wd_20`·`pp_45` 스캔으로 확인 — 실제 교대 지점은 셋 다 신도림).
+     * 군자기지는 후반·근무 중간에만 나오고 전반시작 지점인 다이아는 없다.
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun recommend(date: LocalDate, signOn: String?): LocalTime? = null
+    private const val SINDORIM_GAP_MIN = 45
+
+    /** 편승 열차를 고르는 창 — 신도림 출발 10~19분 전 (사용자 확정 규칙) */
+    private const val WINDOW_EARLY_MIN = 19
+    private const val WINDOW_LATE_MIN = 10
+
+    private fun LocalTime.mins() = hour * 60 + minute
+
+    private fun hm(t: LocalTime) = "%d:%02d".format(t.hour, t.minute)
+
+    /** `"8:13"` → LocalTime. `"25:20"` 같은 24시+ 표기와 빈 값은 null (알람을 걸 수 없다) */
+    private fun time(raw: String?): LocalTime? {
+        val p = raw?.split(':')?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 2 } ?: return null
+        return if (p[0] in 0..23 && p[1] in 0..59) LocalTime.of(p[0], p[1]) else null
+    }
+
+    /** 그 날 양천구청역 신도림행 출발시각 전체 */
+    private fun departures(holiday: Boolean): List<LocalTime> =
+        ROWS.flatMap { r -> (if (holiday) r.holiday else r.weekday).map { LocalTime.of(r.hour, it) } }
+
+    /**
+     * 그 날 그 근무의 알람 권장 시각. 세 갈래다(v1.6.27 사용자 확정):
+     *
+     *  · **지선** — 양천구청에서 바로 승무를 시작하므로 편승이 없다. 전반시작 **5분 전 도착**.
+     *  · **본선 신도림 교대**([SINDORIM_GAP_MIN]) — 양천구청에서 신도림 출발 10~19분 전에
+     *    떠나는 편승 열차 중 **가장 늦은 편**.
+     *  · **기지 출고** — 사용자 요청으로 **알람 없음**(신정기지·군자기지 모두).
+     *
+     * 판별이 애매하면 알람을 걸지 않는다 — 틀린 시각을 주는 것이 최악이다.
+     */
+    fun advise(duty: DutyCode, date: LocalDate): Advice {
+        val holiday = Bundled.isHolidayTimetable(date)
+        val row = Bundled.timeRowFor(duty, date)
+
+        if (duty.type == DutyType.STANDBY || duty.type == DutyType.BRANCH_STANDBY)
+            return Advice(null, "대기 근무는 맡은 열차가 없어 알람을 걸 수 없습니다.")
+
+        // A. 지선 — firstLeg("8:13#10:41")의 앞이 곧 양천구청 출발시각이다. 역산하지 않는다.
+        if (duty.isBranch) {
+            val start = time(row?.firstLeg?.substringBefore('#'))
+                ?: return Advice(null, "이 근무는 승무 시작시각이 없어 알람을 걸 수 없습니다.")
+            val at = start.minusMinutes(5)
+            return Advice(at, "양천구청역 ${hm(at)} 도착 (${hm(start)} 출발 5분 전)")
+        }
+
+        // 본선 — 전반시작이 신도림인지 기지인지가 갈림길
+        val n = duty.number
+        if (duty.type == DutyType.MAIN_NIGHT && n != null && RouteTable.isStandbyOnly(n, Bundled.comboOf(date)))
+            return Advice(null, "운휴대기 근무라 맡은 열차가 없습니다.")
+        val legs = when (duty.type) {
+            DutyType.MAIN_DAY -> n?.let { MainLegs.forDay(it, holiday) }
+            DutyType.MAIN_NIGHT -> n?.let { MainLegs.forNight(it, Bundled.comboOf(date)) }
+            else -> null
+        }
+        val start = time(legs?.firstOrNull())
+        val signOn = time(row?.signOn)
+        if (start == null || signOn == null)
+            return Advice(null, "이 근무는 사업시각이 없어 알람을 걸 수 없습니다. 행로표를 확인하세요.")
+
+        if (start.mins() - signOn.mins() != SINDORIM_GAP_MIN)
+            return Advice(null, "기지에서 열차를 끌고 나오는 근무(출고)라 편승 알람이 없습니다.")
+
+        val at = departures(holiday)
+            .filter { it.mins() in (start.mins() - WINDOW_EARLY_MIN)..(start.mins() - WINDOW_LATE_MIN) }
+            .maxOrNull()
+            ?: return Advice(
+                null,
+                "신도림 ${hm(start)} 출발에 맞춰 탈 양천구청역 열차가 " +
+                    "${WINDOW_LATE_MIN}~${WINDOW_EARLY_MIN}분 전 구간에 없습니다. 행로표를 확인하세요.",
+            )
+        return Advice(at, "양천구청역 ${hm(at)} 편승 탑승 (신도림 ${hm(start)} 출발)")
+    }
 }

@@ -9,12 +9,14 @@ import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
+import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
+import java.time.LocalTime
 
 
 /**
@@ -253,14 +255,83 @@ class PatternTest {
         assertEquals(DutyType.STANDBY, DutyCode.parse("충당 없는다이아").type)
     }
 
-    /** 편승 권장시각은 기준 확정 대기 — 규칙을 채우기 전까지 항상 null이어야 한다 (v1.6.26) */
-    @Test fun deadhead_recommend_is_parked_until_rule_confirmed() {
+    /**
+     * 출근 알람 세 갈래를 손계산으로 고정한다 (v1.6.27 사용자 확정 규칙).
+     *
+     * 2026-08-18은 화요일(평일), 익일도 평일이라 야간 조합은 평평(PP).
+     */
+    @Test fun alarm_advice_has_three_branches() {
         val weekday = LocalDate.of(2026, 8, 18)
-        assertEquals(null, BundledTimetable.recommend(weekday, "7:52"))
-        assertEquals(null, BundledTimetable.recommend(weekday, null))
-        // 4조2교대·통상근무는 출근시각 자체가 없다 = 규칙이 확정돼도 아이콘이 안 뜨는 근거
+
+        // A. 지선 — 전반시작(양천구청 출발) 8:13 → 5분 전 도착
+        val branch = BundledTimetable.advise(DutyCode.parse("지1"), weekday)
+        assertEquals(LocalTime.of(8, 8), branch.at)
+        assertTrue(branch.text, branch.text.contains("양천구청역 8:08 도착"))
+
+        // B. 본선 신도림 교대 — 주간 12번 전반시작 8:07 → 창 7:48~7:57의 마지막 편 7:53
+        val day = BundledTimetable.advise(DutyCode.parse("12"), weekday)
+        assertEquals(LocalTime.of(7, 53), day.at)
+        assertTrue(day.text, day.text.contains("신도림 8:07 출발"))
+        // 야간 38번(평평) 전반시작 19:53 → 창 19:34~19:43의 마지막 편 19:41
+        assertEquals(LocalTime.of(19, 41), BundledTimetable.advise(DutyCode.parse("38"), weekday).at)
+        // 충당 대행도 대신 뛰는 다이아를 그대로 따라간다
+        assertEquals(LocalTime.of(19, 41), BundledTimetable.advise(DutyCode.parse("충당 38"), weekday).at)
+
+        // C. 기지 출고(간격 60분) — 알람 없음. 주간 9번은 행로표에서 신정기지 ○(출고) 확인된 다이아
+        val depot = BundledTimetable.advise(DutyCode.parse("9"), weekday)
+        assertEquals(null, depot.at)
+        assertTrue(depot.text, depot.text.contains("출고"))
+
+        // 기준시각이 없는 근무 — 대기 계열·운휴대기
+        assertEquals(null, BundledTimetable.advise(DutyCode.parse("대3"), weekday).at)
+        assertEquals(null, BundledTimetable.advise(DutyCode.parse("지대1"), weekday).at)
+        val hhSat = LocalDate.of(2026, 8, 22) // 토 → 일 = 휴휴, 33~35는 운휴대기
+        assertEquals(NightCombo.HH, Bundled.comboOf(hhSat))
+        assertEquals(null, BundledTimetable.advise(DutyCode.parse("33"), hhSat).at)
+
+        // 4조2교대·통상근무는 출근시각 자체가 없다 = 아이콘이 안 뜨는 근거
         assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주간"), weekday))
         assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주"), weekday))
+    }
+
+    /**
+     * **B/C 판별의 근거를 잠근다** — 이 테스트가 깨지면 편승 알람이 틀린 시각을 줄 수 있다.
+     *
+     * 판별 기준은 "출근 → 전반시작" 간격 45분(신도림 교대) / 60분(기지 출고)인데,
+     * 행로표가 스캔 이미지라 역명을 코드로 확인할 수 없다. 대신 **전반 첫 열번**이
+     * 5xxx·6xxx(회송 = 출고)인지로 교차검증한다 — 두 지표는 전 다이아에서 일치해야 한다.
+     * (v1.6.27 실측: 주간 평일 29 + 휴일 25 + 야간 73 = 127건 전부 일치, 불일치 0건)
+     */
+    @Test fun deadhead_gap_matches_depot_train_number() {
+        fun mins(t: String) = t.split(":").let { it[0].toInt() * 60 + it[1].toInt() }
+        fun isDepot(firstHalf: String) =
+            firstHalf.substringBefore('·').let { it.toIntOrNull() != null && it.first() in "56" }
+
+        var checked = 0
+        fun check(tag: String, signOn: String, legStart: String, firstHalf: String) {
+            val gap = mins(legStart) - mins(signOn)
+            assertTrue("$tag 간격은 45/60 둘 중 하나여야 (실제 $gap)", gap == 45 || gap == 60)
+            assertEquals("$tag — 간격 60분과 출고 열번이 어긋난다", gap == 60, isDepot(firstHalf))
+            checked++
+        }
+
+        listOf(
+            Triple(Bundled.MAIN_DAY_WEEKDAY, MainLegs.WEEKDAY, false),
+            Triple(Bundled.MAIN_DAY_HOLIDAY, MainLegs.HOLIDAY, true),
+        ).forEach { (times, legs, hol) ->
+            times.forEach { (n, row) ->
+                check("주간$n(${if (hol) "휴" else "평"})", row.signOn, legs.getValue(n)[0],
+                    RouteTable.forMainDay(n, hol)!!.firstHalf)
+            }
+        }
+        Bundled.MAIN_NIGHT.forEach { (n, byCombo) ->
+            byCombo.forEach { (combo, onOff) ->
+                val leg = MainLegs.forNight(n, combo) ?: return@forEach // 33~35 휴휴 = 운휴대기
+                check("야간$n(${combo.label})", onOff.first, leg[0],
+                    RouteTable.forMainNight(n, combo)!!.firstHalf)
+            }
+        }
+        assertEquals("검사한 다이아 수", 127, checked)
     }
 
     /**

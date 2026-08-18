@@ -884,10 +884,8 @@ private fun DayDetailContent(
                     }
                 }
             }
-            // 편승 알람 — 권장시각 **기준**(신도림 근무시작 출발시각 기준)이 사용자 확정 대기라 꺼 둔 상태.
-            // 아이콘·다이얼로그·예약/취소·부팅복구는 전부 완성돼 동작 확인까지 마쳤다(v1.6.26).
-            // `BundledTimetable.recommend()`를 채우고 아래 한 줄을 되살리면 그대로 켜진다.
-            // row?.let { DeadheadAlarmChip(day.date, it.signOn) }
+            // 출근 알람 — 시각이 있는 근무(본선·지선·대기)에만 띄운다. 계산은 BundledTimetable.advise.
+            if (row != null) DeadheadAlarmChip(day.date, day.duty)
             if (showRoute && routeAsset != null) {
                 RouteImageDialog(
                     asset = routeAsset,
@@ -915,20 +913,20 @@ private fun DayDetailContent(
 }
 
 /**
- * 편승 알람 버튼 (행로표 바로 아래, 오른쪽 정렬).
+ * 출근 알람 버튼 (행로표 바로 아래, 오른쪽 정렬).
  *
- * **앱은 어느 다이아가 실제로 편승이 필요한지 판별할 수 없다** — 행로표가 스캔 이미지라
- * 역명이 구조화 데이터로 없다. 그래서 출근시각만 있으면 무조건 버튼을 띄우고,
- * 사용자가 눌러 확인해야만 알람이 걸린다. 앱이 "이 근무는 필요없다"고 숨기지 않는다.
+ * 권장 시각과 안내 문구는 [BundledTimetable.advise]가 세 갈래로 준다
+ * (지선 = 양천구청 도착 / 본선 신도림 교대 = 편승 탑승 / 기지 출고·대기 = 알람 없음).
+ * **자동 예약은 하지 않는다** — 버튼만 띄우고 사용자가 눌러 확인해야 걸린다.
  *
  * 근무변경으로 다이아가 바뀌면 예약해 둔 시각이 안 맞을 수 있으므로,
  * 시트를 열 때(=`at`이 바뀔 때) 예약이 살아 있으면 새 시각으로 다시 걸거나 해제한다.
  */
-@Suppress("unused") // 규칙 확정 대기로 호출부를 잠시 주석 처리해 둠 (위 DayDetailContent 참조)
 @Composable
-private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
+private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode) {
     val ctx = LocalContext.current
-    val at = remember(date, signOn) { BundledTimetable.recommend(date, signOn) }
+    val advice = remember(date, duty) { BundledTimetable.advise(duty, date) }
+    val at = advice.at
     val past = at != null && !LocalDateTime.of(date, at).isAfter(LocalDateTime.now())
     var booked by remember(date) { mutableStateOf<java.time.LocalTime?>(null) }
     var ask by remember(date) { mutableStateOf(false) }
@@ -937,7 +935,7 @@ private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
         val cur = DeadheadAlarm.scheduledAt(ctx, date)
         booked = when {
             cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, date); null }
-            cur != at -> if (DeadheadAlarm.schedule(ctx, date, at)) at else null
+            cur != at -> if (DeadheadAlarm.schedule(ctx, date, at, advice.text)) at else null
             else -> cur
         }
     }
@@ -945,6 +943,8 @@ private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
     fun hm(t: java.time.LocalTime) = "%d:%02d".format(t.hour, t.minute)
     val on = booked != null
     val disabled = at == null || past
+    // 지선은 양천구청에 "도착"하면 되고 본선은 편승 열차를 "탑승"해야 한다
+    val verb = if (duty.isBranch) "도착" else "편승"
 
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Surface(
@@ -962,14 +962,14 @@ private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
             ) {
                 Icon(
                     if (on) Icons.Default.AlarmOn else Icons.Default.Alarm,
-                    "편승 알람", Modifier.size(16.dp),
+                    "출근 알람", Modifier.size(16.dp),
                 )
                 Text(
                     when {
-                        at == null -> "편승 정보 없음"
-                        past -> "편승 ${hm(at)} 지남"
-                        on -> "편승 ${hm(at)} 예약됨"
-                        else -> "편승 ${hm(at)}"
+                        at == null -> "알람 없음"
+                        past -> "$verb ${hm(at)} 지남"
+                        on -> "$verb ${hm(at)} 예약됨"
+                        else -> "$verb ${hm(at)}"
                     },
                     fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                 )
@@ -979,19 +979,14 @@ private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
 
     if (ask) AlertDialog(
         onDismissRequest = { ask = false },
-        title = { Text("편승 알람") },
+        title = { Text("출근 알람") },
         text = {
             Text(
                 when {
-                    at == null ->
-                        "출근 $signOn 근무는 맞춰 탈 수 있는 양천구청역 신도림행 열차가 없습니다. " +
-                            "이 시간대엔 편승 정보 없음."
-                    past -> "권장 편승 시각은 ${hm(at)}인데 이미 지났습니다. 알림을 예약할 수 없어요."
-                    on -> "${hm(at)} 양천구청역 편승 탑승으로 예약돼 있습니다. 해제할까요?"
-                    else ->
-                        "${hm(at)} 양천구청역에서 신도림행 편승 탑승을 권합니다.\n" +
-                            "(출근 $signOn 근무 기준)\n\n" +
-                            "이 시각에 알림을 받을까요?"
+                    at == null -> advice.text
+                    past -> "${advice.text}\n\n이미 지난 시각이라 알림을 예약할 수 없어요."
+                    on -> "${advice.text}\n\n으로 예약돼 있습니다. 해제할까요?"
+                    else -> "${advice.text}\n\n이 시각에 알림을 받을까요?"
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -999,7 +994,7 @@ private fun DeadheadAlarmChip(date: LocalDate, signOn: String) {
         confirmButton = {
             if (at != null && !past) TextButton(onClick = {
                 booked = if (on) { DeadheadAlarm.cancel(ctx, date); null }
-                else if (DeadheadAlarm.schedule(ctx, date, at)) at else null
+                else if (DeadheadAlarm.schedule(ctx, date, at, advice.text)) at else null
                 ask = false
             }) { Text(if (on) "예약 해제" else "알림 예약") }
         },
