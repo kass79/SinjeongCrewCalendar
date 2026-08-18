@@ -3,6 +3,7 @@ package com.sinjeong.crewcalendar.util
 import android.content.Context
 import android.graphics.*
 import androidx.core.content.FileProvider
+import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import java.io.File
@@ -11,13 +12,13 @@ import java.time.YearMonth
 
 /** 근무 종별 [배경, 글자] 색 (라이트 톤과 동일) */
 private fun dutyColors(t: DutyType): Pair<Int, Int> = when (t) {
-    DutyType.MAIN_DAY, DutyType.OFFICE -> 0xFFE8FAF0.toInt() to 0xFF00512B.toInt()
+    DutyType.MAIN_DAY, DutyType.OFFICE -> 0xFFE8FAF0.toInt() to 0xFF00210E.toInt()
     DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> 0xFFF6F0FD.toInt() to 0xFF7A5AB8.toInt()
     // 비번 = 야간과 같은 보라 계열(채도만 낮춤). Theme.kt의 LightDutyColors.off/onOff와 같은 값 — 같이 고칠 것
     DutyType.POST_NIGHT -> 0xFFF5F0FB.toInt() to 0xFF74679A.toInt()
     DutyType.REST, DutyType.BRANCH_REST -> 0xFFFFF0EC.toInt() to 0xFFB3271E.toInt()
     DutyType.STANDBY, DutyType.BRANCH_STANDBY -> 0xFFFFF8E8.toInt() to 0xFF755B00.toInt()
-    DutyType.BRANCH -> 0xFFE8FAF0.toInt() to 0xFF00512B.toInt()
+    DutyType.BRANCH -> 0xFFE8FAF0.toInt() to 0xFF00210E.toInt()
     DutyType.ETC -> 0x00000000 to 0xFF888888.toInt()
 }
 
@@ -70,7 +71,18 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
         val dow = (leading + d - 1) % 7
         val dcol = when { day.holidayName != null || dow == 0 -> 0xFFC4302B.toInt(); dow == 6 -> 0xFF2A5DB0.toInt(); else -> 0xFF444444.toInt() }
         txt("$d", left + 14, top + 40f, 30f, dcol, bold = true)
-        day.holidayName?.let { txt(it, left + cellW - 10, top + 34f, 19f, 0xFFC4302B.toInt(), right = true) }
+        // 공휴일·기념일·절기 이름을 날짜 옆 같은 줄에 (앱 DayCell의 nameTag/HolidayTag — MainCalendarScreen.kt:592·618).
+        // 날짜 숫자 자리를 침범하면 들어갈 때까지 축소하는 것도 HolidayTag와 같은 방식.
+        (day.holidayName ?: day.memorialName ?: day.seasonalTerm)?.let { name ->
+            val avail = cellW - 10 - 54f          // 좌측 여백 + 날짜 숫자(30f 두 자리) 자리를 뺀 폭
+            var s = 19f
+            p.textSize = s; p.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+            while (p.measureText(name) > avail && s > 12f) { s *= 0.92f; p.textSize = s }
+            // 공휴일·기념일은 빨강, 절기는 대기색(앱 nameColor = sunday / onStandby)
+            val nc = if (day.holidayName != null || day.memorialName != null) 0xFFC4302B.toInt()
+            else 0xFF755B00.toInt()
+            txt(name, left + cellW - 10, top + 34f, s, nc, right = true)
+        }
         // 근무 칩
         val label = day.duty.display
         if (label.isNotBlank()) {
@@ -79,11 +91,31 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
             val cx = left + cellW / 2; val cy = top + 82f
             if (bg != 0) {
                 p.color = bg
-                c.drawRoundRect(cx - chipW / 2, cy - chipH / 2, cx + chipW / 2, cy + chipH / 2, 12f, 12f, p)
+                // 알약 = 라운드 높이의 절반 (앱 RoundedCornerShape(percent = 50), v1.6.23)
+                c.drawRoundRect(cx - chipW / 2, cy - chipH / 2, cx + chipW / 2, cy + chipH / 2, chipH / 2, chipH / 2, p)
             }
             txt(label, cx, cy + 13f, if (label.length >= 3) 30f else 36f, fg, bold = true, center = true)
+            // 야간 초승달 배지 — 앱은 Icons.Default.DarkMode 벡터(MainCalendarScreen.kt:660).
+            // Canvas엔 벡터가 없어 원 두 개 차집합으로 직접 그린다. 위치도 앱과 같은 칩 왼쪽 위 모서리.
+            // 공유 이미지는 배경이 흰색 고정(c.drawColor(WHITE))이라 라이트 값 0xFFE09600만 쓴다.
+            if (day.duty.isNight) {
+                val mr = 13f
+                val mx = cx - chipW / 2; val my = cy - chipH / 2 + 2f
+                val moon = Path().apply { addCircle(mx, my, mr, Path.Direction.CW) }
+                val bite = Path().apply { addCircle(mx + mr * 0.45f, my - mr * 0.38f, mr * 0.95f, Path.Direction.CW) }
+                moon.op(bite, Path.Op.DIFFERENCE)
+                p.color = 0xFFE09600.toInt()
+                c.drawPath(moon, p)
+            }
         }
-        day.signOn?.let { txt(it, left + cellW / 2, top + 128f, 24f, 0xFF6B6B78.toInt(), center = true) }
+        // 출근시각. 없으면 휴일 운휴 다이아(본선 주간 26~29)인지 보고 그 자리를 채운다 —
+        // 앱 MainCalendarScreen.kt:671~682과 같은 조건·같은 색.
+        val so = day.signOn
+        if (so != null) {
+            txt(so, left + cellW / 2, top + 128f, 24f, 0xFF6B6B78.toInt(), center = true)
+        } else if (day.duty.isWorkDay && day.duty.number != null && Bundled.isHolidayTimetable(day.date)) {
+            txt("운휴", left + cellW / 2, top + 128f, 24f, 0xFFC4302B.toInt(), bold = true, center = true)
+        }
     }
     // 저장
     val dir = File(context.cacheDir, "share").apply { mkdirs() }
