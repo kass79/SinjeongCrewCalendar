@@ -776,7 +776,10 @@ private fun DayDetailContent(
             // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
             val holiday = Bundled.isHolidayTimetable(day.date)
             val isNight = day.duty.type == DutyType.MAIN_NIGHT
-            val mainLegs = day.duty.number?.takeIf { !day.duty.isBranch }?.let { n ->
+            // 대기(대1~13)는 번호가 본선 교번과 겹친다 — 타입까지 봐야 `대3`이 `3` 다이아의
+            // 사업시각·열번을 끌어오지 않는다 (v1.6.27에서 잡힌 표시 오류)
+            val isMain = day.duty.type == DutyType.MAIN_DAY || isNight
+            val mainLegs = day.duty.number?.takeIf { isMain }?.let { n ->
                 if (isNight) combo?.let { MainLegs.forNight(n, it) } else MainLegs.forDay(n, holiday)
             }
             val trains = day.duty.number?.let { n ->
@@ -784,7 +787,8 @@ private fun DayDetailContent(
                     day.duty.isBranch && day.duty.type != DutyType.BRANCH_STANDBY -> RouteTable.forBranch(n, holiday)
                     day.duty.isBranch -> null
                     isNight -> combo?.let { RouteTable.forMainNight(n, it) }
-                    else -> RouteTable.forMainDay(n, holiday)
+                    isMain -> RouteTable.forMainDay(n, holiday)
+                    else -> null
                 }
             }
             val branchLegs = if (day.duty.isBranch) row?.let { r ->
@@ -985,7 +989,7 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode) {
                 when {
                     at == null -> advice.text
                     past -> "${advice.text}\n\n이미 지난 시각이라 알림을 예약할 수 없어요."
-                    on -> "${advice.text}\n\n으로 예약돼 있습니다. 해제할까요?"
+                    on -> "${advice.text}\n\n이대로 예약돼 있습니다. 알림을 해제할까요?"
                     else -> "${advice.text}\n\n이 시각에 알림을 받을까요?"
                 },
                 style = MaterialTheme.typography.bodyMedium,
