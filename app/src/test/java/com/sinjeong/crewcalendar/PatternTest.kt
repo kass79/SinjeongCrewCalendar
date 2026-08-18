@@ -128,13 +128,25 @@ class PatternTest {
         Bundled.ALL_PATTERNS.forEach { assertNotNull(it.id, Bundled.groupFor(it.id)) }
     }
 
-    /** 동료근무 화면에 뜨는 이름은 전화조회(BundledStaff)에도 있어야 한다 — 두 파일이 어긋나면 조용히 실패 */
+    /**
+     * 동료근무 화면에 뜨는 이름은 전화조회(BundledStaff)에도 있어야 한다 — 두 파일이 어긋나면 조용히 실패.
+     *
+     * ⚠ 아래 2명은 **비상연락망(2026-06-16)에 애초에 없는 사람**이다. v1.6.24에서 사번표를 근거로
+     * "구분 미상"에서 소속이 확정돼 `BundledRoster`에 들어왔지만, 연락망이 그보다 앞선 자료라
+     * 전화번호만 비어 있다. 이름·사번은 `BundledStaff`에 있어 **로그인은 정상**이고,
+     * 화면에는 "등록된 전화번호가 없습니다"가 뜬다(사무·2호선 인원과 같은 처리).
+     * → 코드 결함이 아니라 **원본 자료의 공백**이다. 새 연락망을 받으면 채우고 이 목록을 비울 것.
+     */
     @Test fun new_group_names_resolve_to_phone_numbers() {
+        val knownMissingPhone = setOf("김대호", "이영란")
+        val missing = mutableListOf<String>()
         listOf(CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY).forEach { g ->
             BundledRoster.forGroup(g).forEach { (name, _) ->
-                assertNotNull("$name 전화번호 없음", BundledStaff.phoneFor(name, false))
+                // 이름이 어긋나면(오타 등) phoneFor 가 null 을 주므로 여기서 같이 걸린다
+                if (BundledStaff.phoneFor(name, false) == null) missing += name
             }
         }
+        assertEquals("전화번호 공백 명단이 달라졌다", knownMissingPhone, missing.toSet())
     }
 
     /**
@@ -202,9 +214,10 @@ class PatternTest {
     }
 
     @Test fun officePattern_rests_on_new_holidays() {
-        assertEquals("휴무", office.dutyOn(election, 0).display)
-        assertEquals("휴무", office.dutyOn(constitution, 0).display)
-        assertEquals("주간", office.dutyOn(election.minusDays(1), 0).display)
+        // v1.6.24부터 `display`는 한 글자(휴/주)다 — 패턴을 보는 검사라 원본 `raw`로 확인한다
+        assertEquals("휴무", office.dutyOn(election, 0).raw)
+        assertEquals("휴무", office.dutyOn(constitution, 0).raw)
+        assertEquals("주간", office.dutyOn(election.minusDays(1), 0).raw)
     }
 
     /**
@@ -292,6 +305,82 @@ class PatternTest {
         // 4조2교대·통상근무는 출근시각 자체가 없다 = 아이콘이 안 뜨는 근거
         assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주간"), weekday))
         assertEquals(null, Bundled.timeRowFor(DutyCode.parse("주"), weekday))
+    }
+
+    /**
+     * v1.6.28 — 편승 창을 10~19분 → **10~20분**으로 넓힌 결과를 손계산으로 고정한다.
+     *
+     * v1.6.27에서 "알람 없음"이던 야간 7조합 중 **6조합이 살아나고**, `46 휴평` 하나만 남는다
+     * (앞 열차가 21:20 = 21분 전이라 20분 창에도 안 들어온다).
+     * 살아난 6건은 전부 **정확히 20분 전** 열차다 — 즉 이 창 확대로 얻는 최대치다.
+     */
+    @Test fun widenedWindow_revives_six_of_seven_night_combos() {
+        val pp = LocalDate.of(2026, 8, 19)   // 수 → 목  : 평평
+        val ph = LocalDate.of(2026, 8, 21)   // 금 → 토  : 평휴
+        val hh = LocalDate.of(2026, 8, 22)   // 토 → 일  : 휴휴
+        val hp = LocalDate.of(2026, 8, 23)   // 일 → 월  : 휴평
+        assertEquals(NightCombo.PP, Bundled.comboOf(pp))
+        assertEquals(NightCombo.PH, Bundled.comboOf(ph))
+        assertEquals(NightCombo.HH, Bundled.comboOf(hh))
+        assertEquals(NightCombo.HP, Bundled.comboOf(hp))
+
+        // 다이아, 날짜, 신도림 출발, 되살아난 편승시각(전부 20분 전)
+        listOf(
+            Triple("37", pp, LocalTime.of(18, 40) to LocalTime.of(18, 20)),
+            Triple("37", ph, LocalTime.of(18, 40) to LocalTime.of(18, 20)),
+            Triple("42", pp, LocalTime.of(20, 30) to LocalTime.of(20, 10)),
+            Triple("42", ph, LocalTime.of(20, 30) to LocalTime.of(20, 10)),
+            Triple("50", hh, LocalTime.of(22, 35) to LocalTime.of(22, 15)),
+            Triple("50", hp, LocalTime.of(22, 35) to LocalTime.of(22, 15)),
+        ).forEach { (dia, date, times) ->
+            val (start, expected) = times
+            val a = BundledTimetable.advise(DutyCode.parse(dia), date)
+            assertEquals("$dia ${Bundled.comboOf(date)}", expected, a.at)
+            assertTrue(a.text, a.text.contains("신도림 ${start.hour}:%02d 출발".format(start.minute)))
+            assertEquals("$dia 는 20분 전이어야 한다", 20L, java.time.Duration.between(expected, start).toMinutes())
+        }
+
+        // 유일하게 남은 구멍 — 46 휴평(21:41 출발, 앞 열차 21:20 = 21분 전)
+        assertEquals(null, BundledTimetable.advise(DutyCode.parse("46"), hp).at)
+    }
+
+    /**
+     * 창을 넓혀도 **이미 알람이 있던 다이아의 권장시각은 한 건도 안 바뀐다**는 것을 전수 증명한다.
+     *
+     * 근거: 고르는 방식이 `maxOrNull`(가장 늦은 편)이고 창의 **늦은 쪽 끝(10분)은 그대로**라
+     * 창을 앞으로 넓혀도 더 늦은 열차가 새로 들어올 수 없다. 이 테스트는 그 논증을
+     * 옛 창(10~19분)을 재현해 실제 데이터로 확인한다 — 깨지면 창 확대가 선택을 바꾼 것이다.
+     */
+    @Test fun widenedWindow_never_moves_an_existing_recommendation() {
+        fun oldWindowPick(start: LocalTime, holiday: Boolean): LocalTime? {
+            val s = start.hour * 60 + start.minute
+            return BundledTimetable.ROWS.flatMap { r ->
+                (if (holiday) r.holiday else r.weekday).map { LocalTime.of(r.hour, it) }
+            }.filter { (it.hour * 60 + it.minute) in (s - 19)..(s - 10) }.maxOrNull()
+        }
+
+        var checked = 0
+        listOf(
+            LocalDate.of(2026, 8, 19), LocalDate.of(2026, 8, 21),
+            LocalDate.of(2026, 8, 22), LocalDate.of(2026, 8, 23),
+        ).forEach { date ->
+            val holiday = Bundled.isHolidayTimetable(date)
+            (1..51).forEach { n ->
+                val advice = BundledTimetable.advise(DutyCode.parse("$n"), date)
+                val start = MainLegs.forDay(n, holiday)?.firstOrNull()
+                    ?: MainLegs.forNight(n, Bundled.comboOf(date))?.firstOrNull()
+                val startT = start?.split(":")?.takeIf { it.size == 2 }
+                    ?.let { p -> p[0].toIntOrNull()?.takeIf { it in 0..23 }?.let { h -> LocalTime.of(h, p[1].toInt()) } }
+                    ?: return@forEach
+                val old = oldWindowPick(startT, holiday) ?: return@forEach
+                // 옛 창에 열차가 있었다면 새 창도 같은 열차를 골라야 한다
+                if (advice.at != null) {
+                    assertEquals("$n / $date 권장시각이 바뀌었다", old, advice.at)
+                    checked++
+                }
+            }
+        }
+        assertTrue("검사 표본이 비었다 — 테스트가 무의미해졌다", checked > 50)
     }
 
     /**
