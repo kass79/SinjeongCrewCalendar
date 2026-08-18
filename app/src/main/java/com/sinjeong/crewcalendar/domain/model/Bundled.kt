@@ -154,10 +154,32 @@ object Bundled {
      */
     val MEMORIAL_DAYS: Map<LocalDate, String> = emptyMap()
 
-    /** 절기/복날 표시 */
+    /**
+     * 절기/복날 표시 — 2026년 24절기 전체 + 삼복.
+     *
+     * 출처: https://uncle.tools/manse/solar-terms/2026 (절입시각 분 단위) 를 기준으로,
+     * https://naragara.com/4489 과 대조해 24건 중 23건 일치를 확인했다.
+     * 유일한 불일치인 백로는 절입이 **9/7 23:41**(자정 19분 전)이라 반올림한 자료들이
+     * 9/8로 적는다 — 절입시각을 분 단위로 싣는 https://www.sazasaju.com/blog/2026-jeolip-time-table
+     * 도 9/7 23:41 이므로 9/7 로 넣는다.
+     *
+     * 이름은 모두 2글자 — 기존 6건과 같고, 달력 칸이 좁아 HolidayTag가 축소되는 걸 피한다.
+     * 공휴일과 겹치는 5/5(어린이날·입하) · 6/6(현충일·망종)은 달력이
+     * `holidayName ?: memorialName ?: seasonalTerm` 순으로 고르므로 공휴일 이름만 나온다.
+     */
     val SEASONAL_TERMS: Map<LocalDate, String> = mapOf(
+        d(1, 5) to "소한", d(1, 20) to "대한",
+        d(2, 4) to "입춘", d(2, 19) to "우수",
+        d(3, 5) to "경칩", d(3, 20) to "춘분",
+        d(4, 5) to "청명", d(4, 20) to "곡우",
+        d(5, 5) to "입하", d(5, 21) to "소만",
+        d(6, 6) to "망종", d(6, 21) to "하지",
         d(7, 7) to "소서", d(7, 15) to "초복", d(7, 23) to "대서", d(7, 25) to "중복",
-        d(8, 7) to "입추", d(8, 14) to "말복",
+        d(8, 7) to "입추", d(8, 14) to "말복", d(8, 23) to "처서",
+        d(9, 7) to "백로", d(9, 23) to "추분",
+        d(10, 8) to "한로", d(10, 23) to "상강",
+        d(11, 7) to "입동", d(11, 22) to "소설",
+        d(12, 7) to "대설", d(12, 22) to "동지",
     )
 
     /** 휴일 다이아 적용 여부: 토·일·법정공휴일 */

@@ -4,6 +4,13 @@
   줄일 수 없어 2x1 배치가 아예 불가능했다. 110x40dp 로 내려 2x1 을 허용하고,
   좁아진 구간은 DutyWidget 의 TINY 레이아웃(오늘 근무 + 출근시각)이 받는다.
   기본 배치 크기는 targetCell 4x1 그대로 — 처음 놓으면 지금까지와 같은 7일 스트립이다.
+
+  previewLayout(API 31+)만 쓴다. 실제 위젯은 Glance라 XML이 없어 미리보기용 정적 사본
+  (@layout/widget_duty_preview)을 따로 뒀다. minSdk 26 이라 API 30 이하에서는 이 속성이
+  무시되고 종전처럼 앱 아이콘이 나온다.
+  ponytail: previewImage 폴백은 일부러 안 넣었다 — 벡터 드로어블은 글자를 못 그려서
+  "회색 네모 7개"가 되고, 그건 앱 아이콘보다 못하다. 진짜로 필요해지면 위젯 실화면
+  스크린샷을 PNG(drawable-nodpi)로 넣고 previewImage 로 걸 것.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="110dp"
@@ -15,4 +22,5 @@
     android:updatePeriodMillis="1800000"
     android:widgetCategory="home_screen"
     android:resizeMode="horizontal|vertical"
+    android:previewLayout="@layout/widget_duty_preview"
     android:description="@string/widget_label" />

@@ -1,0 +1,250 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  위젯 고르기 화면 previewLayout 전용 — 실제 위젯은 Glance(DutyWidget)라 XML 레이아웃이 없다.
+  그래서 4x1(WIDE) 모습만 정적으로 흉내 낸다: 부제 한 줄 + 7일 스트립.
+  치수·글자크기는 DutyWidget 의 tall=true·narrow=false 갈래와 맞춤
+  (부제 13sp / 요일+날짜 11.5sp / 근무 16sp, 칸 padding 4dp, 칸 간격 1dp).
+  데이터는 가짜지만 MAIN_PATTERN 의 실제 연속 구간(47 → 47비 → 휴16 → 18 → 23 → 휴29 → 4)이고
+  "47비"는 DutyCode.display 규칙대로 "~"로 적는다.
+  색은 프레임워크 테마 속성이라 런처(호스트) 테마를 따라간다 — Glance 위젯과 같은 동작.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/widget_preview_card"
+    android:backgroundTint="?android:attr/colorBackground"
+    android:paddingLeft="8dp"
+    android:paddingRight="8dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="2dp"
+        android:layout_marginBottom="3dp"
+        android:text="오늘 출근 20:51"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:maxLines="1"
+        android:textColor="?android:attr/textColorPrimary" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <!-- 오늘 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorAccent">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="목 13"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimaryInverse" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="47"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimaryInverse" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorControlHighlight">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="금 14"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="~"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorControlHighlight">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="토 15"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="휴16"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
+
+        <!-- 일요일 = 날짜 빨강 -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorControlHighlight">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="일 16"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="#C4302B" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="18"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorControlHighlight">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="월 17"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="23"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorControlHighlight">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="화 18"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="휴29"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginLeft="1dp"
+            android:layout_marginRight="1dp"
+            android:orientation="vertical"
+            android:gravity="center_horizontal"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="@drawable/widget_preview_cell"
+            android:backgroundTint="?android:attr/colorControlHighlight">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="수 19"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="4"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:textColor="?android:attr/textColorPrimary" />
+        </LinearLayout>
+    </LinearLayout>
+</LinearLayout>
