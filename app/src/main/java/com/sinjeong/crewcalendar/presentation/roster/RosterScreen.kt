@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -125,6 +126,10 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
     // 글자 자동 축소(AutoFitText)는 유지 — 긴 코드만 줄고 대부분은 11sp 그대로다.
     val m = MatrixMetrics.Dense
     val hScroll = rememberMatrixScroll(month, m.cellW)
+    // 필터를 바꾸면 명단이 통째로 달라지는데 세로 위치는 그대로라 중간부터 보였다 — "나" 행이 화면 밖.
+    // 가로(날짜) 스크롤은 헤더와 공유하는 상태라 건드리지 않는다.
+    val listState = rememberLazyListState()
+    LaunchedEffect(filter, favOnly) { listState.scrollToItem(0) }
 
     Scaffold(
         topBar = {
@@ -179,7 +184,7 @@ fun RosterScreen(onBack: () -> Unit, viewModel: RosterViewModel = hiltViewModel(
                 CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH,
                 CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY,
             ).filter { filter == null || filter == it }
-            LazyColumn {
+            LazyColumn(state = listState) {
                 sections.forEach { g ->
                     val q = query.trim()
                     val members = people.filter {

@@ -72,6 +72,18 @@ class MatesViewModel @Inject constructor(
         viewModelScope.launch { mateRepo.upsert(Mate(name.trim(), group, offset)) }
     }
 
+    /**
+     * 수정: 저장 키가 "이름|소속"이라 둘 중 하나라도 바뀌면 **옛 키를 먼저 지워야** 유령 행이 안 남는다.
+     * ★즐겨찾기 그룹은 그대로 옮긴다 — 이름 오타를 고쳤다고 ★이 풀리면 안 된다.
+     */
+    fun editMate(old: Mate, name: String, group: CrewGroup, todayPatternIndex: Int) {
+        val offset = Bundled.patternFor(group).offsetFor(LocalDate.now(), todayPatternIndex)
+        viewModelScope.launch {
+            if (old.name != name.trim() || old.group != group) mateRepo.remove(old)
+            mateRepo.upsert(Mate(name.trim(), group, offset, old.favGroup))
+        }
+    }
+
     /** 동료근무 화면과 같은 규칙 — Mate가 없으면(=본인) 그 시점에 만든다 */
     fun setFav(name: String, group: CrewGroup, offset: Int, fav: FavGroup?) {
         val existing = mates.value.find { it.name == name && it.group == group }
@@ -102,6 +114,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     var filter by remember { mutableStateOf<FavGroup?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     var sheetTarget by remember { mutableStateOf<MatrixPerson?>(null) }
+    var editTarget by remember { mutableStateOf<Mate?>(null) }
 
     val duty = LocalDutyColors.current
     val m = MatrixMetrics.Roomy
@@ -196,6 +209,9 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
 
     sheetTarget?.let { person ->
         val mate = mates.find { it.name == person.cleanName && it.group == person.group }
+        // 내장 명단에 있는 이름은 근무가 BundledRoster 값이라 고칠 게 없다 — 수동 등록분만 수정 가능
+        val manual = mate != null &&
+            BundledRoster.forGroup(mate.group).none { it.first == mate.name }
         PersonSheet(
             person,
             fav = mate?.favGroup,
@@ -203,6 +219,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             onDismiss = { sheetTarget = null },
             // 본인 행은 지울 게 없다
             onRemove = if (mate != null && !person.isMe) ({ viewModel.remove(mate) }) else null,
+            onEdit = if (manual && !person.isMe) ({ editTarget = mate }) else null,
         )
     }
 
@@ -212,22 +229,56 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             onDismiss = { showAdd = false },
         )
     }
+
+    editTarget?.let { target ->
+        AddMateSheet(
+            onAdd = { name, group, idx ->
+                viewModel.editMate(target, name, group, idx); editTarget = null
+            },
+            onDismiss = { editTarget = null },
+            edit = target,
+        )
+    }
 }
 
-/** 동료 추가: 이름 → 소속 → 오늘 근무 선택 (근무선택과 동일 원리로 전체 자동 계산) */
+/**
+ * 동료 추가: 이름 → 소속 → 오늘 근무 선택 (근무선택과 동일 원리로 전체 자동 계산).
+ * `edit`가 있으면 같은 시트가 **수정 모드**로 뜬다 — 값이 채워져 있고, 근무 칸을 탭해도 바로
+ * 저장되지 않고 선택만 된다(이름만 고칠 수도 있으니 [저장] 버튼으로 확정).
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () -> Unit) {
+private fun AddMateSheet(
+    onAdd: (String, CrewGroup, Int) -> Unit,
+    onDismiss: () -> Unit,
+    edit: Mate? = null,
+) {
     val duty = LocalDutyColors.current
-    var name by remember { mutableStateOf("") }
-    var group by remember { mutableStateOf(CrewGroup.BRANCH) }
+    val today = remember { LocalDate.now() }
+    var name by remember { mutableStateOf(edit?.name ?: "") }
+    var group by remember { mutableStateOf(edit?.group ?: CrewGroup.BRANCH) }
+    // 지금 저장된 근무 칸을 미리 선택해 둔다. 소속을 바꾸면 교번표가 통째로 달라지므로 다시 골라야 한다.
+    var picked by remember(group) {
+        mutableStateOf(
+            if (edit != null && group == edit.group) {
+                val p = Bundled.patternFor(group)
+                Math.floorMod(
+                    ChronoUnit.DAYS.between(p.anchorDate, today).toInt() + edit.patternOffset,
+                    p.length,
+                )
+            } else -1,
+        )
+    }
 
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("동료 추가", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(
+                if (edit == null) "동료 추가" else "동료 수정",
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+            )
             OutlinedTextField(
                 value = name, onValueChange = { name = it },
                 label = { Text("이름") }, singleLine = true, modifier = Modifier.fillMaxWidth(),
@@ -260,11 +311,18 @@ private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () 
                     val code = DutyCode.parse(pattern.sequence[i])
                     val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     Surface(
-                        onClick = { if (name.trim().length >= 2) onAdd(name, group, i) },
+                        onClick = {
+                            if (edit != null) picked = i
+                            else if (name.trim().length >= 2) onAdd(name, group, i)
+                        },
                         color = bg, contentColor = fg,
                         shape = RoundedCornerShape(9.dp),
-                        border = if (name.trim().length < 2)
-                            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant) else null,
+                        border = when {
+                            i == picked -> BorderStroke(2.5.dp, MaterialTheme.colorScheme.primary)
+                            name.trim().length < 2 ->
+                                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                            else -> null
+                        },
                     ) {
                         Text(
                             code.display,
@@ -276,11 +334,23 @@ private fun AddMateSheet(onAdd: (String, CrewGroup, Int) -> Unit, onDismiss: () 
                     }
                 }
             }
-            if (name.trim().length < 2) Text(
+            if (edit == null && name.trim().length < 2) Text(
                 "이름을 먼저 입력하면 근무를 선택할 수 있습니다",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (edit != null) {
+                if (picked < 0) Text(
+                    "소속을 바꿨습니다 — 오늘 근무를 다시 골라주세요.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Button(
+                    onClick = { onAdd(name, group, picked) },
+                    enabled = name.trim().length >= 2 && picked >= 0,
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("저장") }
+            }
         }
     }
 }

@@ -430,8 +430,8 @@ private fun FavLabel(fav: FavGroup?, onClick: () -> Unit) {
 }
 
 /**
- * 이름을 탭했을 때 뜨는 시트 — 전화·문자·★그룹, 그리고 동료 탭에서는 삭제까지.
- * 두 화면이 공유한다(`onRemove`가 null이면 삭제 항목이 안 뜬다).
+ * 이름을 탭했을 때 뜨는 시트 — 전화·문자·★그룹, 그리고 동료 탭에서는 수정·삭제까지.
+ * 두 화면이 공유한다(`onEdit`/`onRemove`가 null이면 그 항목이 안 뜬다).
  */
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
@@ -441,6 +441,8 @@ fun PersonSheet(
     onSetFav: (FavGroup?) -> Unit,
     onDismiss: () -> Unit,
     onRemove: (() -> Unit)? = null,
+    /** 수동 등록한 동료만 — 내장 명단에서 온 사람은 근무가 계산값이라 고칠 게 없다 */
+    onEdit: (() -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
@@ -448,6 +450,7 @@ fun PersonSheet(
     val cleanName = person.cleanName
     val phone = BundledStaff.phoneFor(cleanName, person.group == CrewGroup.MAIN_CONDUCTOR)
     var favMenu by remember { mutableStateOf(false) }
+    var confirmRemove by remember { mutableStateOf(false) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
             Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 28.dp),
@@ -501,11 +504,29 @@ fun PersonSheet(
             } else {
                 Text("등록된 전화번호가 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if (onEdit != null) {
+                OutlinedButton(onClick = { onEdit(); onDismiss() }) { Text("동료 수정") }
+            }
             if (onRemove != null) {
-                TextButton(onClick = { onRemove(); onDismiss() }) {
+                // 바로 지우지 않는다 — ★ 바로 아래라 오탭이 잦았다(관리자 화면과 같은 확인 다이얼로그)
+                TextButton(onClick = { confirmRemove = true }) {
                     Text("동료 삭제", color = MaterialTheme.colorScheme.error)
                 }
             }
         }
+    }
+
+    if (confirmRemove) {
+        AlertDialog(
+            onDismissRequest = { confirmRemove = false },
+            title = { Text("$cleanName 삭제") },
+            text = { Text("저장한 동료 목록에서 지웁니다. 다시 추가할 수 있습니다.") },
+            confirmButton = {
+                TextButton(onClick = { confirmRemove = false; onRemove?.invoke(); onDismiss() }) {
+                    Text("삭제", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmRemove = false }) { Text("취소") } },
+        )
     }
 }
