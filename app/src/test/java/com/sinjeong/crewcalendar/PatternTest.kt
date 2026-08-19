@@ -538,20 +538,19 @@ class PatternTest {
         fun head(s: String) = Regex("^(\\d{4})").find(s.split('·').first().trim())?.value
         fun tail(s: String) = Regex("^(\\d{4})").find(s.split('·').last().trim())?.value
 
-        // 평일 4·7은 행로표(열번)와 시각표(MainLegs)가 서로 뒤바뀌어 있다 — 확정 전까지 양쪽에서 뺀다
-        val suspect = setOf(4, 7)
+        // v1.6.30에서 뺐던 평일 4·7을 v1.6.31에서 다시 넣는다 — 시각표를 행로표 쪽으로 바로잡아
+        // 둘 다 맞물리고, 앞 다이아가 4·7이라 빠져 있던 평일 19·20도 같이 살아난다.
         var chained = 0
         listOf(false to 0 to 15, true to 15 to 30).forEach { spec ->
             val (pair, toSecondEnd) = spec
             val (hol, toFirstEnd) = pair
             val legs = if (hol) MainLegs.HOLIDAY else MainLegs.WEEKDAY
             legs.keys.sorted().forEach { n ->
-                if (!hol && n in suspect) return@forEach
                 val me = RouteTable.forMainDay(n, hol)!!
                 val t = head(me.secondHalf) ?: return@forEach // 텍스트로 시작 = 신도림 아님
                 var hit = false
                 legs.keys.forEach other@{ o ->
-                    if (o == n || (!hol && o in suspect)) return@other
+                    if (o == n) return@other
                     val ot = RouteTable.forMainDay(o, hol)!!
                     val oLegs = legs.getValue(o)
                     listOf(tail(ot.firstHalf) to (oLegs[1] to toFirstEnd),
@@ -570,17 +569,15 @@ class PatternTest {
                 if (hit) chained++
             }
         }
-        // 평일 17 + 휴일 20 = 37건이 맞물린다.
-        // 맞물리지 않는 나머지는 앞 승무원이 군자 소속이라 우리 표에 없는 경우다
-        // (평일 17·29 · 휴일 없음). 평일 19·20은 앞 다이아가 하필 4·7이라 여기서는 빠지는데,
-        // 둘 다 행로표 스캔(`wd_19` 16:46→17:01 · `wd_20` 16:51→17:06)으로 직접 확인했다.
-        assertEquals("맞물리는 다이아 수", 37, chained)
+        // 4·7 교정 후 맞물리는 다이아 수 (v1.6.31에서 4·7·19·20이 더해졌다).
+        // 맞물리지 않는 나머지는 앞 승무원이 군자 소속이라 우리 표에 아예 없는 경우다.
+        assertEquals("맞물리는 다이아 수", 41, chained)
     }
 
     /**
      * **본선 후반 알람 전수표를 손계산으로 고정한다** (v1.6.30).
      *
-     * 켜진 다이아 40건 / 제외 14건. 제외는 사유가 구체적으로 보여야 한다.
+     * 켜진 다이아 42건 / 제외 12건 (v1.6.31에서 평일 4·7이 제외 → 켜짐). 제외는 사유가 구체적으로 보여야 한다.
      * 표본 시각은 행로표 스캔으로 눈으로도 확인한 것들이다
      * (`wd_12` 16:50 · `wd_29` 19:10 신도림 / `hol_2` 13:48 · `hol_16` 16:09 · `hol_25` 18:14).
      */
@@ -598,6 +595,13 @@ class PatternTest {
         assertEquals(LocalTime.of(18, 55), at(29, weekday).at)
         // 평일 23: 신도림 17:40 → 17:19~17:30 → 17:30 → 알람 17:25
         assertEquals(LocalTime.of(17, 25), at(23, weekday).at)
+        // ── v1.6.31 사용자 실근무 확정 (행로표 `wd_4`·`wd_7` 스캔과 일치) ──
+        // 평일 4: 신도림 14:01 → 13:40~13:51 → 13:51 → 알람 13:46
+        assertEquals(LocalTime.of(13, 46), at(4, weekday).at)
+        assertTrue(at(4, weekday).text, at(4, weekday).text.contains("신도림 14:01 출발"))
+        // 평일 7: 신도림 15:36 → 15:15~15:26 → 15:21 → 알람 15:16
+        assertEquals(LocalTime.of(15, 16), at(7, weekday).at)
+        assertTrue(at(7, weekday).text, at(7, weekday).text.contains("신도림 15:36 출발"))
         // 휴일 2: 표 13:33 + 15 = 신도림 13:48 → 13:27~13:38 → 13:31 → 알람 13:26
         assertEquals(LocalTime.of(13, 26), at(2, holiday).at)
         assertTrue(at(2, holiday).text, at(2, holiday).text.contains("신도림 13:48 출발"))
@@ -611,8 +615,7 @@ class PatternTest {
             Triple(1, weekday, "군자기지 편승"), Triple(6, weekday, "신정기지 출고"),
             Triple(13, weekday, "군자기지 출고"), Triple(14, weekday, "군자기지 입출고"),
             Triple(16, weekday, "신정기지 출고"), Triple(17, weekday, "신정기지 출고"),
-            Triple(21, weekday, "신정기지 출고"), Triple(4, weekday, "어긋남"),
-            Triple(7, weekday, "어긋남"),
+            Triple(21, weekday, "신정기지 출고"),
             Triple(1, holiday, "군자기지"), Triple(3, holiday, "군자기지 입출고"),
             Triple(5, holiday, "신정기지 출고"), Triple(20, holiday, "신정기지 출고"),
             Triple(21, holiday, "성수 교대"),
@@ -625,7 +628,7 @@ class PatternTest {
         // ── 켜진 수 / 제외 수 ──
         val on = MainLegs.WEEKDAY.keys.count { at(it, weekday).at != null } +
             MainLegs.HOLIDAY.keys.count { at(it, holiday).at != null }
-        assertEquals("후반 알람이 켜진 본선 주간 다이아 수", 40, on)
+        assertEquals("후반 알람이 켜진 본선 주간 다이아 수", 42, on)
         assertEquals("본선 주간 조합 수", 54, MainLegs.WEEKDAY.size + MainLegs.HOLIDAY.size)
 
         // 야간 후반은 그대로 익일이라 없다
