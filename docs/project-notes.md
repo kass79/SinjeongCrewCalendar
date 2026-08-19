@@ -747,12 +747,25 @@ v1.6.27~31은 `canScheduleExactAlarms()`가 false면 `setWindow`(편승 ±5분 /
 
 *"핸드폰에서 알람이 울리는것처럼 진짜 알람 울려줘야지..그건 안돼?"*
 
-- **소리 반복은 `Notification.FLAG_INSISTENT` 한 줄로 한다.** MediaPlayer도, 포그라운드
-  서비스도 쓰지 않았다. 이유는 코드가 짧아서가 아니라 **좀비 사운드가 생길 구조가 아니어서**다 —
-  재생기를 시스템이 들고 있으므로 알림이 사라지는 **모든** 경로([해제] 버튼 · 밀어서 지우기 ·
-  `setTimeoutAfter(90초)` · 앱에서 `cancel`)에서 소리가 반드시 끊긴다. 직접 든 MediaPlayer는
-  프로세스가 죽거나 예외가 나면 소리가 남는다. 덤으로 `FOREGROUND_SERVICE_*` 권한을 안 넣어도 돼서
-  **플레이 데이터 안전성 신고 항목이 안 늘었다.**
+- **소리 반복은 알람 화면(`AlarmRingActivity`)이 `MediaPlayer`로 직접 낸다. 포그라운드 서비스는 안 썼다.**
+  처음엔 알림의 `Notification.FLAG_INSISTENT` 한 줄에만 맡겼다(재생기를 시스템이 들고 있어
+  좀비 사운드가 구조적으로 불가능한 게 장점이었다). **실측이 그 설계를 부정했다** — 알림에
+  `timeout=PT1M30S`가 정상 등록된 걸 `dumpsys notification`으로 확인했는데도 소리가
+  **7초·43초 만에** 끊겼다(`RingtonePlayer: stopAsync`). 새벽 출근 알람이 7초 울리고 마는 건
+  이 기능의 존재 이유가 무너지는 것이라 플랫폼에 맡기는 걸 그만뒀다.
+  - 겹쳐 울리지 않게 `onCreate`에서 **알림을 먼저 지운다** — 알림의 역할은 이 화면을 띄우는 것까지.
+  - 좀비 사운드 방지는 **세 겹**: `onDestroy`(뒤로가기 포함 모든 종료 경로에서 프레임워크가 부른다)
+    + 90초 뒤 자동 `finish()` + 프로세스가 죽으면 재생기도 같이 죽는다.
+  - `FLAG_KEEP_SCREEN_ON`으로 우는 동안 화면이 안 꺼진다.
+  - 포그라운드 서비스를 피한 덕에 `FOREGROUND_SERVICE_*` 권한이 안 늘었다 —
+    **플레이 데이터 안전성 신고 항목 무변경.**
+- **전체 화면 알림이 거부된 기기(화면이 못 뜨는 경우)에는 알림의 `FLAG_INSISTENT`가 그대로 남아**
+  (짧더라도) 소리·진동이 울린다. 그래서 알림 쪽 플래그도 함께 유지했다.
+- ⚠ **에뮬레이터 함정**: 이 검증 중 알람 화면이 4~8초 만에 저절로 닫히는 현상이 반복됐는데,
+  `finish()`에 스택트레이스를 심어 보니 **Compose 버튼에 실제 터치 이벤트가 들어오고 있었다**
+  (`getevent`로 `ABS_MT_TRACKING_ID` 눌림/뗌 확인). 좌표가 없는 유령 탭이라 **직전 `input tap`
+  좌표를 그대로 재사용**했고, 그게 하필 [해제] 버튼 자리였다. 앱 결함이 아니라 호스트 쪽 입력이다.
+  다시 재려면 **`input tap`으로 좌표를 화면 구석에 옮겨 놓고** 시작할 것.
 - **새 채널 `crew_alarm_channel`.** 채널은 만든 뒤 소리·중요도를 못 바꾸므로 기존 채널을 고치지 않고
   새 ID로 팠다. `setSound(TYPE_ALARM, USAGE_ALARM)` — **`USAGE_ALARM`이 핵심**이라 미디어·알림 볼륨이
   아니라 **알람 볼륨**을 따르고 방해금지의 "알람 허용"(기본 켜짐)도 통과한다.
@@ -780,9 +793,16 @@ v1.6.27~31은 `canScheduleExactAlarms()`가 false면 `setWindow`(편승 ±5분 /
 | 권한 OFF + v1.6.32 | 대기 알람 **0건** — 조용히 거짓 예약을 만들지 않는다 |
 | 권한 ON 전환 + v1.6.32 (앱 미실행) | 자동 재예약 **`window=0 exactAllowReason=permission flags=0x5`**, 정확히 11:45:00 |
 | 정확 알람 + Doze | `device_idle=-83ms` (지연 0) → **11:45:00 정시 발화** |
-| 칩 탭(권한 OFF) | 안내 다이얼로그 → [설정 열기] → "알람 및 리마인더" 화면 진입 |
-| 알림 권한 거부 | 같은 관문에서 안내(문구·버튼이 알림 설정으로 바뀜) |
-| 회귀 | `PatternTest` **28 tests OK**(편승 알람 42건 계산 잠금 포함), 달력·상세시트·근무선택·동료근무·위젯·로그인 정상, logcat FATAL/ANR **0건** |
+| 칩 탭(권한 OFF) | "알람 권한을 켜 주세요" 다이얼로그(권장 시각 문구 유지) → [설정 열기] → **"알람 및 리마인더" 화면 직행**, 예약 안 됨 |
+| 설정에서 권한 ON → 앱 복귀 → 칩 탭 | 바로 정상 예약 흐름, 칩 `후반 16:35 예약`, 알람 `16:35:00 exactAllowReason=permission` |
+| 알림 권한 거부 | 같은 관문에서 "이 앱의 알림이 꺼져 있습니다" + [설정 열기] → 앱 알림 설정. 설정 화면엔 빨간 "알람이 울리지 않는 상태입니다" |
+| 전체 화면 알림 거부 | 설정 화면에 **무채색** "알람 화면이 뜨지 않습니다"(예약은 막지 않음) + [설정 열기] → "Full-screen notifications" 화면 |
+| **진짜 알람 발화** | 잠금·화면꺼짐 상태에서 FSI가 화면을 깨우고 `AlarmRingActivity` 전체화면. `dumpsys audio`에 `MediaPlayer usage=USAGE_ALARM state:started` |
+| 방해금지(zen_mode=1) | `dumpsys notification`에 **`not_intercepted … new:allowedAlarm`** — DND를 그대로 통과해 소리남 |
+| [해제] | 탭 즉시 `player event:stopped` + `releasing player`(약 1초), 알림도 사라짐 — **좀비 사운드 0** |
+| 90초 자동 정지 | 12:15:43 시작 → **12:17:13.154 `finish()`가 `startRinging$lambda`(autoStop 핸들러)에서 호출** → 소리 종료. 딱 90초 |
+| 브리핑 회귀 | 출근 7:22 근무 기준 `2026-08-20 06:22:00 window=0 exactAllowReason=permission flags=0x5` — 폴백이 아니라 정확 알람으로 걸린다 |
+| 회귀 | `PatternTest` **28 tests OK**(편승 알람 42건 계산 잠금 포함), 달력·상세시트·근무선택 4카드·동료근무 매트릭스·동료 탭·위젯(내일 주간 + 7일 띠)·로그인 유지 정상, logcat FATAL/ANR **0건** |
 
 ### 6. 사용자가 지금 당장 할 일 (v1.6.31을 쓰는 동안)
 
