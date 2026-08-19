@@ -9,9 +9,7 @@ import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.domain.usecase.GetMonthScheduleUseCase
-import com.sinjeong.crewcalendar.domain.usecase.GetTodayDutyUseCase
 import com.sinjeong.crewcalendar.domain.usecase.SelectDutyPositionUseCase
-import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
 import com.sinjeong.crewcalendar.domain.usecase.UpdateDayUseCase
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -32,7 +30,6 @@ data class DutyPickerState(
 data class CalendarUiState(
     val month: YearMonth = YearMonth.now(),
     val days: List<DaySchedule> = emptyList(),
-    val today: TodayDuty? = null,
     val user: User? = null,
     val selectedDate: LocalDate? = null,
     val picker: DutyPickerState? = null,
@@ -56,7 +53,6 @@ data class CalendarUiState(
 @HiltViewModel
 class MainCalendarViewModel @Inject constructor(
     private val getMonthSchedule: GetMonthScheduleUseCase,
-    private val getTodayDuty: GetTodayDutyUseCase,
     private val selectDutyPosition: SelectDutyPositionUseCase,
     private val updateDay: UpdateDayUseCase,
     private val userRepo: UserRepository,
@@ -79,31 +75,19 @@ class MainCalendarViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val today: StateFlow<TodayDuty?> = userRepo.observeMe()
-        .flatMapLatest { user ->
-            if (user == null) flowOf(null)
-            else getMonthSchedule(YearMonth.now())
-                .map { list -> list.firstOrNull { it.date == LocalDate.now() } }
-                .map { day -> day?.let { getTodayDuty(it) } }
-        }
-        .catch { emit(null) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
-
     val uiState: StateFlow<CalendarUiState> = combine(
-        month, days, today, userRepo.observeMe(), selectedDate, picker, changeDate, error,
+        month, days, userRepo.observeMe(), selectedDate, picker, changeDate, error,
     ) { arr ->
         @Suppress("UNCHECKED_CAST")
         CalendarUiState(
             month = arr[0] as YearMonth,
             days = arr[1] as List<DaySchedule>,
-            today = arr[2] as TodayDuty?,
-            user = arr[3] as User?,
-            selectedDate = arr[4] as LocalDate?,
-            picker = arr[5] as DutyPickerState?,
-            changeDate = arr[6] as LocalDate?,
-            isLoading = (arr[1] as List<*>).isEmpty() && arr[7] == null,
-            error = arr[7] as String?,
+            user = arr[2] as User?,
+            selectedDate = arr[3] as LocalDate?,
+            picker = arr[4] as DutyPickerState?,
+            changeDate = arr[5] as LocalDate?,
+            isLoading = (arr[1] as List<*>).isEmpty() && arr[6] == null,
+            error = arr[6] as String?,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())
 

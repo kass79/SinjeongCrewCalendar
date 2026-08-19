@@ -55,7 +55,6 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
-import com.sinjeong.crewcalendar.domain.usecase.TodayDuty
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
@@ -351,66 +350,6 @@ private fun dutyChipColors(type: DutyType, duty: DutyColors, fallback: Color): P
         DutyType.BRANCH -> duty.main to duty.onMain
         DutyType.ETC -> Color.Transparent to fallback
     }
-
-/* ── 오늘 요약 카드 ───────────────────────────────────── */
-@Composable
-private fun TodaySummaryCard(today: TodayDuty, groupLabel: String?, onClick: () -> Unit) {
-    val duty = LocalDutyColors.current
-    Card(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ),
-        shape = RoundedCornerShape(18.dp),
-    ) {
-        Row(
-            Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Column {
-                Text(
-                    "오늘 · ${today.date.dayOfWeek.getDisplayName(TextStyle.SHORT, Locale.KOREAN)}",
-                    style = MaterialTheme.typography.labelSmall,
-                )
-                Text(
-                    "${today.date.dayOfMonth}",
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.ExtraBold,
-                )
-            }
-            Column(Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        // 상단 요약은 폭이 넉넉하다 → 한 글자 코드 대신 "주간 근무"처럼 풀어 쓴다
-                        "${today.duty.displayLong.ifBlank { "근무 없음" }} 근무",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    groupLabel?.let {
-                        Surface(color = duty.branch, contentColor = duty.onBranch, shape = RoundedCornerShape(5.dp)) {
-                            Text(it, fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
-                        }
-                    }
-                }
-                val sub = buildString {
-                    today.signOn?.let { append("출근 $it") }
-                    if (today.memo.isNotBlank()) {
-                        if (isNotEmpty()) append(" · ")
-                        append(today.memo)
-                    }
-                }
-                if (sub.isNotBlank()) Text(
-                    sub, style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
-        }
-    }
-}
 
 /* ── 요일 헤더 ────────────────────────────────────────── */
 @Composable
