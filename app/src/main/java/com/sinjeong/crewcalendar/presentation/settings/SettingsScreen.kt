@@ -22,7 +22,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.domain.model.Bundled
-import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
