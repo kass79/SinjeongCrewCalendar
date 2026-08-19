@@ -257,8 +257,11 @@ object Bundled {
     val MAIN_DAY_WEEKDAY: Map<Int, TimeRow> = mapOf(
         1 to TimeRow("6:27", "15:56"), 2 to TimeRow("6:23", "15:23"),
         3 to TimeRow("6:33", "15:51", false, "7:18#10:33", "14:06-15:51"),
-        4 to TimeRow("6:45", "17:21"), 5 to TimeRow("6:47", "17:05"),
-        6 to TimeRow("6:52", "17:26"), 7 to TimeRow("6:56", "17:16"),
+        // 4·7 퇴근시각은 v1.6.33에서 맞바꿨다. v1.6.31이 [MainLegs] 후반종료만 바로잡고
+        // 여기를 안 고쳐 "signOff = 후반종료" 규칙(다른 9장 전부 성립)이 4·7만 깨져 있었다.
+        // 근거: 행로표 파일럿 wd_4(17:16)·wd_7(17:21) 실판독 + 앱 자체 모순.
+        4 to TimeRow("6:45", "17:16"), 5 to TimeRow("6:47", "17:05"),
+        6 to TimeRow("6:52", "17:26"), 7 to TimeRow("6:56", "17:21"),
         8 to TimeRow("6:57", "17:25"), 9 to TimeRow("7:02", "17:36"),
         10 to TimeRow("7:10", "18:55"), 11 to TimeRow("7:20", "18:42"),
         12 to TimeRow("7:22", "18:35"), 13 to TimeRow("7:36", "17:55"),

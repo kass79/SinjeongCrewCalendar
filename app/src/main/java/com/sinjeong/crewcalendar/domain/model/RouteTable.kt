@@ -110,7 +110,9 @@ object RouteTable {
             NightCombo.HP to TrainAssignment("2310·2344·2376·6932", "출고열차#5925교대·2015·2057", "11:25"),
         ),
         38 to mapOf(
-            NightCombo.PP to TrainAssignment("2398·2446·6942", "5925·2014·2052", "10:41"),
+            // 6925: v1.6.33 정정(옛 5925는 오타). 행로표 파일럿 pp_38 재판독 —
+            // 신정기지 5:43 ○출고 → 신도림 5:48. 35 HP 후반 "6925·2014·2052"와도 일치.
+            NightCombo.PP to TrainAssignment("2398·2446·6942", "6925·2014·2052", "10:41"),
             NightCombo.PH to TrainAssignment("2398·2446·6942", "5923·2011·2041", "10:33"),
             NightCombo.HH to TrainAssignment("2286·2326·2358", "6923·2012·2042", "11:14"),
             NightCombo.HP to TrainAssignment("2339·2369·2399", "6929·2020·2064", "11:20"),
@@ -143,7 +145,9 @@ object RouteTable {
             NightCombo.PP to TrainAssignment("2447·2479·2505", "5937·2043·2107", "11:18"),
             NightCombo.PH to TrainAssignment("2447·2479·2505", "2035·2067", "10:37"),
             NightCombo.HH to TrainAssignment("2334·2366·2398·6936", "2035·2067", "11:28"),
-            NightCombo.HP to TrainAssignment("신도림교대후 군자기지편승·후반군자출고·2390·2418", "1936·2101", "9:43"),
+            // 2358: v1.6.33 정정(옛 2418은 오타이고 순서도 뒤집혀 있었다). 행로표 파일럿 hp_43 —
+            // 신도림 20:12 출발 2358 → 성수, 성수 20:51 출발 2390 → 신도림 21:41.
+            NightCombo.HP to TrainAssignment("신도림교대후 군자기지편승·후반군자출고·2358·2390", "1936·2101", "9:43"),
         ),
         44 to mapOf(
             NightCombo.PP to TrainAssignment("2449·2481·2507·5956", "2052·2106", "11:22"),
