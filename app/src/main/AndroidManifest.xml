@@ -50,12 +50,15 @@
                 android:resource="@xml/duty_widget_info" />
         </receiver>
 
-        <!-- 출근 1시간 전 브리핑 알람 + 부팅 재등록 (보호된 시스템 브로드캐스트는 exported=false로도 수신) -->
+        <!-- 출근 1시간 전 브리핑 알람 + 부팅 재등록 (보호된 시스템 브로드캐스트는 exported=false로도 수신).
+             SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED도 여기서 받는다 — 사용자가 "알람 및 리마인더"를
+             켜는 순간 브리핑과 편승 예약을 정확 알람으로 다시 건다(권한을 끌 때 시스템이 지워 버리므로). -->
         <receiver
             android:name=".widget.BriefingReceiver"
             android:exported="false">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 

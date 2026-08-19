@@ -64,6 +64,9 @@ object BriefingAlarm {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         if (!enabled(ctx)) { am.cancel(pi); return }
+        // 정확 알람 권한이 없으면 아예 걸지 않는다 — v1.6.31까지의 setWindow 폴백은 Doze에서
+        // 통째로 밀려 새벽 출근에 못 울렸다(근거는 [AlarmPermission] 주석). 안내는 설정 화면이 한다.
+        if (!AlarmPermission.canExact(ctx)) { am.cancel(pi); return }
 
         val now = LocalDateTime.now()
         val today = now.toLocalDate()
@@ -77,12 +80,7 @@ object BriefingAlarm {
             ?: run { am.cancel(pi); return }
 
         val ms = at.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi)
-        } else {
-            // 14+ 에서 정확알람 권한이 없을 때: ±10분 창
-            am.setWindow(AlarmManager.RTC_WAKEUP, ms - 600_000L, 1_200_000L, pi)
-        }
+        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi)
     }
 
     /** 오늘 근무 브리핑 발송. 날씨는 실패해도 알림 자체는 반드시 나간다. */

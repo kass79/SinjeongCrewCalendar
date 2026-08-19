@@ -19,6 +19,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.User
@@ -204,6 +206,32 @@ fun SettingsScreen(
                     settingsPrefs.edit().putBoolean("notify_briefing", it).apply()
                     com.sinjeong.crewcalendar.widget.BriefingAlarm.requestRearm(ctx) // 켜면 등록, 끄면 해제
                 })
+            }
+
+            // 권한이 없으면 위 토글을 켜 놔도 브리핑·편승 알람이 걸리지 않는다(v1.6.32).
+            // 화면에 돌아올 때마다 다시 읽어야 설정에서 켜고 온 것이 바로 반영된다.
+            val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+            var alarmWarn by remember { mutableStateOf(AlarmPermission.warning(ctx)) }
+            LaunchedEffect(Unit) {
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                    alarmWarn = AlarmPermission.warning(ctx)
+                }
+            }
+            alarmWarn?.let { warn ->
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("알람이 울리지 않는 상태입니다", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
+                        Text(
+                            warn,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(onClick = { AlarmPermission.openSettings(ctx) }) { Text("설정 열기") }
+                }
             }
 
             // 함께 쓰는 앱

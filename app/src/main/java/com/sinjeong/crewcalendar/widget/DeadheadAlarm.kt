@@ -102,17 +102,17 @@ object DeadheadAlarm {
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
+    /**
+     * 실제로 알람을 건다. **정확 알람 권한이 없으면 걸지 않고 false** — v1.6.31까지 있던
+     * `setWindow` 폴백은 Doze에서 통째로 밀려 "예약됨인데 안 울림"을 만들었다([AlarmPermission] 주석).
+     */
     private fun arm(ctx: Context, date: LocalDate, leg: Int, a: Alarm): Boolean {
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return false
+        if (!AlarmPermission.canExact(ctx)) return false
         val whenAt = LocalDateTime.of(date, a.at)
         if (!whenAt.isAfter(LocalDateTime.now())) return false
         val ms = whenAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val pi = pending(ctx, date, leg, a)
-        if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
-            am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi)
-        } else {
-            am.setWindow(AlarmManager.RTC_WAKEUP, ms - 300_000L, 600_000L, pi) // 정확알람 불가 시 ±5분
-        }
+        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pending(ctx, date, leg, a))
         return true
     }
 
