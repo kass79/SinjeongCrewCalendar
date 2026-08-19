@@ -28,12 +28,6 @@ interface PatternRepository {
     suspend fun save(pattern: Pattern)
 }
 
-interface DiaRepository {
-    /** 해당 날짜 성격(평/토/휴) + 교번의 다이아 조회 */
-    suspend fun findDia(number: Int, dayKind: DayKind, nightVariant: NightVariant? = null, isBranch: Boolean = false): Dia?
-    suspend fun getAll(dayKind: DayKind): List<Dia>
-}
-
 interface ScheduleRepository {
     /** 오버라이드 문서 스트림 (해당 월) */
     fun observeOverrides(uid: String, month: YearMonth): Flow<List<Schedule>>

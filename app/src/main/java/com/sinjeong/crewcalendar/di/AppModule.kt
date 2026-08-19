@@ -51,7 +51,6 @@ object RepositoryModule {
     ): RosterRepository = if (firebaseOn(context)) remote.get() else local
 
     @Provides @Singleton fun patternRepo(impl: LocalPatternRepository): PatternRepository = impl
-    @Provides @Singleton fun diaRepo(impl: LocalDiaRepository): DiaRepository = impl
     @Provides @Singleton fun holidayRepo(impl: LocalHolidayRepository): HolidayRepository = impl
     @Provides @Singleton fun snapshotRepo(impl: LocalSnapshotRepository): SnapshotRepository = impl
     @Provides @Singleton fun mateRepo(impl: LocalMateRepository): MateRepository = impl

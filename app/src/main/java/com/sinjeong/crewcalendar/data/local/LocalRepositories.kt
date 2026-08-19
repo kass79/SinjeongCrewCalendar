@@ -145,12 +145,6 @@ class LocalPatternRepository @Inject constructor() : PatternRepository {
 }
 
 @Singleton
-class LocalDiaRepository @Inject constructor() : DiaRepository {
-    override suspend fun findDia(number: Int, dayKind: DayKind, nightVariant: NightVariant?, isBranch: Boolean): Dia? = null
-    override suspend fun getAll(dayKind: DayKind): List<Dia> = emptyList()
-}
-
-@Singleton
 class LocalHolidayRepository @Inject constructor() : HolidayRepository {
     override suspend fun getHolidays(month: YearMonth): Map<LocalDate, Pair<String, Boolean>> =
         Bundled.PUBLIC_HOLIDAYS.filterKeys { YearMonth.from(it) == month }
