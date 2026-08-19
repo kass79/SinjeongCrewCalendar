@@ -467,6 +467,52 @@ class PatternTest {
         assertEquals("본선은 간격이 45/60 두 갈래", setOf(45, 60), gaps.toSet())
     }
 
+    /**
+     * **후반사업 편승 알람(v1.6.29)의 근거를 잠근다.**
+     *
+     * ① 지선 주간 다이아의 **후반시작시각은 전부 다른 지선 다이아의 사업 종료시각과 정확히 맞물린다.**
+     *    (지1 후반 12:51 = 지6 전반 종료 12:51 / 지3 후반 14:51 = 지1 후반 종료 14:51 …)
+     *    지선은 양천구청에서 인수인계하므로 그 맞물림 지점이 곧 **양천구청**이고,
+     *    그래서 전반과 같은 "5분 전 도착" 규칙을 후반에도 쓸 수 있다. 깨지면 규칙 근거가 사라진다.
+     * ② 본선 후반은 **알람을 걸지 않는다**(시작 지점을 코드로 판별할 근거가 없음).
+     * ③ 야간은 후반이 익일이라 이 날짜 알람으로 못 건다.
+     */
+    @Test fun secondLeg_alarm_only_for_branch_day_duties() {
+        listOf(Bundled.BRANCH_WEEKDAY, Bundled.BRANCH_HOLIDAY).forEach { table ->
+            // 그 표 안의 모든 사업 종료시각 = 인수인계 지점 후보
+            val ends = table.values.flatMap { r ->
+                listOfNotNull(
+                    r.firstLeg?.split('#', '-')?.getOrNull(1),
+                    r.secondLeg?.split('#', '-')?.getOrNull(1),
+                )
+            }.map { it.trim('▼') }.toSet()
+            table.forEach { (dia, r) ->
+                if (r.overnight || r.secondLeg == null) return@forEach // 야간·대기는 제외
+                val start = r.secondLeg!!.split('#', '-')[0]
+                assertTrue("$dia 후반시작 $start 이 인수인계 지점이 아니다", start in ends)
+            }
+        }
+
+        val weekday = LocalDate.of(2026, 8, 18) // 화 = 평일
+        // 지선 주간 — 지1 후반 12:51 → 12:46 도착
+        val branch = BundledTimetable.advise(DutyCode.parse("지1"), weekday, second = true)
+        assertEquals(LocalTime.of(12, 46), branch.at)
+        assertTrue(branch.text, branch.text.contains("양천구청역 12:46 도착"))
+
+        // 본선 주간 12번 — 후반 16:50이지만 시작 지점을 몰라 알람 없음
+        val main = BundledTimetable.advise(DutyCode.parse("12"), weekday, second = true)
+        assertEquals(null, main.at)
+        assertTrue(main.text, main.text.contains("시작 지점"))
+
+        // 야간(지선·본선 모두) — 후반이 익일이라 못 건다
+        assertEquals(null, BundledTimetable.advise(DutyCode.parse("지10"), weekday, second = true).at)
+        assertEquals(null, BundledTimetable.advise(DutyCode.parse("38"), weekday, second = true).at)
+
+        // 전반은 종전 그대로 (후반 인자를 붙여도 기본값이 안 바뀐 것을 확인)
+        assertEquals(LocalTime.of(8, 8), BundledTimetable.advise(DutyCode.parse("지1"), weekday).at)
+        assertEquals(LocalTime.of(7, 53), BundledTimetable.advise(DutyCode.parse("12"), weekday).at)
+    }
+
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
     @Test fun mainDay_26to29_have_no_holiday_timetable() {
         assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)

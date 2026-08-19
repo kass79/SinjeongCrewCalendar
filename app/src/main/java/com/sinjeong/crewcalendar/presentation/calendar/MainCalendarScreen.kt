@@ -17,8 +17,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.AlarmOn
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
@@ -713,6 +711,7 @@ private fun DayCell(
 
 /* ── 날짜 상세 내용 (기존 앱 형식: 출근시간/전반사업/후반사업/근무시간)
       접힘 = ModalBottomSheet 안, 펼침 = 오른쪽 패널 안. 컨테이너만 다르고 내용은 동일 ── */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DayDetailContent(
     day: DaySchedule,
@@ -909,7 +908,19 @@ private fun DayDetailContent(
                 }
             }
             // 출근 알람 — 시각이 있는 근무(본선·지선·대기)에만 띄운다. 계산은 BundledTimetable.advise.
-            if (row != null) DeadheadAlarmChip(day.date, day.duty)
+            // 후반 칩은 후반사업이 실제로 있는 근무(본선 다이아 / 지선 사업시각)에만 붙인다 —
+            // 대기 근무에 "알람 없음" 칩이 두 개 겹쳐 뜨는 걸 막는다.
+            if (row != null) {
+                val hasSecond = mainLegs != null || branchLegs != null
+                FlowRow(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    DeadheadAlarmChip(day.date, day.duty, second = false)
+                    if (hasSecond) DeadheadAlarmChip(day.date, day.duty, second = true)
+                }
+            }
             if (showRoute && routeAsset != null) {
                 RouteImageDialog(
                     asset = routeAsset,
@@ -937,29 +948,35 @@ private fun DayDetailContent(
 }
 
 /**
- * 출근 알람 버튼 (행로표 바로 아래, 오른쪽 정렬).
+ * 편승(출근) 알람 버튼 (행로표 바로 아래, 오른쪽 정렬). **전반사업용·후반사업용 두 개**가 나란히 뜬다.
  *
- * 권장 시각과 안내 문구는 [BundledTimetable.advise]가 세 갈래로 준다
- * (지선 = 양천구청 도착 / 본선 신도림 교대 = 편승 탑승 / 기지 출고·대기 = 알람 없음).
+ * 권장 시각과 안내 문구는 [BundledTimetable.advise]가 준다
+ * (지선 = 양천구청 도착 / 본선 신도림 교대 = 편승 탑승 / 기지 출고·대기·본선 후반 = 알람 없음).
  * **자동 예약은 하지 않는다** — 버튼만 띄우고 사용자가 눌러 확인해야 걸린다.
  *
  * 근무변경으로 다이아가 바뀌면 예약해 둔 시각이 안 맞을 수 있으므로,
  * 시트를 열 때(=`at`이 바뀔 때) 예약이 살아 있으면 새 시각으로 다시 걸거나 해제한다.
+ *
+ * 아이콘은 v1.6.29에서 만든 파스텔 벡터 2종(`ic_deadhead_first` 민트 / `ic_deadhead_second` 라벤더).
+ * **`Icon`이 아니라 `Image`로 그린다** — `Icon`은 tint를 먹여 파스텔 색을 통째로 지워 버린다.
+ * 예약 상태는 종전대로 **칩 배경색 + 글자**가 나타낸다(예약됨 = primaryContainer + "예약됨",
+ * 예약 가능 = surfaceVariant, 지남·없음 = 흐리게).
  */
 @Composable
-private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode) {
+private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) {
     val ctx = LocalContext.current
-    val advice = remember(date, duty) { BundledTimetable.advise(duty, date) }
+    val leg = if (second) DeadheadAlarm.LEG_SECOND else DeadheadAlarm.LEG_FIRST
+    val advice = remember(date, duty, second) { BundledTimetable.advise(duty, date, second) }
     val at = advice.at
     val past = at != null && !LocalDateTime.of(date, at).isAfter(LocalDateTime.now())
-    var booked by remember(date) { mutableStateOf<java.time.LocalTime?>(null) }
-    var ask by remember(date) { mutableStateOf(false) }
+    var booked by remember(date, second) { mutableStateOf<java.time.LocalTime?>(null) }
+    var ask by remember(date, second) { mutableStateOf(false) }
 
-    LaunchedEffect(date, at) {
-        val cur = DeadheadAlarm.scheduledAt(ctx, date)
+    LaunchedEffect(date, at, second) {
+        val cur = DeadheadAlarm.scheduledAt(ctx, date, leg)
         booked = when {
-            cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, date); null }
-            cur != at -> if (DeadheadAlarm.schedule(ctx, date, at, advice.text)) at else null
+            cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, date, leg); null }
+            cur != at -> if (DeadheadAlarm.schedule(ctx, date, leg, at, advice.text)) at else null
             else -> cur
         }
     }
@@ -967,43 +984,42 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode) {
     fun hm(t: java.time.LocalTime) = "%d:%02d".format(t.hour, t.minute)
     val on = booked != null
     val disabled = at == null || past
-    // 지선은 양천구청에 "도착"하면 되고 본선은 편승 열차를 "탑승"해야 한다
-    val verb = if (duty.isBranch) "도착" else "편승"
+    val half = if (second) "후반" else "전반"
 
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Surface(
-            onClick = { ask = true },
-            shape = RoundedCornerShape(999.dp),
-            color = if (on) MaterialTheme.colorScheme.primaryContainer
-            else MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer
-            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (disabled) 0.45f else 1f),
+    Surface(
+        onClick = { ask = true },
+        shape = RoundedCornerShape(999.dp),
+        color = if (on) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (disabled) 0.45f else 1f),
+    ) {
+        Row(
+            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
         ) {
-            Row(
-                Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-            ) {
-                Icon(
-                    if (on) Icons.Default.AlarmOn else Icons.Default.Alarm,
-                    "출근 알람", Modifier.size(16.dp),
-                )
-                Text(
-                    when {
-                        at == null -> "알람 없음"
-                        past -> "$verb ${hm(at)} 지남"
-                        on -> "$verb ${hm(at)} 예약됨"
-                        else -> "$verb ${hm(at)}"
-                    },
-                    fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                )
-            }
+            Image(
+                painterResource(if (second) R.drawable.ic_deadhead_second else R.drawable.ic_deadhead_first),
+                "$half 편승 알람",
+                Modifier.size(18.dp),
+                alpha = if (disabled) 0.5f else 1f,
+            )
+            Text(
+                when {
+                    at == null -> "$half 알람없음"
+                    past -> "$half ${hm(at)} 지남"
+                    on -> "$half ${hm(at)} 예약"
+                    else -> "$half ${hm(at)}"
+                },
+                fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+            )
         }
     }
 
     if (ask) AlertDialog(
         onDismissRequest = { ask = false },
-        title = { Text("출근 알람") },
+        title = { Text("${half}사업 편승 알람") },
         text = {
             Text(
                 when {
@@ -1017,8 +1033,8 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode) {
         },
         confirmButton = {
             if (at != null && !past) TextButton(onClick = {
-                booked = if (on) { DeadheadAlarm.cancel(ctx, date); null }
-                else if (DeadheadAlarm.schedule(ctx, date, at, advice.text)) at else null
+                booked = if (on) { DeadheadAlarm.cancel(ctx, date, leg); null }
+                else if (DeadheadAlarm.schedule(ctx, date, leg, at, advice.text)) at else null
                 ask = false
             }) { Text(if (on) "예약 해제" else "알림 예약") }
         },

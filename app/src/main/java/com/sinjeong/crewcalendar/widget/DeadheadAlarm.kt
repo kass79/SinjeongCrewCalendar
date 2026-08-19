@@ -34,7 +34,11 @@ import java.time.ZoneId
  */
 object DeadheadAlarm {
     const val ACTION = "com.sinjeong.crewcalendar.DEADHEAD"
-    private const val KEY = "deadhead_alarms" // "yyyy-MM-dd|HH:mm|문구" 집합
+    private const val KEY = "deadhead_alarms" // "yyyy-MM-dd|구간|HH:mm|문구" 집합
+
+    /** 전반사업 = 1 / 후반사업 = 2. 같은 날짜에 두 건이 따로 걸린다(v1.6.29). */
+    const val LEG_FIRST = 1
+    const val LEG_SECOND = 2
 
     /** 예약 1건 */
     data class Alarm(val at: LocalTime, val text: String)
@@ -42,58 +46,68 @@ object DeadheadAlarm {
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
     /** 지난 날짜는 읽을 때 걷어낸다 — 목록이 무한히 자라지 않게 */
-    private fun entries(ctx: Context): Map<LocalDate, Alarm> =
+    private fun entries(ctx: Context): Map<Pair<LocalDate, Int>, Alarm> =
         prefs(ctx).getStringSet(KEY, emptySet()).orEmpty()
             .mapNotNull { s ->
                 runCatching {
-                    // 문구에 '|'가 들어갈 일은 없지만, 들어가도 앞 두 칸만 끊어 읽는다
-                    val p = s.split('|', limit = 3)
-                    LocalDate.parse(p[0]) to Alarm(LocalTime.parse(p[1]), p.getOrElse(2) { "" })
+                    // v1.6.29에서 "날짜|시각|문구" → "날짜|구간|시각|문구"로 늘렸다.
+                    // 옛 저장분은 둘째 칸이 시각(`:` 포함)이라 그것으로 구분해 전반으로 읽는다.
+                    val p = s.split('|', limit = 4)
+                    val legacy = ':' in p[1]
+                    val leg = if (legacy) LEG_FIRST else p[1].toInt()
+                    val at = LocalTime.parse(if (legacy) p[1] else p[2])
+                    (LocalDate.parse(p[0]) to leg) to Alarm(at, p.getOrElse(if (legacy) 2 else 3) { "" })
                 }.getOrNull()
             }
-            .filter { it.first >= LocalDate.now() }
+            .filter { it.first.first >= LocalDate.now() }
             .toMap()
 
-    private fun save(ctx: Context, m: Map<LocalDate, Alarm>) =
+    private fun save(ctx: Context, m: Map<Pair<LocalDate, Int>, Alarm>) =
         prefs(ctx).edit()
-            .putStringSet(KEY, m.map { "${it.key}|${it.value.at}|${it.value.text}" }.toSet())
+            .putStringSet(
+                KEY,
+                m.map { (k, v) -> "${k.first}|${k.second}|${v.at}|${v.text}" }.toSet(),
+            )
             .apply()
 
-    /** 그 날짜에 예약된 시각 (없으면 null) — 상세시트 아이콘 상태가 이 값 하나로 정해진다 */
-    fun scheduledAt(ctx: Context, date: LocalDate): LocalTime? = entries(ctx)[date]?.at
+    /** 그 날짜·구간에 예약된 시각 (없으면 null) — 상세시트 칩 상태가 이 값 하나로 정해진다 */
+    fun scheduledAt(ctx: Context, date: LocalDate, leg: Int = LEG_FIRST): LocalTime? =
+        entries(ctx)[date to leg]?.at
 
     /** 예약(또는 시각 변경 재예약). 이미 지난 시각이면 아무것도 하지 않고 false */
-    fun schedule(ctx: Context, date: LocalDate, at: LocalTime, text: String): Boolean {
+    fun schedule(ctx: Context, date: LocalDate, leg: Int, at: LocalTime, text: String): Boolean {
         val a = Alarm(at, text)
-        if (!arm(ctx, date, a)) return false
-        save(ctx, entries(ctx) + (date to a))
+        if (!arm(ctx, date, leg, a)) return false
+        save(ctx, entries(ctx) + ((date to leg) to a))
         return true
     }
 
-    fun cancel(ctx: Context, date: LocalDate) {
-        ctx.getSystemService(AlarmManager::class.java)?.cancel(pending(ctx, date))
-        save(ctx, entries(ctx) - date)
+    fun cancel(ctx: Context, date: LocalDate, leg: Int = LEG_FIRST) {
+        ctx.getSystemService(AlarmManager::class.java)?.cancel(pending(ctx, date, leg))
+        save(ctx, entries(ctx) - (date to leg))
     }
 
     /** 부팅 후 재등록 ([BriefingReceiver]가 BOOT_COMPLETED에서 호출) */
-    fun rearmAll(ctx: Context) = entries(ctx).forEach { (d, a) -> arm(ctx, d, a) }
+    fun rearmAll(ctx: Context) = entries(ctx).forEach { (k, a) -> arm(ctx, k.first, k.second, a) }
 
-    private fun pending(ctx: Context, date: LocalDate, a: Alarm? = null) = PendingIntent.getBroadcast(
-        ctx, date.toEpochDay().toInt(),
+    private fun pending(ctx: Context, date: LocalDate, leg: Int, a: Alarm? = null) = PendingIntent.getBroadcast(
+        // 전반은 옛 requestCode를 그대로 둔다 — 업데이트 전에 걸어 둔 알람도 계속 취소된다
+        ctx, date.toEpochDay().toInt() + if (leg == LEG_SECOND) 1_000_000 else 0,
         // 취소는 extras를 안 보는 filterEquals(action+컴포넌트)로 매칭되므로 at 없이도 정확히 걸린다
         Intent(ctx, DeadheadReceiver::class.java).setAction(ACTION)
             .putExtra("date", date.toString())
+            .putExtra("leg", leg)
             .putExtra("at", a?.at?.toString())
             .putExtra("text", a?.text),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
-    private fun arm(ctx: Context, date: LocalDate, a: Alarm): Boolean {
+    private fun arm(ctx: Context, date: LocalDate, leg: Int, a: Alarm): Boolean {
         val am = ctx.getSystemService(AlarmManager::class.java) ?: return false
         val whenAt = LocalDateTime.of(date, a.at)
         if (!whenAt.isAfter(LocalDateTime.now())) return false
         val ms = whenAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val pi = pending(ctx, date, a)
+        val pi = pending(ctx, date, leg, a)
         if (Build.VERSION.SDK_INT < 31 || am.canScheduleExactAlarms()) {
             am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, ms, pi)
         } else {
@@ -102,9 +116,9 @@ object DeadheadAlarm {
         return true
     }
 
-    internal fun notifyNow(ctx: Context, dateStr: String?, at: String?, body: String?) {
+    internal fun notifyNow(ctx: Context, dateStr: String?, leg: Int, at: String?, body: String?) {
         val date = runCatching { LocalDate.parse(dateStr) }.getOrNull() ?: LocalDate.now()
-        save(ctx, entries(ctx) - date) // 발송했으면 예약 해제 — 아이콘이 계속 "예약됨"으로 남지 않게
+        save(ctx, entries(ctx) - (date to leg)) // 발송했으면 예약 해제 — 칩이 계속 "예약됨"으로 남지 않게
         if (Build.VERSION.SDK_INT >= 33 &&
             ActivityCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -117,7 +131,7 @@ object DeadheadAlarm {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         NotificationManagerCompat.from(ctx).notify(
-            1100 + (date.toEpochDay() % 100).toInt(),
+            1100 + (date.toEpochDay() % 100).toInt() + if (leg == LEG_SECOND) 200 else 0,
             NotificationCompat.Builder(ctx, BriefingAlarm.CHANNEL)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle("출근 알람")
@@ -139,6 +153,7 @@ class DeadheadReceiver : BroadcastReceiver() {
         DeadheadAlarm.notifyNow(
             context,
             intent.getStringExtra("date"),
+            intent.getIntExtra("leg", DeadheadAlarm.LEG_FIRST), // 옛 알람은 leg가 없다 → 전반
             intent.getStringExtra("at"),
             intent.getStringExtra("text"),
         )
