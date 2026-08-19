@@ -144,15 +144,6 @@ class LocalPatternRepository @Inject constructor() : PatternRepository {
     override suspend fun save(pattern: Pattern) = Unit
 }
 
-@Singleton
-class LocalHolidayRepository @Inject constructor() : HolidayRepository {
-    override suspend fun getHolidays(month: YearMonth): Map<LocalDate, Pair<String, Boolean>> =
-        Bundled.PUBLIC_HOLIDAYS.filterKeys { YearMonth.from(it) == month }
-            .mapValues { it.value to true } +
-            Bundled.MEMORIAL_DAYS.filterKeys { YearMonth.from(it) == month }
-                .mapValues { it.value to false }
-}
-
 /** 월별 근무기록: 지난 달을 처음 계산할 때 동결 저장 → 이후 근무선택이 바뀌어도 불변 */
 @Singleton
 class LocalSnapshotRepository @Inject constructor(

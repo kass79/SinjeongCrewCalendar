@@ -36,10 +36,6 @@ interface ScheduleRepository {
     suspend fun getOverridesFor(uid: String, month: YearMonth): List<Schedule>
 }
 
-interface HolidayRepository {
-    suspend fun getHolidays(month: YearMonth): Map<LocalDate, Pair<String, Boolean>> // name, isPublic
-}
-
 /**
  * 월별 근무기록 스냅샷 — 지난 달은 그때 근무 그대로 보존.
  * (근무선택을 다시 해서 패턴 위치가 바뀌어도 과거 월 기록은 변하지 않는다)
