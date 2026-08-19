@@ -440,6 +440,36 @@ class PatternTest {
     }
 
     /**
+     * **본선 퇴근시각([Bundled.TimeRow.signOff]) = [MainLegs] 후반종료** — 두 벌로 나뉜 값이
+     * 갈리지 않게 잠근다.
+     *
+     * v1.6.31이 사용자 실근무 확인으로 `MainLegs`의 평일 4·7 후반만 바로잡고 `TimeRow`는
+     * 그대로 둬서, 앱이 같은 값을 두 군데에 다르게 들고 있었다(4 = 17:16/17:21, 7 = 17:21/17:16).
+     * v1.6.33에서 행로표 파일럿 실판독으로 `TimeRow`를 맞추고 이 잠금을 건다.
+     * 127건 전부 성립하므로 예외 목록은 없다 — 깨지면 한쪽만 고쳤다는 뜻이다.
+     */
+    @Test fun signOff_equals_mainLegs_second_half_end() {
+        var checked = 0
+        listOf(
+            Triple(Bundled.MAIN_DAY_WEEKDAY, MainLegs.WEEKDAY, "평"),
+            Triple(Bundled.MAIN_DAY_HOLIDAY, MainLegs.HOLIDAY, "휴"),
+        ).forEach { (times, legs, tag) ->
+            times.forEach { (n, row) ->
+                assertEquals("주간$n($tag) 퇴근", legs.getValue(n)[3], row.signOff)
+                checked++
+            }
+        }
+        Bundled.MAIN_NIGHT.forEach { (n, byCombo) ->
+            byCombo.forEach { (combo, onOff) ->
+                val leg = MainLegs.forNight(n, combo) ?: return@forEach // 33~35 휴휴 = 운휴대기
+                assertEquals("야간$n(${combo.label}) 퇴근", leg[3], onOff.second)
+                checked++
+            }
+        }
+        assertEquals("검사한 다이아 수", 127, checked)
+    }
+
+    /**
      * 편승 기준시각 후보 데이터의 성질을 고정한다 (사용자 규칙 확정용 근거, v1.6.26 실측).
      *
      *  · 지선 `firstLeg` 시작 = **출근 +30분 정확히** (평일·휴일 13개 다이아 전부, 예외 0건)
