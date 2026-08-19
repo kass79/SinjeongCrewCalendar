@@ -2,16 +2,39 @@ package com.sinjeong.crewcalendar.widget
 
 import android.Manifest
 import android.app.AlarmManager
+import android.app.Notification
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.os.Bundle
+import android.view.WindowManager
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.material3.Button
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.sinjeong.crewcalendar.MainActivity
 import com.sinjeong.crewcalendar.R
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -34,6 +57,14 @@ import java.time.ZoneId
  */
 object DeadheadAlarm {
     const val ACTION = "com.sinjeong.crewcalendar.DEADHEAD"
+    const val ACTION_DISMISS = "com.sinjeong.crewcalendar.DEADHEAD_DISMISS"
+
+    /** 알람 전용 채널(v1.6.32 신설) — 알람 볼륨·알람 사운드. 브리핑은 계속 [BriefingAlarm.CHANNEL] */
+    const val CHANNEL = "crew_alarm_channel"
+
+    /** 소리·진동을 반복할 최대 시간. 기본 알람앱들처럼 이만큼 지나면 시스템이 알림째 지운다 */
+    private const val RING_MS = 90_000L
+
     private const val KEY = "deadhead_alarms" // "yyyy-MM-dd|구간|HH:mm|문구" 집합
 
     /** 전반사업 = 1 / 후반사업 = 2. 같은 날짜에 두 건이 따로 걸린다(v1.6.29). */
@@ -126,36 +157,112 @@ object DeadheadAlarm {
 
         // 문구는 예약할 때 계산해 둔 것을 그대로 쓴다 (지선 "도착" / 본선 "편승 탑승"이 갈린다)
         val text = body?.takeIf { it.isNotBlank() } ?: "양천구청역 ${at.orEmpty()}"
-        val open = PendingIntent.getActivity(
-            ctx, 0, Intent(ctx, MainActivity::class.java),
+        val id = 1100 + (date.toEpochDay() % 100).toInt() + if (leg == LEG_SECOND) 200 else 0
+
+        // 전체화면 알람 화면. FLAG_ACTIVITY_NEW_TASK가 없으면 알림에서 못 띄운다.
+        val ring = PendingIntent.getActivity(
+            ctx, id,
+            Intent(ctx, AlarmRingActivity::class.java)
+                .putExtra("id", id).putExtra("text", text)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        NotificationManagerCompat.from(ctx).notify(
-            1100 + (date.toEpochDay() % 100).toInt() + if (leg == LEG_SECOND) 200 else 0,
-            NotificationCompat.Builder(ctx, BriefingAlarm.CHANNEL)
-                .setSmallIcon(R.mipmap.ic_launcher)
-                .setContentTitle("출근 알람")
-                .setContentText(text)
-                .setStyle(NotificationCompat.BigTextStyle().bigText(text))
-                .setCategory(NotificationCompat.CATEGORY_REMINDER)
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setContentIntent(open)
-                .setAutoCancel(true)
-                .build(),
+        val dismiss = PendingIntent.getBroadcast(
+            ctx, id + 500,
+            Intent(ctx, DeadheadReceiver::class.java).setAction(ACTION_DISMISS).putExtra("id", id),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
+
+        val n = NotificationCompat.Builder(ctx, CHANNEL)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentTitle("출근 알람")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            // 전체 화면 알림이 허용돼 있으면 잠금화면 위로 알람 화면이 바로 뜨고,
+            // 안 돼 있으면 시스템이 알아서 heads-up으로 낮춘다 — 그래도 소리는 아래 INSISTENT로 계속 울린다.
+            .setFullScreenIntent(ring, true)
+            .setContentIntent(ring)
+            .addAction(0, "해제", dismiss)
+            .setDeleteIntent(dismiss)
+            .setAutoCancel(true)
+            // 안전장치: 시스템이 이 시간에 알림을 지우고 → 소리도 함께 끊긴다. 좀비 사운드가 생길 수 없다.
+            .setTimeoutAfter(RING_MS)
+            .build()
+        // 폰 기본 알람처럼 "지울 때까지" 소리·진동 반복. 소리는 시스템이 재생하므로
+        // MediaPlayer·포그라운드 서비스가 필요 없고, 알림이 사라지는 모든 경로에서 확실히 멈춘다.
+        n.flags = n.flags or Notification.FLAG_INSISTENT
+        NotificationManagerCompat.from(ctx).notify(id, n)
+    }
+}
+
+/**
+ * 알람 화면 — 잠금화면 위에 뜨는 전체화면. 소리·진동은 알림(`FLAG_INSISTENT`)이 내고 있으므로
+ * 이 화면은 **보여주고 [해제]로 알림을 지우는 일만** 한다. 그래서 재생기를 들고 있지 않고,
+ * 화면이 안 떠도(전체 화면 알림 거부) 알람은 그대로 울린다.
+ */
+class AlarmRingActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (Build.VERSION.SDK_INT >= 27) {
+            setShowWhenLocked(true)
+            setTurnScreenOn(true)
+        } else {
+            @Suppress("DEPRECATION")
+            window.addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                    WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
+            )
+        }
+        val id = intent.getIntExtra("id", 0)
+        val text = intent.getStringExtra("text").orEmpty()
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                Surface(Modifier.fillMaxSize()) {
+                    Column(
+                        Modifier.fillMaxSize().safeDrawingPadding().padding(24.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                    ) {
+                        Text(
+                            LocalTime.now().let { "%d:%02d".format(it.hour, it.minute) },
+                            fontSize = 68.sp, fontWeight = FontWeight.ExtraBold,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Text("출근 알람", fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.height(20.dp))
+                        Text(text, fontSize = 18.sp, textAlign = TextAlign.Center, lineHeight = 26.sp)
+                        Spacer(Modifier.height(48.dp))
+                        Button(
+                            onClick = {
+                                NotificationManagerCompat.from(this@AlarmRingActivity).cancel(id)
+                                finish()
+                            },
+                            Modifier.fillMaxWidth().height(64.dp),
+                        ) { Text("해제", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold) }
+                    }
+                }
+            }
+        }
     }
 }
 
 /** 편승 알람 발화 — 조회할 스케줄이 없어(시각을 인텐트에 담아 둠) 워커 없이 바로 알린다 */
 class DeadheadReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action != DeadheadAlarm.ACTION) return
-        DeadheadAlarm.notifyNow(
-            context,
-            intent.getStringExtra("date"),
-            intent.getIntExtra("leg", DeadheadAlarm.LEG_FIRST), // 옛 알람은 leg가 없다 → 전반
-            intent.getStringExtra("at"),
-            intent.getStringExtra("text"),
-        )
+        when (intent.action) {
+            // 알림의 [해제] 버튼 / 밀어서 지우기. 알림을 지우면 시스템이 소리도 함께 끊는다.
+            DeadheadAlarm.ACTION_DISMISS ->
+                NotificationManagerCompat.from(context).cancel(intent.getIntExtra("id", 0))
+            DeadheadAlarm.ACTION -> DeadheadAlarm.notifyNow(
+                context,
+                intent.getStringExtra("date"),
+                intent.getIntExtra("leg", DeadheadAlarm.LEG_FIRST), // 옛 알람은 leg가 없다 → 전반
+                intent.getStringExtra("at"),
+                intent.getStringExtra("text"),
+            )
+        }
     }
 }

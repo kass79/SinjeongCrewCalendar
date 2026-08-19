@@ -209,23 +209,31 @@ fun SettingsScreen(
             }
 
             // 권한이 없으면 위 토글을 켜 놔도 브리핑·편승 알람이 걸리지 않는다(v1.6.32).
+            // warning = 아예 안 울림(빨강) / notice = 울리긴 하는데 약함(전체화면 알람 꺼짐).
             // 화면에 돌아올 때마다 다시 읽어야 설정에서 켜고 온 것이 바로 반영된다.
             val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
             var alarmWarn by remember { mutableStateOf(AlarmPermission.warning(ctx)) }
+            var alarmNote by remember { mutableStateOf(AlarmPermission.notice(ctx)) }
             LaunchedEffect(Unit) {
                 lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
                     alarmWarn = AlarmPermission.warning(ctx)
+                    alarmNote = AlarmPermission.notice(ctx)
                 }
             }
-            alarmWarn?.let { warn ->
+            (alarmWarn ?: alarmNote)?.let { msg ->
+                val blocking = alarmWarn != null
                 Row(
                     Modifier.fillMaxWidth().padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text("알람이 울리지 않는 상태입니다", fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.error)
                         Text(
-                            warn,
+                            if (blocking) "알람이 울리지 않는 상태입니다" else "알람 화면이 뜨지 않습니다",
+                            fontWeight = FontWeight.Bold,
+                            color = if (blocking) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            msg,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

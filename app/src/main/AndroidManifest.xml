@@ -15,6 +15,9 @@
     <!-- 출근 1시간 전 브리핑: 정확 알람(12~13 기본허용, 14+는 setWindow 폴백) + 부팅 후 재등록 -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- 편승 알람을 잠금화면 위 전체화면으로 띄운다(v1.6.32). 14+는 사용자가 끌 수 있고,
+         꺼져 있으면 heads-up으로 낮아질 뿐 소리·진동(FLAG_INSISTENT)은 그대로 울린다. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
         android:name=".SinjeongApp"
@@ -36,6 +39,18 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 편승 알람 전체화면. 잠금화면 위에 뜨고 최근앱 목록엔 남지 않는다.
+             showWhenLocked/turnScreenOn은 코드에서도 켠다(API 26 대응) -->
+        <activity
+            android:name=".widget.AlarmRingActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:taskAffinity=""
+            android:theme="@style/Theme.SinjeongCrew" />
 
         <!-- 오늘/내일 근무 홈 위젯 -->
         <receiver

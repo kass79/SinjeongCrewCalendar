@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.widget
 
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -43,7 +44,16 @@ object AlarmPermission {
      */
     fun canNotify(ctx: Context): Boolean = NotificationManagerCompat.from(ctx).areNotificationsEnabled()
 
-    /** 지금 막고 있는 것에 대한 안내 문구. 둘 다 켜져 있으면 null */
+    /**
+     * 잠금화면 위 전체화면 알람을 띄울 수 있나. 안드로이드 14부터 사용자가 끌 수 있다.
+     * **이건 예약을 막지 않는다** — 꺼져 있어도 소리·진동은 `FLAG_INSISTENT`로 그대로 울리고
+     * 알림만 heads-up으로 낮아진다. 그래서 [warning]이 아니라 [notice] 쪽이다.
+     */
+    fun canFullScreen(ctx: Context): Boolean =
+        Build.VERSION.SDK_INT < 34 ||
+            ctx.getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() != false
+
+    /** 알람을 **못 울리게 막고 있는** 것에 대한 안내. 다 켜져 있으면 null */
     fun warning(ctx: Context): String? = when {
         !canExact(ctx) ->
             "정시에 알람을 받으려면 휴대폰 설정에서 \"알람 및 리마인더\"를 켜야 합니다.\n" +
@@ -53,14 +63,23 @@ object AlarmPermission {
         else -> null
     }
 
-    /** [warning]이 가리키는 바로 그 설정 화면으로 보낸다. 그 화면이 없는 기기면 앱 정보로 물러난다. */
+    /** 막지는 않지만 알람이 약해지는 것. [warning]이 없을 때만 보면 된다 */
+    fun notice(ctx: Context): String? =
+        if (canFullScreen(ctx)) null
+        else "\"전체 화면 알림\"이 꺼져 있어 잠금화면에 알람 화면이 뜨지 않습니다.\n" +
+            "소리와 진동은 그대로 울립니다."
+
+    /** 지금 막고 있는(또는 약하게 만드는) 바로 그 설정 화면으로 보낸다. 없는 기기면 앱 정보로 물러난다. */
     fun openSettings(ctx: Context) {
         val pkg = Uri.parse("package:${ctx.packageName}")
-        val first = if (!canExact(ctx) && Build.VERSION.SDK_INT >= 31) {
-            Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)
-        } else {
-            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
-                .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
+        val first = when {
+            !canExact(ctx) && Build.VERSION.SDK_INT >= 31 ->
+                Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, pkg)
+            canNotify(ctx) && Build.VERSION.SDK_INT >= 34 ->
+                Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, pkg)
+            else ->
+                Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                    .putExtra(Settings.EXTRA_APP_PACKAGE, ctx.packageName)
         }
         listOf(first, Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg)).firstOrNull {
             runCatching { ctx.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.isSuccess
