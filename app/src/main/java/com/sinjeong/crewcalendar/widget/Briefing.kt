@@ -121,11 +121,7 @@ object BriefingAlarm {
         )
     }
 
-    /** "7:47" → 그 날 07:47. 야간 표기 "25:20"은 익일로 자연히 넘어간다. */
-    private fun signOnAt(date: LocalDate, s: String?): LocalDateTime? {
-        val hm = s?.split(":")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 2 } ?: return null
-        return date.atStartOfDay().plusHours(hm[0].toLong()).plusMinutes(hm[1].toLong())
-    }
+    // signOnAt은 [DutyWidgetWorker] 파일의 것을 같은 패키지에서 그대로 쓴다 (v1.6.33 통합).
 }
 
 /* ── 날씨 (Open-Meteo, 키 불필요) ─────────────────────────────── */

@@ -63,8 +63,14 @@ class DutyWidgetWorker @AssistedInject constructor(
     }.getOrElse { Result.retry() }
 }
 
-/** "7:47" → 그 날 07:47. 야간 표기 "25:20"은 익일 01:20으로 자연히 넘어간다. */
-private fun signOnAt(date: LocalDate, s: String?): LocalDateTime? {
+/**
+ * **출근시각 문자열 → 실제 시각. 이 패키지의 유일한 구현이다** (v1.6.33에 [Briefing]의 사본과 통합).
+ *
+ * `"7:47"` → 그 날 07:47. 야간 표기 `"25:20"`은 `atStartOfDay().plusHours(25)`라
+ * **익일 01:20으로 자연히 넘어간다** — `LocalTime.parse`를 쓰면 여기서 죽는다.
+ * 브리핑 예약(출근 1시간 전)과 위젯 부제·경계 갱신이 같은 값을 봐야 하므로 두 벌로 두지 말 것.
+ */
+internal fun signOnAt(date: LocalDate, s: String?): LocalDateTime? {
     val hm = s?.split(":")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 2 } ?: return null
     return date.atStartOfDay().plusHours(hm[0].toLong()).plusMinutes(hm[1].toLong())
 }

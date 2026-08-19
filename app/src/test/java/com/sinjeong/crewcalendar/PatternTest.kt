@@ -11,8 +11,10 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.widget.signOnAt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
@@ -467,6 +469,22 @@ class PatternTest {
             }
         }
         assertEquals("검사한 다이아 수", 127, checked)
+    }
+
+    /**
+     * **`signOnAt`의 24시+ 표기 규칙을 잠근다** (v1.6.33에 브리핑·위젯 2벌을 한 벌로 통합).
+     *
+     * 출근 브리핑 예약과 위젯 부제·경계 갱신이 같은 함수를 쓴다. `LocalTime.parse`로 바꾸는
+     * 순간 야간 `"25:20"`에서 예외가 나고 브리핑이 통째로 안 걸린다.
+     */
+    @Test fun signOnAt_handles_24plus_night_notation() {
+        val d = LocalDate.of(2026, 8, 20)
+        assertEquals(d.atTime(7, 47), signOnAt(d, "7:47"))
+        assertEquals("25:20 = 익일 01:20", d.plusDays(1).atTime(1, 20), signOnAt(d, "25:20"))
+        assertEquals("24:00 = 익일 자정", d.plusDays(1).atStartOfDay(), signOnAt(d, "24:00"))
+        assertNull(signOnAt(d, null))
+        assertNull("출근시각이 없는 날은 예약하지 않는다", signOnAt(d, ""))
+        assertNull(signOnAt(d, "휴무"))
     }
 
     /**
