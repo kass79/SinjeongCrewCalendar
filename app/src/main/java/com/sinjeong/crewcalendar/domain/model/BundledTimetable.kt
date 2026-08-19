@@ -197,7 +197,7 @@ object BundledTimetable {
                 ?: return Advice(null, "이 근무는 후반사업 다이아를 알 수 없어 알람을 걸 수 없습니다.")
             val why = (if (holiday) SECOND_NOT_SINDORIM_HOLIDAY else SECOND_NOT_SINDORIM_WEEKDAY)[num]
             if (why != null)
-                return Advice(null, "후반사업이 신도림 교대가 아니라 ${why}(으)로 시작해 편승 알람이 없습니다.")
+                return Advice(null, "후반사업이 신도림 교대로 시작하지 않습니다 ($why). 탈 편승 열차가 없어 알람을 걸지 않습니다.")
             val raw = time(MainLegs.forDay(num, holiday)?.getOrNull(2))
                 ?: return Advice(null, "이 근무는 후반 사업시각이 없어 알람을 걸 수 없습니다. 행로표를 확인하세요.")
             // 휴일 표의 후반시작은 양천구청 편승 출발시각이라 신도림 출발은 그 15분 뒤다
