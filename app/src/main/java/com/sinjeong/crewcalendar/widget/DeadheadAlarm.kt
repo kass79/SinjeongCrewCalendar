@@ -8,8 +8,13 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.media.AudioAttributes
+import android.media.MediaPlayer
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -62,8 +67,8 @@ object DeadheadAlarm {
     /** 알람 전용 채널(v1.6.32 신설) — 알람 볼륨·알람 사운드. 브리핑은 계속 [BriefingAlarm.CHANNEL] */
     const val CHANNEL = "crew_alarm_channel"
 
-    /** 소리·진동을 반복할 최대 시간. 기본 알람앱들처럼 이만큼 지나면 시스템이 알림째 지운다 */
-    private const val RING_MS = 90_000L
+    /** 소리를 반복할 최대 시간. 기본 알람앱들처럼 이만큼 지나면 저절로 멈춘다 */
+    internal const val RING_MS = 90_000L
 
     private const val KEY = "deadhead_alarms" // "yyyy-MM-dd|구간|HH:mm|문구" 집합
 
@@ -199,11 +204,30 @@ object DeadheadAlarm {
 }
 
 /**
- * 알람 화면 — 잠금화면 위에 뜨는 전체화면. 소리·진동은 알림(`FLAG_INSISTENT`)이 내고 있으므로
- * 이 화면은 **보여주고 [해제]로 알림을 지우는 일만** 한다. 그래서 재생기를 들고 있지 않고,
- * 화면이 안 떠도(전체 화면 알림 거부) 알람은 그대로 울린다.
+ * 알람 화면 — 잠금화면 위에 뜨는 전체화면.
+ *
+ * ### 왜 이 화면이 소리를 직접 내나 (v1.6.32 실측으로 뒤집은 설계)
+ *
+ * 처음엔 알림의 `FLAG_INSISTENT`에만 맡겼다(재생기를 시스템이 들고 있어 좀비 사운드가 구조적으로
+ * 불가능하다는 게 이유였다). **API 36 에뮬레이터에서 실제로 재 보니 그게 안 됐다** —
+ * 알림이 90초 `timeoutAfter`(`timeout=PT1M30S`로 등록된 것까지 확인)보다 훨씬 먼저 사라지면서
+ * 소리가 **7초·43초 만에** 끊겼다(`RingtonePlayer: stopAsync`). 새벽 출근 알람이 7초 울리고
+ * 마는 것은 이 기능의 존재 이유를 무너뜨린다. **"플랫폼이 알아서 해 주겠지"를 실측이 부정했다.**
+ *
+ * 그래서 **화면이 떠 있는 동안은 이 화면이 `MediaPlayer`로 직접 반복 재생**한다:
+ * - 겹쳐 울리지 않게 `onCreate`에서 알림을 먼저 지운다(알림의 역할은 이 화면을 띄우는 것까지).
+ * - 좀비 사운드 방지는 **세 겹** — `onDestroy`(뒤로가기·종료 포함 모든 경로에서 프레임워크가 부른다)
+ *   + [RING_MS] 뒤 자동 `finish()` + 프로세스가 죽으면 재생기도 같이 죽는다.
+ * - `FLAG_KEEP_SCREEN_ON`으로 우는 동안 화면이 안 꺼진다.
+ *
+ * 전체 화면 알림이 거부돼 이 화면이 못 뜨는 기기에서는 알림의 `FLAG_INSISTENT`가 그대로 남아
+ * (짧더라도) 소리·진동이 울린다 — 그래서 알림 쪽 플래그도 함께 유지한다.
  */
 class AlarmRingActivity : ComponentActivity() {
+
+    private var player: MediaPlayer? = null
+    private val autoStop = Handler(Looper.getMainLooper())
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 27) {
@@ -216,8 +240,12 @@ class AlarmRingActivity : ComponentActivity() {
                     WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON,
             )
         }
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         val id = intent.getIntExtra("id", 0)
         val text = intent.getStringExtra("text").orEmpty()
+        NotificationManagerCompat.from(this).cancel(id) // 소리가 두 겹으로 겹치지 않게
+        startRinging()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
                 Surface(Modifier.fillMaxSize()) {
@@ -236,16 +264,43 @@ class AlarmRingActivity : ComponentActivity() {
                         Text(text, fontSize = 18.sp, textAlign = TextAlign.Center, lineHeight = 26.sp)
                         Spacer(Modifier.height(48.dp))
                         Button(
-                            onClick = {
-                                NotificationManagerCompat.from(this@AlarmRingActivity).cancel(id)
-                                finish()
-                            },
+                            onClick = { finish() }, // 소리는 onDestroy가 끈다
                             Modifier.fillMaxWidth().height(64.dp),
                         ) { Text("해제", fontSize = 22.sp, fontWeight = FontWeight.ExtraBold) }
                     }
                 }
             }
         }
+    }
+
+    /** 알람 볼륨(USAGE_ALARM)으로 기본 알람음을 반복 재생. 실패해도 화면은 그대로 뜬다. */
+    private fun startRinging() {
+        val uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
+            ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        if (uri != null) {
+            player = runCatching {
+                MediaPlayer().apply {
+                    setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_ALARM)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                            .build(),
+                    )
+                    setDataSource(this@AlarmRingActivity, uri)
+                    isLooping = true
+                    prepare()
+                    start()
+                }
+            }.getOrNull()
+        }
+        autoStop.postDelayed({ finish() }, DeadheadAlarm.RING_MS)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        autoStop.removeCallbacksAndMessages(null)
+        player?.let { p -> runCatching { p.stop() }; p.release() }
+        player = null
     }
 }
 
