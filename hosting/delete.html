@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>신정승무 캘린더 · 데이터 삭제 요청</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font-family: -apple-system, "Segoe UI", "Malgun Gothic", sans-serif;
+    line-height: 1.75; max-width: 760px; margin: 0 auto;
+    padding: 32px 20px 80px; color: #1a1a1a; background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #16161a; } }
+  h1 { font-size: 1.7rem; margin-bottom: 4px; }
+  h2 { font-size: 1.15rem; margin-top: 34px; border-left: 4px solid #1D3FA8; padding-left: 10px; }
+  .updated { color: #888; font-size: .9rem; margin-bottom: 24px; }
+  ul, ol { padding-left: 22px; }
+  li { margin: 6px 0; }
+  code { background: rgba(125,125,125,.18); padding: 1px 6px; border-radius: 5px; }
+  a { color: #3a6ff0; }
+  .box { background: rgba(29,63,168,.07); border-radius: 12px; padding: 14px 18px; margin: 18px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 14px 0; }
+  th, td { border: 1px solid rgba(125,125,125,.35); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: rgba(125,125,125,.12); }
+</style>
+</head>
+<body>
+<h1>데이터 삭제 요청 안내</h1>
+<p class="updated">최종 개정일: 2026년 8월 20일 · ‘신정승무 캘린더’ 앱</p>
+
+<div class="box">
+<b>앱에서 로그아웃하는 것만으로는 서버 기록이 지워지지 않습니다.</b> 로그아웃은 기기에 저장된 이름·사번을 지우고 앱을 잠글 뿐입니다. 서버에 저장된 근무 공유 데이터를 지우려면 아래 절차로 관리자에게 요청해 주세요.
+</div>
+
+<h2>1. 무엇이 지워지고 무엇이 안 지워지나</h2>
+<table>
+  <tr><th>데이터</th><th>어디에 있나</th><th>지우는 방법</th></tr>
+  <tr>
+    <td>이름 · 사번</td>
+    <td>서버(Firestore)</td>
+    <td>아래 <b>삭제 요청</b></td>
+  </tr>
+  <tr>
+    <td>근무 선택 · 근무 변경 내역<br>(동료 화면에 보이는 값)</td>
+    <td>서버(Firestore)</td>
+    <td>아래 <b>삭제 요청</b></td>
+  </tr>
+  <tr>
+    <td>개인 메모</td>
+    <td>본인 기기에만<br>(서버로 전송되지 않음)</td>
+    <td>앱을 삭제하면 함께 사라짐</td>
+  </tr>
+  <tr>
+    <td>과거 월 근무 기록 · 동료 즐겨찾기 · 알람 예약 시각</td>
+    <td>본인 기기에만</td>
+    <td>앱을 삭제하면 함께 사라짐</td>
+  </tr>
+  <tr>
+    <td>앱에 미리 담긴 근무자 명단 · 비상연락망</td>
+    <td>앱 설치 파일 안<br>(이용자에게서 수집한 정보 아님)</td>
+    <td>요청 시 다음 배포판에서 반영</td>
+  </tr>
+</table>
+
+<h2>2. 삭제 요청 절차</h2>
+<ol>
+  <li>아래 주소로 메일을 보냅니다 — <a href="mailto:kass7942@gmail.com?subject=%5B%EC%8B%A0%EC%A0%95%EC%8A%B9%EB%AC%B4%20%EC%BA%98%EB%A6%B0%EB%8D%94%5D%20%EB%8D%B0%EC%9D%B4%ED%84%B0%20%EC%82%AD%EC%A0%9C%20%EC%9A%94%EC%B2%AD">kass7942@gmail.com</a></li>
+  <li>제목: <code>[신정승무 캘린더] 데이터 삭제 요청</code></li>
+  <li>본문에 <b>본인 확인을 위한 이름과 사번</b>, 그리고 <b>전부 삭제</b>인지 <b>일부(근무 변경 내역만 등)</b>인지를 적어 주세요.</li>
+  <li>관리자가 본인 여부를 확인한 뒤 서버 데이터를 삭제하고, 처리 결과를 회신합니다.</li>
+</ol>
+<p>본인 확인은 사업소 내부에서 통상적인 방법(사내 연락 등)으로 이루어질 수 있습니다. 확인이 되지 않으면 다른 사람의 데이터를 지우는 사고를 막기 위해 처리하지 않습니다.</p>
+
+<h2>3. 처리 기간</h2>
+<p>본인 확인이 끝난 날부터 <b>영업일 기준 7일 이내</b>에 삭제합니다. 이 앱은 개인이 만들어 운영하는 비공식 편의 앱이라 자동 처리 시스템이 없고 사람이 직접 처리합니다.</p>
+
+<h2>4. 삭제 후</h2>
+<ul>
+  <li>동료 화면에서 본인 근무가 더 이상 보이지 않습니다.</li>
+  <li>같은 이름·사번으로 다시 로그인하면 새로 데이터가 만들어집니다. 다시 만들어지길 원하지 않으시면 앱을 삭제한 채로 두시면 됩니다.</li>
+  <li>삭제된 데이터는 복구할 수 없습니다.</li>
+</ul>
+
+<h2>5. 문의</h2>
+<p><a href="mailto:kass7942@gmail.com">kass7942@gmail.com</a></p>
+<p>개인정보를 어떻게 다루는지는 <a href="/privacy">개인정보처리방침</a>에서 확인하실 수 있습니다.</p>
+<p>본 앱은 서울교통공사의 공식 앱이 아니며, 신정승무사업소 승무원이 개인적으로 만들어 배포하는 비공식 편의 앱입니다.</p>
+</body>
+</html>
