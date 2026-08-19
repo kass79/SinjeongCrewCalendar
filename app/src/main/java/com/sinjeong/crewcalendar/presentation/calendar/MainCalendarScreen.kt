@@ -959,8 +959,21 @@ private fun DayDetailContent(
  *
  * 아이콘은 v1.6.29에서 만든 파스텔 벡터 2종(`ic_deadhead_first` 민트 / `ic_deadhead_second` 라벤더).
  * **`Icon`이 아니라 `Image`로 그린다** — `Icon`은 tint를 먹여 파스텔 색을 통째로 지워 버린다.
- * 예약 상태는 종전대로 **칩 배경색 + 글자**가 나타낸다(예약됨 = primaryContainer + "예약됨",
- * 예약 가능 = surfaceVariant, 지남·없음 = 흐리게).
+ *
+ * ### 네 상태 색 (v1.6.30 — 사용자: "알림 예약/해제 구분 색깔을 쫌 해줘야 할듯해")
+ *
+ * 종전엔 예약됨(primaryContainer)과 예약 가능(surfaceVariant)이 둘 다 옅은 채움이라 구분이 약했다.
+ * **채움 여부**로 켜짐/꺼짐을 가르고, 색 계열(민트=전반 / 라벤더=후반)은 그대로 둔다.
+ *
+ * | 상태 | 라이트 | 다크 | 명암비 |
+ * |---|---|---|---|
+ * | **예약됨** | 잉크색 **꽉 채움** + 흰 글자 | 파스텔 **꽉 채움** + 잉크 글자 | 7.21·10.22 / 5.02·5.80 |
+ * | 예약 가능 | 투명 + 잉크 테두리·글자 | 투명 + 파스텔 테두리·글자 | 7.04·9.x / 12.62·10.29 |
+ * | 지남 | surfaceVariant + 흐린 글자 | 〃 | — |
+ * | 알람없음 | surfaceVariant + 흐린 글자 | 〃 | — |
+ *
+ * 지남과 알람없음은 둘 다 무채색으로 물러나고 **글자**("지남" / "알람없음")로 갈린다 —
+ * 둘 다 "지금 할 수 있는 게 없다"는 같은 뜻이라 색까지 나눌 이유가 없다.
  */
 @Composable
 private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) {
@@ -986,13 +999,27 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     val disabled = at == null || past
     val half = if (second) "후반" else "전반"
 
+    // 아이콘과 같은 계열. `ink`는 아이콘의 딥 톤(#12756A/#513F96)보다 한 단계 진하다 —
+    // 파스텔 위 글자를 AA(4.5:1) 위로 올리려면 이만큼 필요하다(3.87 → 5.02).
+    val pastel = if (second) Color(0xFFC9BCEF) else Color(0xFFA7E3D8)
+    val ink = if (second) Color(0xFF453383) else Color(0xFF0F6259)
+    val lightTheme = MaterialTheme.colorScheme.surface.luminance() > 0.5f
+    val accent = if (lightTheme) ink else pastel // 테두리·글자에 쓰는 계열색
+
     Surface(
         onClick = { ask = true },
         shape = RoundedCornerShape(999.dp),
-        color = if (on) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant,
-        contentColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (disabled) 0.45f else 1f),
+        color = when {
+            disabled -> MaterialTheme.colorScheme.surfaceVariant
+            on -> accent // 예약됨 = 꽉 채움
+            else -> Color.Transparent // 예약 가능 = 테두리만
+        },
+        contentColor = when {
+            disabled -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f)
+            on -> if (lightTheme) Color.White else ink
+            else -> accent
+        },
+        border = if (!disabled && !on) BorderStroke(1.5.dp, accent) else null,
     ) {
         Row(
             Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
