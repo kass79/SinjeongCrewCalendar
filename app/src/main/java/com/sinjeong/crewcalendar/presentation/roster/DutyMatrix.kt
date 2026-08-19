@@ -133,7 +133,16 @@ fun rememberMatrixScroll(month: YearMonth, cellW: Dp): ScrollState {
     return scroll
 }
 
-/** 근무 종별 색 — 달력 칩(`dutyChipColors`)·월 이미지와 같은 매핑 */
+/**
+ * **근무 종별 색의 단일 출처.** 달력 칩·동료 그리드·근무선택 그리드가 전부 여기를 쓴다.
+ *
+ * v1.6.33에서 `MainCalendarScreen`에 있던 같은 내용의 `dutyChipColors`를 지우고 합쳤다.
+ * 색을 두 벌로 두면 한쪽만 고치는 사고가 난다(v1.6.17이 [DutyMatrix]를 뽑은 이유 그대로).
+ *
+ * ⚠ 넘길 값은 [DutyCode.type]이 아니라 **[DutyCode.colorType]** 이다 — 대행("충당 9" 꼴)은
+ * 시각·행로표를 원래 근무에서 가져오되 색만 대기(노랑)로 되돌려야 한다.
+ * 월 이미지(`MonthImage.dutyColors`)는 Compose 밖이라 Int 사본을 따로 들고 있다.
+ */
 fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Color, Color> =
     when (type) {
         DutyType.MAIN_DAY, DutyType.OFFICE -> duty.main to duty.onMain

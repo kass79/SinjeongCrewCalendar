@@ -55,6 +55,7 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
@@ -339,18 +340,6 @@ private fun RestCountChip(count: Int) {
     }
 }
 
-/* ── 근무 종별 색 (공용) ──────────────────────────────── */
-private fun dutyChipColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Color, Color> =
-    when (type) {
-        DutyType.MAIN_DAY, DutyType.OFFICE -> duty.main to duty.onMain
-        DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> duty.night to duty.onNight
-        DutyType.POST_NIGHT -> duty.off to duty.onOff
-        DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
-        DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
-        DutyType.BRANCH -> duty.main to duty.onMain
-        DutyType.ETC -> Color.Transparent to fallback
-    }
-
 /* ── 요일 헤더 ────────────────────────────────────────── */
 @Composable
 private fun WeekdayHeader() {
@@ -509,7 +498,7 @@ private fun DayCell(
 ) {
     val duty = LocalDutyColors.current
     val isToday = day.date == LocalDate.now()
-    val (chipBg, chipFg) = dutyChipColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    val (chipBg, chipFg) = dutyCellColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
     // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5, v1.6.11 6.5→6sp)
     val dateSize = if (big) 8.sp else 6.sp
@@ -667,7 +656,7 @@ private fun DayDetailContent(
     var memo by remember(day.date) { mutableStateOf(day.memo) }
     val row = Bundled.timeRowFor(day.duty, day.date)
     val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
-    val (chipBg, chipFg) = dutyChipColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    val (chipBg, chipFg) = dutyCellColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
     val isDia = day.duty.type in setOf(DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
     Column(
@@ -1144,7 +1133,7 @@ internal fun DutyPickerSheet(
                 ShiftTeam.entries.forEach { team ->
                     val code = pattern.dutyOn(picker.date, team.offset)
                     val isCurrent = picker.group == currentGroup && currentOffset == team.offset
-                    val (bg, fg) = dutyChipColors(code.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedCard(
                         // offsetFor(date, idx) == team.offset 이 되는 idx 를 역산해 넘긴다
                         onClick = { onPick(CrewGroup.SHIFT_4_2, Math.floorMod(team.offset + days, pattern.length)) },
@@ -1218,7 +1207,7 @@ private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: 
     ) {
         items(sequence.size) { i ->
             val code = DutyCode.parse(sequence[i])
-            val (bg, fg) = dutyChipColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+            val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
             Surface(
                 onClick = { onPick(i) },
                 color = bg, contentColor = fg,
@@ -1346,7 +1335,7 @@ private fun DutyChangeSheet(
                 items(DutyCode.CHANGE_OPTIONS.size) { i ->
                     val code = DutyCode.CHANGE_OPTIONS[i]
                     val parsed = DutyCode.parse(code)
-                    val (bg, fg) = dutyChipColors(parsed.type, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    val (bg, fg) = dutyCellColors(parsed.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     Surface(
                         // 충당 계열은 바로 확정하지 않고 다이아 선택 단계로 넘어간다
                         onClick = {
