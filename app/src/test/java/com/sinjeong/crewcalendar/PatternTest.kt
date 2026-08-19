@@ -281,14 +281,16 @@ class PatternTest {
         assertEquals(LocalTime.of(8, 8), branch.at)
         assertTrue(branch.text, branch.text.contains("양천구청역 8:08 도착"))
 
-        // B. 본선 신도림 교대 — 주간 12번 전반시작 8:07 → 창 7:48~7:57의 마지막 편 7:53
+        // B. 본선 신도림 교대 — 주간 12번 전반시작 8:07 → 창 7:46~7:57의 마지막 편 7:53 → 알람 7:48
         val day = BundledTimetable.advise(DutyCode.parse("12"), weekday)
-        assertEquals(LocalTime.of(7, 53), day.at)
+        assertEquals(LocalTime.of(7, 48), day.at)
+        assertTrue(day.text, day.text.contains("양천구청역 7:53 편승"))
         assertTrue(day.text, day.text.contains("신도림 8:07 출발"))
-        // 야간 38번(평평) 전반시작 19:53 → 창 19:34~19:43의 마지막 편 19:41
-        assertEquals(LocalTime.of(19, 41), BundledTimetable.advise(DutyCode.parse("38"), weekday).at)
+        assertTrue(day.text, day.text.contains("알림 7:48"))
+        // 야간 38번(평평) 전반시작 19:53 → 편승 19:41 → 알람 19:36
+        assertEquals(LocalTime.of(19, 36), BundledTimetable.advise(DutyCode.parse("38"), weekday).at)
         // 충당 대행도 대신 뛰는 다이아를 그대로 따라간다
-        assertEquals(LocalTime.of(19, 41), BundledTimetable.advise(DutyCode.parse("충당 38"), weekday).at)
+        assertEquals(LocalTime.of(19, 36), BundledTimetable.advise(DutyCode.parse("충당 38"), weekday).at)
 
         // C. 기지 출고(간격 60분) — 알람 없음. 주간 9번은 행로표에서 신정기지 ○(출고) 확인된 다이아
         val depot = BundledTimetable.advise(DutyCode.parse("9"), weekday)
@@ -338,7 +340,9 @@ class PatternTest {
             val (times, gap) = spec
             val (start, expected) = times
             val a = BundledTimetable.advise(DutyCode.parse(dia), date)
-            assertEquals("$dia ${Bundled.comboOf(date)}", expected, a.at)
+            // v1.6.30: 알람은 편승 열차 출발 5분 전
+            assertEquals("$dia ${Bundled.comboOf(date)}", expected.minusMinutes(5), a.at)
+            assertTrue(a.text, a.text.contains("양천구청역 ${expected.hour}:%02d 편승".format(expected.minute)))
             assertTrue(a.text, a.text.contains("신도림 ${start.hour}:%02d 출발".format(start.minute)))
             assertEquals("$dia 는 ${gap}분 전이어야 한다", gap, java.time.Duration.between(expected, start).toMinutes())
         }
@@ -381,7 +385,8 @@ class PatternTest {
                 }
                 // 옛 창에 열차가 있었다면 새 창도 같은 열차를 골라야 한다
                 if (advice.at != null) {
-                    assertEquals("$n / $date 권장시각이 바뀌었다", old, advice.at)
+                    // 고른 편승 열차는 그대로여야 한다 (알람만 v1.6.30에서 5분 앞당겨졌다)
+                    assertEquals("$n / $date 권장시각이 바뀌었다", old.minusMinutes(5), advice.at)
                     checked++
                 }
             }
@@ -474,7 +479,8 @@ class PatternTest {
      *    (지1 후반 12:51 = 지6 전반 종료 12:51 / 지3 후반 14:51 = 지1 후반 종료 14:51 …)
      *    지선은 양천구청에서 인수인계하므로 그 맞물림 지점이 곧 **양천구청**이고,
      *    그래서 전반과 같은 "5분 전 도착" 규칙을 후반에도 쓸 수 있다. 깨지면 규칙 근거가 사라진다.
-     * ② 본선 후반은 **알람을 걸지 않는다**(시작 지점을 코드로 판별할 근거가 없음).
+     * ② 본선 후반은 v1.6.30에서 신도림 교대인 다이아만 켜졌다
+     *    (근거는 [mainSecondLeg_starts_are_handover_points] · [mainSecondLeg_alarm_table]).
      * ③ 야간은 후반이 익일이라 이 날짜 알람으로 못 건다.
      */
     @Test fun secondLeg_alarm_only_for_branch_day_duties() {
@@ -499,10 +505,10 @@ class PatternTest {
         assertEquals(LocalTime.of(12, 46), branch.at)
         assertTrue(branch.text, branch.text.contains("양천구청역 12:46 도착"))
 
-        // 본선 주간 12번 — 후반 16:50이지만 시작 지점을 몰라 알람 없음
+        // 본선 주간 12번 — v1.6.30에서 켜졌다(신도림 16:50 출발 → 편승 16:40 → 알람 16:35)
         val main = BundledTimetable.advise(DutyCode.parse("12"), weekday, second = true)
-        assertEquals(null, main.at)
-        assertTrue(main.text, main.text.contains("시작 지점"))
+        assertEquals(LocalTime.of(16, 35), main.at)
+        assertTrue(main.text, main.text.contains("신도림 16:50 출발"))
 
         // 야간(지선·본선 모두) — 후반이 익일이라 못 건다
         assertEquals(null, BundledTimetable.advise(DutyCode.parse("지10"), weekday, second = true).at)
@@ -510,7 +516,158 @@ class PatternTest {
 
         // 전반은 종전 그대로 (후반 인자를 붙여도 기본값이 안 바뀐 것을 확인)
         assertEquals(LocalTime.of(8, 8), BundledTimetable.advise(DutyCode.parse("지1"), weekday).at)
-        assertEquals(LocalTime.of(7, 53), BundledTimetable.advise(DutyCode.parse("12"), weekday).at)
+        assertEquals(LocalTime.of(7, 48), BundledTimetable.advise(DutyCode.parse("12"), weekday).at)
+    }
+
+    /**
+     * **본선 후반 = 신도림 교대라는 근거를 전수로 잠근다** (v1.6.30 — 깨지면 틀린 시각을 준다).
+     *
+     * 후반 첫 열번을 **마지막으로 굴리는 다른 다이아**를 찾아 그 종료시각과 후반시작을 견주면,
+     * 두 값이 우연이 아닌 고정 간격으로 맞물린다. 지선 후반을 v1.6.29에서 확정한 방법과 같다.
+     *
+     * | 맞물리는 상대 | 평일 | 휴일 |
+     * |---|---|---|
+     * | 앞 다이아의 **전반종료**(신도림 교대 시각) | Δ0 | Δ+15 |
+     * | 앞 다이아의 **후반종료**(=퇴근, 교대 후 편승 15분) | Δ+15 | Δ+30 |
+     *
+     * 휴일만 15분씩 밀려 있는 것이 **휴일 표의 후반시작이 양천구청 편승 출발시각**이라는
+     * 관측(행로표 `hol_2`·`hol_16`·`hol_25` 스캔)과 정확히 맞아떨어진다.
+     */
+    @Test fun mainSecondLeg_starts_are_handover_points() {
+        fun mins(t: String) = t.split(":").let { it[0].toInt() * 60 + it[1].toInt() }
+        fun head(s: String) = Regex("^(\\d{4})").find(s.split('·').first().trim())?.value
+        fun tail(s: String) = Regex("^(\\d{4})").find(s.split('·').last().trim())?.value
+
+        // 평일 4·7은 행로표(열번)와 시각표(MainLegs)가 서로 뒤바뀌어 있다 — 확정 전까지 양쪽에서 뺀다
+        val suspect = setOf(4, 7)
+        var chained = 0
+        listOf(false to 0 to 15, true to 15 to 30).forEach { spec ->
+            val (pair, toSecondEnd) = spec
+            val (hol, toFirstEnd) = pair
+            val legs = if (hol) MainLegs.HOLIDAY else MainLegs.WEEKDAY
+            legs.keys.sorted().forEach { n ->
+                if (!hol && n in suspect) return@forEach
+                val me = RouteTable.forMainDay(n, hol)!!
+                val t = head(me.secondHalf) ?: return@forEach // 텍스트로 시작 = 신도림 아님
+                var hit = false
+                legs.keys.forEach other@{ o ->
+                    if (o == n || (!hol && o in suspect)) return@other
+                    val ot = RouteTable.forMainDay(o, hol)!!
+                    val oLegs = legs.getValue(o)
+                    listOf(tail(ot.firstHalf) to (oLegs[1] to toFirstEnd),
+                           tail(ot.secondHalf) to (oLegs[3] to toSecondEnd)).forEach { (last, exp) ->
+                        if (last != t) return@forEach
+                        val (endAt, delta) = exp
+                        val d = mins(endAt) - mins(legs.getValue(n)[2])
+                        if (d < -60 || d > 60) return@forEach // 같은 열번이 하루 두 번 도는 우연은 버린다
+                        assertEquals(
+                            "${if (hol) "휴일" else "평일"}$n 후반 $t 이 $o 번과 어긋난다",
+                            delta.toLong(), d.toLong(),
+                        )
+                        hit = true
+                    }
+                }
+                if (hit) chained++
+            }
+        }
+        // 평일 17 + 휴일 20 = 37건이 맞물린다.
+        // 맞물리지 않는 나머지는 앞 승무원이 군자 소속이라 우리 표에 없는 경우다
+        // (평일 17·29 · 휴일 없음). 평일 19·20은 앞 다이아가 하필 4·7이라 여기서는 빠지는데,
+        // 둘 다 행로표 스캔(`wd_19` 16:46→17:01 · `wd_20` 16:51→17:06)으로 직접 확인했다.
+        assertEquals("맞물리는 다이아 수", 37, chained)
+    }
+
+    /**
+     * **본선 후반 알람 전수표를 손계산으로 고정한다** (v1.6.30).
+     *
+     * 켜진 다이아 40건 / 제외 14건. 제외는 사유가 구체적으로 보여야 한다.
+     * 표본 시각은 행로표 스캔으로 눈으로도 확인한 것들이다
+     * (`wd_12` 16:50 · `wd_29` 19:10 신도림 / `hol_2` 13:48 · `hol_16` 16:09 · `hol_25` 18:14).
+     */
+    @Test fun mainSecondLeg_alarm_table() {
+        val weekday = LocalDate.of(2026, 8, 18) // 화
+        val holiday = LocalDate.of(2026, 8, 23) // 일
+        assertTrue(Bundled.isHolidayTimetable(holiday))
+
+        fun at(n: Int, date: LocalDate) = BundledTimetable.advise(DutyCode.parse("$n"), date, second = true)
+
+        // ── 손계산 대조 (신도림 출발 → 창 10~21분 전 마지막 편 → 그 5분 전) ──
+        // 평일 12: 신도림 16:50 → 16:29~16:40 → 16:40 → 알람 16:35
+        assertEquals(LocalTime.of(16, 35), at(12, weekday).at)
+        // 평일 29: 신도림 19:10 → 18:49~19:00 → 19:00 → 알람 18:55
+        assertEquals(LocalTime.of(18, 55), at(29, weekday).at)
+        // 평일 23: 신도림 17:40 → 17:19~17:30 → 17:30 → 알람 17:25
+        assertEquals(LocalTime.of(17, 25), at(23, weekday).at)
+        // 휴일 2: 표 13:33 + 15 = 신도림 13:48 → 13:27~13:38 → 13:31 → 알람 13:26
+        assertEquals(LocalTime.of(13, 26), at(2, holiday).at)
+        assertTrue(at(2, holiday).text, at(2, holiday).text.contains("신도림 13:48 출발"))
+        // 휴일 16: 15:54 + 15 = 16:09 → 15:48~15:59 → 15:51 → 알람 15:46
+        assertEquals(LocalTime.of(15, 46), at(16, holiday).at)
+        // 휴일 25: 17:59 + 15 = 18:14 → 17:53~18:04 → 18:01 → 알람 17:56
+        assertEquals(LocalTime.of(17, 56), at(25, holiday).at)
+
+        // ── 제외 다이아: 알람 없음 + 구체적 사유 ──
+        listOf(
+            Triple(1, weekday, "군자기지 편승"), Triple(6, weekday, "신정기지 출고"),
+            Triple(13, weekday, "군자기지 출고"), Triple(14, weekday, "군자기지 입출고"),
+            Triple(16, weekday, "신정기지 출고"), Triple(17, weekday, "신정기지 출고"),
+            Triple(21, weekday, "신정기지 출고"), Triple(4, weekday, "어긋남"),
+            Triple(7, weekday, "어긋남"),
+            Triple(1, holiday, "군자기지"), Triple(3, holiday, "군자기지 입출고"),
+            Triple(5, holiday, "신정기지 출고"), Triple(20, holiday, "신정기지 출고"),
+            Triple(21, holiday, "성수 교대"),
+        ).forEach { (n, date, why) ->
+            val a = at(n, date)
+            assertEquals("$n / $date 는 알람이 없어야", null, a.at)
+            assertTrue("$n / $date 사유: ${a.text}", a.text.contains(why))
+        }
+
+        // ── 켜진 수 / 제외 수 ──
+        val on = MainLegs.WEEKDAY.keys.count { at(it, weekday).at != null } +
+            MainLegs.HOLIDAY.keys.count { at(it, holiday).at != null }
+        assertEquals("후반 알람이 켜진 본선 주간 다이아 수", 40, on)
+        assertEquals("본선 주간 조합 수", 54, MainLegs.WEEKDAY.size + MainLegs.HOLIDAY.size)
+
+        // 야간 후반은 그대로 익일이라 없다
+        MainLegs.NIGHT.keys.forEach { n ->
+            assertEquals("야간 $n", null, at(n, weekday).at)
+        }
+    }
+
+    /**
+     * **알람은 편승 열차 출발 5분 전** (v1.6.30 사용자 확정).
+     *
+     * 사용자 원문: *"34다이아 신도림 17:44분 출발 근무면 양천구청역에서 17시30분 편승 맞으니까
+     * 5분전 17시25분 알람을 예약해줘야지"*.
+     * 지선은 이미 "전반시작 5분 전 도착"이라 **두 번 빼지 않는다**는 것도 같이 잠근다.
+     */
+    @Test fun alarmIsFiveMinutesBeforeTheDeadheadTrain() {
+        val weekday = LocalDate.of(2026, 8, 18)
+        // 34번(야간·평평) 전반시작 = 신도림 17:44 → 창 17:23~17:34 → 편승 17:30 → 알람 17:25
+        val a = BundledTimetable.advise(DutyCode.parse("34"), weekday)
+        assertEquals(LocalTime.of(17, 25), a.at)
+        assertTrue(a.text, a.text.contains("양천구청역 17:30 편승"))
+        assertTrue(a.text, a.text.contains("신도림 17:44 출발"))
+        assertTrue(a.text, a.text.contains("알림 17:25"))
+
+        // 지선은 그대로 5분 — 지1 전반 8:13 → 8:08 (8:03이 아니다)
+        assertEquals(LocalTime.of(8, 8), BundledTimetable.advise(DutyCode.parse("지1"), weekday).at)
+        assertEquals(LocalTime.of(12, 46), BundledTimetable.advise(DutyCode.parse("지1"), weekday, true).at)
+
+        // 편승 계열은 전 다이아에서 "알람 = 문구 속 편승시각 − 5분"이 성립해야 한다
+        var seen = 0
+        listOf(LocalDate.of(2026, 8, 19), LocalDate.of(2026, 8, 22)).forEach { d ->
+            (1..51).forEach { n ->
+                listOf(false, true).forEach { second ->
+                    val adv = BundledTimetable.advise(DutyCode.parse("$n"), d, second)
+                    val board = Regex("양천구청역 (\\d+):(\\d\\d) 편승").find(adv.text) ?: return@forEach
+                    val b = LocalTime.of(board.groupValues[1].toInt(), board.groupValues[2].toInt())
+                    assertEquals("$n/$d/$second", b.minusMinutes(5), adv.at)
+                    seen++
+                }
+            }
+        }
+        assertTrue("표본이 비었다", seen > 40)
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
