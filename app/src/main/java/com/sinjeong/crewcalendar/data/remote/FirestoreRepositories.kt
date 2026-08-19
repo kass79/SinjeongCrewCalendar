@@ -65,7 +65,6 @@ class FirestoreUserRepository @Inject constructor(
     override val currentUid: String? get() = local.currentUid
     override fun observeMe(): Flow<User?> = local.observeMe()
     override suspend fun searchByName(query: String): List<User> = local.searchByName(query)
-    override suspend fun updateFcmToken(token: String) = Unit
 
     override suspend fun upsert(user: User) {
         local.upsert(user)

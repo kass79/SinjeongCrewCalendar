@@ -70,8 +70,6 @@ class LocalUserRepository @Inject constructor(
 
     override suspend fun searchByName(query: String): List<User> = emptyList()
 
-    override suspend fun updateFcmToken(token: String) = Unit
-
     override suspend fun updatePatternPosition(patternId: String, offset: Int) {
         val cur = state.value ?: return // 로그인 전에는 근무선택 불가
         upsert(cur.copy(patternId = patternId, patternOffset = offset))

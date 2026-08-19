@@ -82,18 +82,9 @@
             android:name=".widget.DeadheadReceiver"
             android:exported="false" />
 
-        <!-- FCM: 교환 요청 / 근무 변경 알림 -->
-        <service
-            android:name=".fcm.CrewMessagingService"
-            android:exported="false">
-            <intent-filter>
-                <action android:name="com.google.firebase.MESSAGING_EVENT" />
-            </intent-filter>
-        </service>
-
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="duty_channel" />
+        <!-- FCM(CrewMessagingService + default_notification_channel_id) 제거(v1.6.33):
+             토큰을 저장하는 곳이 없어 푸시를 보낼 방법 자체가 없었는데 SDK만 기기 식별자를
+             구글로 보내고 있었다. 알림은 전부 기기에서 직접 예약한다(브리핑·편승 알람). -->
 
         <!-- 근무표 이미지 공유용 FileProvider -->
         <provider

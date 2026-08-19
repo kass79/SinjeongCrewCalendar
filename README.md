@@ -13,7 +13,7 @@
 | 아키텍처 | Clean Architecture (data / domain / presentation) + MVVM |
 | DI | Hilt |
 | 비동기 | Coroutines / Flow |
-| 백엔드 | Firebase Auth · Firestore(오프라인 캐시) · FCM(공지 알림) |
+| 백엔드 | Firebase Auth · Firestore(오프라인 캐시) — 푸시(FCM)는 v1.6.33에서 제거, 알림은 전부 기기에서 예약 |
 | 위젯 | Glance (오늘/내일 근무) + WorkManager 갱신 |
 | 외부 연동 | Google Calendar API 양방향 동기화 |
 
@@ -44,8 +44,7 @@ SinjeongCrewCalendar/
         ├── presentation/
         │   ├── theme/                   # 2호선 그린 시드 M3 팔레트 + 근무색 토큰
         │   └── calendar/                # MainCalendarScreen + ViewModel
-        ├── widget/                      # Glance 위젯 + Worker
-        └── fcm/                         # 공지/근무변경 푸시 수신
+        └── widget/                      # Glance 위젯 + Worker + 브리핑·편승 알람
 ```
 
 ## 도메인 모델 요약

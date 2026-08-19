@@ -17,8 +17,6 @@ data class User(
     val patternOffset: Int = 0,
     /** 동료 화면에 내 근무 공개 여부 */
     val visibleToOthers: Boolean = true,
-    /** FCM 토큰 (교환요청 푸시용) */
-    val fcmToken: String? = null,
     /** 구글 캘린더 동기화 대상 calendarId (null이면 비활성) */
     val googleCalendarId: String? = null,
     /** 연차/촉연 등 잔여일수 */

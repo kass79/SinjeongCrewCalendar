@@ -96,10 +96,16 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
-    implementation(libs.firebase.messaging)
     // firebase-analytics 제거(v1.6.18): 코드 호출 0건인데 매니페스트 병합으로
     // AD_ID·ACCESS_ADSERVICES_* 광고 권한이 딸려와 "광고 ID 수집" 신고 의무가 생겼다.
     // 광고 없는 사내앱이라 데이터 세이프티를 단순하게 유지하려고 뺀다. 필요하면 되살릴 것.
+    //
+    // firebase-messaging 제거(v1.6.33): 같은 이유의 재발. updateFcmToken이 로컬·원격 양쪽
+    // `= Unit`이라 토큰을 어디에도 저장하지 않았고 getToken·subscribeToTopic 호출도 0건 —
+    // 즉 **특정 사용자에게 푸시를 보낼 방법 자체가 없는데** SDK만 기기 설치 ID를 구글로 계속
+    // 보내 데이터 세이프티 "기기 또는 기타 ID" 신고 의무와 c2dm.RECEIVE 병합 권한이 남았다.
+    // 나중에 푸시가 실제로 필요해지면 그때 토큰 저장·발송 경로까지 갖춰 제대로 다시 넣을 것
+    // (libs.versions.toml의 카탈로그 항목은 남겨 뒀다 — 한 줄이면 되살아난다).
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)

@@ -10,7 +10,6 @@
         "patternId": "string|null — patterns/{id} 참조",
         "patternOffset": "number — 순환 시작 오프셋(교번표의 내 줄)",
         "visibleToOthers": "boolean — 동료 화면 공개",
-        "fcmToken": "string|null",
         "googleCalendarId": "string|null — 양방향 동기화 대상",
         "annualLeaveRemaining": "number",
         "promotedLeaveRemaining": "number",

@@ -10,7 +10,6 @@ interface UserRepository {
     fun observeMe(): Flow<User?>
     suspend fun upsert(user: User)
     suspend fun searchByName(query: String): List<User>
-    suspend fun updateFcmToken(token: String)
     /** 근무선택: 패턴 + 순환 오프셋 저장 → 전체 달력 자동 재계산 */
     suspend fun updatePatternPosition(patternId: String, offset: Int)
 
