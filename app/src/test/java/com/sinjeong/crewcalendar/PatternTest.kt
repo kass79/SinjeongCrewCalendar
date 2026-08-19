@@ -308,13 +308,13 @@ class PatternTest {
     }
 
     /**
-     * v1.6.28 — 편승 창을 10~19분 → **10~20분**으로 넓힌 결과를 손계산으로 고정한다.
+     * v1.6.29 — 편승 창을 10~20분 → **10~21분**으로 넓힌 결과를 손계산으로 고정한다.
      *
-     * v1.6.27에서 "알람 없음"이던 야간 7조합 중 **6조합이 살아나고**, `46 휴평` 하나만 남는다
-     * (앞 열차가 21:20 = 21분 전이라 20분 창에도 안 들어온다).
-     * 살아난 6건은 전부 **정확히 20분 전** 열차다 — 즉 이 창 확대로 얻는 최대치다.
+     * v1.6.27(창 19분)에서 "알람 없음"이던 야간 7조합이 **전부 살아난다** —
+     * 6조합은 v1.6.28(20분)에서, 마지막 `46 휴평`(21:41 출발 / 앞 열차 21:20)이 이번 21분에서.
+     * 이제 "편승 창이 비어 알람 없음"인 야간 조합은 **0건**이다.
      */
-    @Test fun widenedWindow_revives_six_of_seven_night_combos() {
+    @Test fun widenedWindow_revives_all_seven_night_combos() {
         val pp = LocalDate.of(2026, 8, 19)   // 수 → 목  : 평평
         val ph = LocalDate.of(2026, 8, 21)   // 금 → 토  : 평휴
         val hh = LocalDate.of(2026, 8, 22)   // 토 → 일  : 휴휴
@@ -324,24 +324,24 @@ class PatternTest {
         assertEquals(NightCombo.HH, Bundled.comboOf(hh))
         assertEquals(NightCombo.HP, Bundled.comboOf(hp))
 
-        // 다이아, 날짜, 신도림 출발, 되살아난 편승시각(전부 20분 전)
+        // 다이아, 날짜, (신도림 출발 → 되살아난 편승시각), 몇 분 전인가
         listOf(
-            Triple("37", pp, LocalTime.of(18, 40) to LocalTime.of(18, 20)),
-            Triple("37", ph, LocalTime.of(18, 40) to LocalTime.of(18, 20)),
-            Triple("42", pp, LocalTime.of(20, 30) to LocalTime.of(20, 10)),
-            Triple("42", ph, LocalTime.of(20, 30) to LocalTime.of(20, 10)),
-            Triple("50", hh, LocalTime.of(22, 35) to LocalTime.of(22, 15)),
-            Triple("50", hp, LocalTime.of(22, 35) to LocalTime.of(22, 15)),
-        ).forEach { (dia, date, times) ->
+            Triple("37", pp, (LocalTime.of(18, 40) to LocalTime.of(18, 20)) to 20L),
+            Triple("37", ph, (LocalTime.of(18, 40) to LocalTime.of(18, 20)) to 20L),
+            Triple("42", pp, (LocalTime.of(20, 30) to LocalTime.of(20, 10)) to 20L),
+            Triple("42", ph, (LocalTime.of(20, 30) to LocalTime.of(20, 10)) to 20L),
+            Triple("50", hh, (LocalTime.of(22, 35) to LocalTime.of(22, 15)) to 20L),
+            Triple("50", hp, (LocalTime.of(22, 35) to LocalTime.of(22, 15)) to 20L),
+            // v1.6.29에서 마지막으로 살아난 하나 — 21분 전이라 20분 창에는 못 들어왔다
+            Triple("46", hp, (LocalTime.of(21, 41) to LocalTime.of(21, 20)) to 21L),
+        ).forEach { (dia, date, spec) ->
+            val (times, gap) = spec
             val (start, expected) = times
             val a = BundledTimetable.advise(DutyCode.parse(dia), date)
             assertEquals("$dia ${Bundled.comboOf(date)}", expected, a.at)
             assertTrue(a.text, a.text.contains("신도림 ${start.hour}:%02d 출발".format(start.minute)))
-            assertEquals("$dia 는 20분 전이어야 한다", 20L, java.time.Duration.between(expected, start).toMinutes())
+            assertEquals("$dia 는 ${gap}분 전이어야 한다", gap, java.time.Duration.between(expected, start).toMinutes())
         }
-
-        // 유일하게 남은 구멍 — 46 휴평(21:41 출발, 앞 열차 21:20 = 21분 전)
-        assertEquals(null, BundledTimetable.advise(DutyCode.parse("46"), hp).at)
     }
 
     /**
@@ -360,6 +360,7 @@ class PatternTest {
         }
 
         var checked = 0
+        val added = mutableListOf<String>()
         listOf(
             LocalDate.of(2026, 8, 19), LocalDate.of(2026, 8, 21),
             LocalDate.of(2026, 8, 22), LocalDate.of(2026, 8, 23),
@@ -372,7 +373,12 @@ class PatternTest {
                 val startT = start?.split(":")?.takeIf { it.size == 2 }
                     ?.let { p -> p[0].toIntOrNull()?.takeIf { it in 0..23 }?.let { h -> LocalTime.of(h, p[1].toInt()) } }
                     ?: return@forEach
-                val old = oldWindowPick(startT, holiday) ?: return@forEach
+                val old = oldWindowPick(startT, holiday)
+                // 옛 창엔 없었는데 새로 생긴 건 v1.6.28~29에서 살아난 7조합뿐이어야 한다
+                if (old == null) {
+                    if (advice.at != null) added += "$n ${Bundled.comboOf(date)}"
+                    return@forEach
+                }
                 // 옛 창에 열차가 있었다면 새 창도 같은 열차를 골라야 한다
                 if (advice.at != null) {
                     assertEquals("$n / $date 권장시각이 바뀌었다", old, advice.at)
@@ -381,6 +387,11 @@ class PatternTest {
             }
         }
         assertTrue("검사 표본이 비었다 — 테스트가 무의미해졌다", checked > 50)
+        assertEquals(
+            "새로 생긴 알람이 알려진 7조합과 다르다",
+            listOf("37 PP", "42 PP", "37 PH", "42 PH", "50 HH", "46 HP", "50 HP").sorted(),
+            added.sorted(),
+        )
     }
 
     /**

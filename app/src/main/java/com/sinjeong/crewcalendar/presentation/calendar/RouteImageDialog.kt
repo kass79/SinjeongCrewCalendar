@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
@@ -15,13 +14,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ScreenRotation
-import androidx.compose.material.icons.filled.ZoomOutMap
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
@@ -37,7 +34,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -182,16 +178,9 @@ fun RouteImageInline(
                     modifier = Modifier.size(w, h).clickable { onExpand() },
                 )
             }
-            Icon(
-                Icons.Default.ZoomOutMap, "크게 보기",
-                tint = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(6.dp)
-                    .background(Color.Black.copy(alpha = 0.38f), CircleShape)
-                    .padding(4.dp)
-                    .size(16.dp),
-            )
+            // v1.6.29: 우하단 ZoomOutMap 아이콘 삭제(사용자 요청 "터치하면 커지는데?").
+            // 힌트일 뿐이었고 가로 스크롤 위치에 따라 표 셀("야간 8:00")을 덮었다(남은 이슈 1번).
+            // 이미지 아무 데나 탭하면 전체화면이 열리는 동작은 그대로다.
         }
     }
 }
