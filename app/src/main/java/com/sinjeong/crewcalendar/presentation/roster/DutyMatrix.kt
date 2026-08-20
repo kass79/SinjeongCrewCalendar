@@ -119,14 +119,28 @@ data class MatrixMetrics(
     }
 }
 
-/** 오늘 열 근처로 맞춰 두는 가로 스크롤 상태 — 헤더와 전 행이 하나를 공유해 같이 움직인다 */
+/**
+ * 표시 첫 날 — 이번 달이면 **오늘**, 다른 달이면 1일(v1.6.38).
+ *
+ * 동료 탭은 "남들과 앞으로의 근무를 비교"하는 화면이라 지나간 날짜는 자리만 차지한다.
+ * 이름 열 바로 옆이 오늘이 되도록 범위를 잘라 준다. 동료근무(전체 조망)는 이 함수를 안 쓴다.
+ */
+fun todayStartDay(month: YearMonth): Int =
+    if (month == YearMonth.now()) LocalDate.now().dayOfMonth else 1
+
+/**
+ * 오늘 열 근처로 맞춰 두는 가로 스크롤 상태 — 헤더와 전 행이 하나를 공유해 같이 움직인다.
+ * [startDay]가 오늘이면 오늘이 이미 첫 칸이라 스크롤 값이 자연히 0이 된다.
+ */
 @Composable
-fun rememberMatrixScroll(month: YearMonth, cellW: Dp): ScrollState {
+fun rememberMatrixScroll(month: YearMonth, cellW: Dp, startDay: Int = 1): ScrollState {
     val scroll = rememberScrollState()
     val density = LocalDensity.current
-    LaunchedEffect(month, cellW) {
+    LaunchedEffect(month, cellW, startDay) {
         if (month == YearMonth.now()) {
-            val px = with(density) { (cellW * (LocalDate.now().dayOfMonth - 3)).toPx() }
+            // 오늘이 그려진 칸의 순번 − 2칸(앞뒤 맥락). 종전 식(오늘−3)과 startDay=1에서 완전히 같다.
+            val col = LocalDate.now().dayOfMonth - startDay - 2
+            val px = with(density) { (cellW * col).toPx() }
             scroll.scrollTo(px.toInt().coerceAtLeast(0))
         } else scroll.scrollTo(0)
     }
@@ -197,13 +211,17 @@ private fun Modifier.nameColumnEdge(color: Color, x: Float) = drawBehind {
     drawLine(color, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())
 }
 
-/** 헤더: 왼쪽 이름칸 + 가로 스크롤되는 날짜·요일 */
+/**
+ * 헤더: 왼쪽 이름칸 + 가로 스크롤되는 날짜·요일.
+ * [startDay]부터 말일까지 그린다 — 기본 1일(동료근무), 동료 탭은 오늘([todayStartDay]).
+ */
 @Composable
 fun MatrixDateHeader(
     month: YearMonth,
     m: MatrixMetrics,
     hScroll: ScrollState,
     duty: DutyColors,
+    startDay: Int = 1,
 ) {
     val today = LocalDate.now()
     val edge = MaterialTheme.colorScheme.outline
@@ -221,7 +239,7 @@ fun MatrixDateHeader(
             )
         }
         Row(Modifier.horizontalScroll(hScroll)) {
-            (1..month.lengthOfMonth()).forEach { d ->
+            (startDay..month.lengthOfMonth()).forEach { d ->
                 val date = month.atDay(d)
                 val isToday = date == today
                 val hol = Bundled.PUBLIC_HOLIDAYS.containsKey(date)
@@ -267,6 +285,8 @@ fun MatrixRow(
     overrides: Map<LocalDate, String> = emptyMap(),
     /** 홀짝 줄무늬 — 사람이 많을 때 가로로 눈이 미끄러지는 걸 막는다 */
     zebra: Boolean = false,
+    /** 표시 첫 날. 헤더와 **같은 값**이어야 열이 어긋나지 않는다 */
+    startDay: Int = 1,
     onNameClick: () -> Unit = {},
 ) {
     val pattern = Bundled.patternFor(p.group)
@@ -298,7 +318,7 @@ fun MatrixRow(
             if (isFav) Text("★", fontSize = m.dowSp, color = duty.onStandby)
         }
         Row(Modifier.horizontalScroll(hScroll)) {
-            (1..month.lengthOfMonth()).forEach { d ->
+            (startDay..month.lengthOfMonth()).forEach { d ->
                 val date = month.atDay(d)
                 val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)

@@ -118,7 +118,9 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
 
     val duty = LocalDutyColors.current
     val m = MatrixMetrics.Roomy
-    val hScroll = rememberMatrixScroll(month, m.cellW)
+    // 이번 달은 오늘~말일, 다른 달은 1일~말일 (v1.6.38 — 과거는 비교에 쓸모가 없다)
+    val startDay = todayStartDay(month)
+    val hScroll = rememberMatrixScroll(month, m.cellW, startDay)
 
     val q = query.trim()
     val me = meAsPerson(user)?.takeIf { q.isEmpty() || it.name.contains(q) }
@@ -188,7 +190,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     Text("조건에 맞는 동료가 없습니다", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                MatrixDateHeader(month, m, hScroll, duty)
+                MatrixDateHeader(month, m, hScroll, duty, startDay)
                 HorizontalDivider()
                 val favKeys = remember(mates) {
                     mates.filter { it.favGroup != null }.map { mateKey(it.name, it.group) }.toSet()
@@ -200,6 +202,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                             isFav = p.key in favKeys,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
                             zebra = i % 2 == 1,
+                            startDay = startDay,
                             onNameClick = { sheetTarget = p })
                     }
                 }
