@@ -1206,17 +1206,23 @@ internal fun DutyPickerSheet(
 /**
  * 교번 순환 한 벌을 6열 칩 그리드로. 근무선택 2단계와 **근무변경의 충당 계열 다이아 선택**이 같이 쓴다.
  * 두 벌로 나누면 색·크기가 갈라지므로 한 벌만 둔다.
+ *
+ * 칸은 **다이아 번호순으로 보여주되**(v1.6.35 — 교번 순환 그대로면 번호가 뒤죽박죽이라 못 찾는다),
+ * 각 칸이 들고 다니는 인덱스는 **원래 시퀀스 인덱스** 그대로다. `onPick`으로 나가는 값이
+ * 곧 `Pattern.offsetFor`의 입력이라 여기서 인덱스를 바꾸면 근무표가 통째로 어긋난다.
  */
 @Composable
 private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: (Int) -> Unit) {
     val duty = LocalDutyColors.current
+    val order = remember(sequence) { DutyCode.displayOrder(sequence) }
     LazyVerticalGrid(
         columns = GridCells.Fixed(6),
         verticalArrangement = Arrangement.spacedBy(5.dp),
         horizontalArrangement = Arrangement.spacedBy(5.dp),
         modifier = Modifier.heightIn(max = 340.dp),
     ) {
-        items(sequence.size) { i ->
+        items(order.size) { pos ->
+            val i = order[pos]
             val code = DutyCode.parse(sequence[i])
             val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
             Surface(

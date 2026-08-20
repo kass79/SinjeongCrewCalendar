@@ -26,12 +26,16 @@ import java.time.LocalTime
  *
  * ⚠ `./gradlew test`는 이 저장소 경로(07_프로젝트)의 한글 때문에 포크된 테스트 워커가
  * 클래스를 못 찾아 ClassNotFoundException 으로 죽는다 — 코드가 아니라 환경 문제다.
- * 실행은 컴파일 후 JUnitCore를 직접 띄운다(9 tests OK 확인):
+ * 실행은 컴파일 후 JUnitCore를 직접 띄운다(v1.6.35 기준 32 tests OK):
  *   ./gradlew :app:compileDebugUnitTestKotlin
- *   java -cp "app/build/intermediates/classes/debugUnitTest/transformDebugUnitTestClassesWithAsm/dirs;\
- *     app/build/intermediates/runtime_app_classes_jar/debug/bundleDebugClassesToRuntimeJar/classes.jar;\
+ *   java -cp "app/build/tmp/kotlin-classes/debugUnitTest;app/build/tmp/kotlin-classes/debug;\
  *     <junit-4.13.2.jar>;<hamcrest-core-1.3.jar>;<kotlin-stdlib.jar>" \
  *     org.junit.runner.JUnitCore com.sinjeong.crewcalendar.PatternTest
+ *
+ * ⚠ **`kotlin-classes`(코틀린 컴파일 산출물)를 써야 한다.** 종전에 적어둔
+ * `intermediates/classes/.../transformDebugUnitTestClassesWithAsm/dirs` + `runtime_app_classes_jar`는
+ * `assemble`류를 돌려야 갱신되는 자리라, 컴파일만 하고 그 경로로 돌리면 **옛 클래스가 실행돼**
+ * 방금 고친 코드가 반영 안 된 채 엉뚱한 실패가 나온다(v1.6.35에서 실제로 3건 헛failure).
  */
 class PatternTest {
 
@@ -808,6 +812,56 @@ class PatternTest {
             }
         }
         assertTrue("표본이 비었다", seen > 40)
+    }
+
+    /**
+     * v1.6.35 근무선택 그리드 번호순 정렬 — **표시 순서만 바뀌고 근무표는 한 칸도 안 움직인다**를 잠근다.
+     * 정렬된 칸이 원래 시퀀스 인덱스를 안 들고 다니면 `Pattern.offsetFor`가 딴 offset을 뱉어
+     * 사용자 전원의 근무표가 통째로 어긋난다 — 이 앱에서 가장 비싼 사고다.
+     */
+    @Test fun dutyGridOrderIsDisplayOnly() {
+        val pick = LocalDate.of(2026, 8, 20)          // 사용자가 근무선택을 누른 날
+        val month = (1..31).map { LocalDate.of(2026, 8, it) }
+
+        listOf(Bundled.MAIN_PATTERN, Bundled.BRANCH_PATTERN).forEach { p ->
+            val order = DutyCode.displayOrder(p.sequence)
+            // 빠지거나 겹친 칸 없이 전 칸이 그대로 있다
+            assertEquals(p.name, p.sequence.indices.toList(), order.sorted())
+
+            order.forEachIndexed { pos, i ->
+                val dia = p.sequence[i]
+                // 정렬 전 그리드에서 같은 다이아가 있던 칸. 값이 i와 같아야 = 중복 다이아가 없다는 뜻
+                val before = p.sequence.indexOf(dia)
+                assertEquals("$dia 중복", before, i)
+
+                val offBefore = p.offsetFor(pick, before)   // 정렬 전에 그 다이아를 골랐다면
+                val offAfter = p.offsetFor(pick, i)         // 정렬 후 pos번째 칸을 골랐을 때
+                assertEquals("$dia offset", offBefore, offAfter)
+                // 고른 날 근무가 실제로 그 다이아이고, 8월 전체 근무표가 정렬 전과 완전히 같다
+                assertEquals("$dia @$pos", dia, p.dutyOn(pick, offAfter).raw)
+                month.forEach { d ->
+                    assertEquals("$dia $d", p.dutyOn(d, offBefore).raw, p.dutyOn(d, offAfter).raw)
+                }
+            }
+        }
+
+        // 사용자 요구 순서 그대로인지 — 주간 1~29 → 야간 33~51(비번 짝) → 대기 → 운휴
+        val main = DutyCode.displayOrder(Bundled.MAIN_PATTERN.sequence).map { Bundled.MAIN_PATTERN.sequence[it] }
+        assertEquals((1..29).map { "$it" }, main.take(29))
+        assertEquals((33..51).flatMap { listOf("$it", "${it}비") }, main.subList(29, 67))
+        assertEquals(
+            listOf("대1", "대2", "대3", "대4", "대5", "대6",
+                "대11", "대11비", "대12", "대12비", "대13", "대13비"),
+            main.subList(67, 79),
+        )
+        assertEquals((1..29).map { "휴$it" }, main.drop(79))
+
+        // 지선: 지1~지8 → 지10~지14(비번 짝) → 지대 → 지휴
+        val br = DutyCode.displayOrder(Bundled.BRANCH_PATTERN.sequence).map { Bundled.BRANCH_PATTERN.sequence[it] }
+        assertEquals((1..8).map { "지$it" }, br.take(8))
+        assertEquals((10..14).flatMap { listOf("지$it", "지${it}비") }, br.subList(8, 18))
+        assertEquals(listOf("지대1", "지대2", "지대11", "지대11비"), br.subList(18, 22))
+        assertEquals((1..7).map { "지휴$it" }, br.drop(22))
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */

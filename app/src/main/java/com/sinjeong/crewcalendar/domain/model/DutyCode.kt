@@ -114,6 +114,34 @@ data class DutyCode(
          */
         val FILL_OPTIONS = setOf("충당", "대기충당", "교체")
 
+        /**
+         * 근무선택 그리드 **표시 순서** — 다이아 번호순으로 정렬한 인덱스 목록.
+         * 주간 1~29 → 야간 33~51(익일 비번 `~`는 제 다이아 바로 뒤에 짝지어) → 대기 대1~13 → 운휴 휴1~29.
+         * 지선도 같은 규칙: 지1~지8 → 지10~지14 → 지대 → 지휴.
+         *
+         * ⚠ **돌려주는 값은 반드시 원래 시퀀스 인덱스다.** 교번 offset을
+         * `Pattern.offsetFor(date, index)`가 이 인덱스로 계산하므로, 정렬된 자리 번호를 넘기면
+         * 고른 다이아와 다른 근무표가 저장된다(사용자 전원의 근무가 어긋남).
+         *
+         * 비번(`38비`)을 따로 모으지 않고 제 다이아 옆에 붙이는 이유: [display]가 전부 `~` 한 글자라
+         * 모아 두면 어느 야간의 비번인지 구분할 방법이 사라진다.
+         */
+        fun displayOrder(sequence: List<String>): List<Int> =
+            sequence.indices.sortedBy { orderKey(sequence[it]) }
+
+        private fun orderKey(raw: String): Int {
+            val s = raw.removePrefix("지")
+            val post = s.endsWith("비")
+            val body = s.removeSuffix("비")
+            val rank = when {
+                body.startsWith("휴") -> 2                // 운휴
+                body.startsWith("대") -> 1                // 대기
+                else -> 0                                 // 주간·야간 다이아 (번호가 이어져 1~29 → 33~51)
+            }
+            val n = body.filter(Char::isDigit).toIntOrNull() ?: 999
+            return (rank * 1000 + n) * 2 + if (post) 1 else 0
+        }
+
         private val OVERRIDE_TYPES = mapOf(
             "충당" to DutyType.STANDBY, "대기충당" to DutyType.STANDBY, "교체" to DutyType.STANDBY,
             "비번" to DutyType.POST_NIGHT,
