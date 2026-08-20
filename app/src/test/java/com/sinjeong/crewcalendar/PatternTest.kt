@@ -271,7 +271,8 @@ class PatternTest {
     }
 
     /**
-     * 출근 알람 세 갈래를 손계산으로 고정한다 (v1.6.27 사용자 확정 규칙).
+     * 출근 알람 세 갈래를 손계산으로 고정한다 (v1.6.27 사용자 확정 규칙,
+     * 세 번째 갈래 "기지 출고"는 v1.6.34에서 알람 없음 → **출고 50분 전**으로 바뀌었다).
      *
      * 2026-08-18은 화요일(평일), 익일도 평일이라 야간 조합은 평평(PP).
      */
@@ -294,10 +295,12 @@ class PatternTest {
         // 충당 대행도 대신 뛰는 다이아를 그대로 따라간다
         assertEquals(LocalTime.of(19, 36), BundledTimetable.advise(DutyCode.parse("충당 38"), weekday).at)
 
-        // C. 기지 출고(간격 60분) — 알람 없음. 주간 9번은 행로표에서 신정기지 ○(출고) 확인된 다이아
+        // C. 기지 출고(간격 60분) — v1.6.34부터 **출고 50분 전**. 사용자 확정 예시 그대로:
+        //    주간 9번(행로표에서 신정기지 ○출고 확인) 전반시작 8:02 → 알람 7:12
         val depot = BundledTimetable.advise(DutyCode.parse("9"), weekday)
-        assertEquals(null, depot.at)
-        assertTrue(depot.text, depot.text.contains("출고"))
+        assertEquals(LocalTime.of(7, 12), depot.at)
+        assertTrue(depot.depot)
+        assertEquals("신정기지 8:02 출고 · 알림 7:12", depot.text)
 
         // 기준시각이 없는 근무 — 대기 계열·운휴대기
         assertEquals(null, BundledTimetable.advise(DutyCode.parse("대3"), weekday).at)
@@ -374,6 +377,7 @@ class PatternTest {
             val holiday = Bundled.isHolidayTimetable(date)
             (1..51).forEach { n ->
                 val advice = BundledTimetable.advise(DutyCode.parse("$n"), date)
+                if (advice.depot) return@forEach // 기지 출고(v1.6.34)는 편승 창과 무관하다
                 val start = MainLegs.forDay(n, holiday)?.firstOrNull()
                     ?: MainLegs.forNight(n, Bundled.comboOf(date))?.firstOrNull()
                 val startT = start?.split(":")?.takeIf { it.size == 2 }
@@ -625,7 +629,9 @@ class PatternTest {
     /**
      * **본선 후반 알람 전수표를 손계산으로 고정한다** (v1.6.30).
      *
-     * 켜진 다이아 42건 / 제외 12건 (v1.6.31에서 평일 4·7이 제외 → 켜짐). 제외는 사유가 구체적으로 보여야 한다.
+     * 편승 42건 / 출고 9건 / 제외 3건 (v1.6.31에서 평일 4·7이 제외 → 켜짐,
+     * v1.6.34에서 제외 12건 중 출고 9건이 [depotAlarmIsFiftyMinutesBeforeRollout]로 옮겨 갔다).
+     * **편승 42건은 그대로다** — 이 테스트가 그 불변을 잠근다. 제외는 사유가 구체적으로 보여야 한다.
      * 표본 시각은 행로표 스캔으로 눈으로도 확인한 것들이다
      * (`wd_12` 16:50 · `wd_29` 19:10 신도림 / `hol_2` 13:48 · `hol_16` 16:09 · `hol_25` 18:14).
      */
@@ -659,14 +665,11 @@ class PatternTest {
         assertEquals(LocalTime.of(17, 56), at(25, holiday).at)
 
         // ── 제외 다이아: 알람 없음 + 구체적 사유 ──
+        // v1.6.34에서 **출고 9건이 여기서 빠져 나갔다**(→ [depotAlarmIsFiftyMinutesBeforeRollout]).
+        // 남은 셋은 편승·교대라 여전히 못 건다.
         listOf(
-            Triple(1, weekday, "군자기지 편승"), Triple(6, weekday, "신정기지 출고"),
-            Triple(13, weekday, "군자기지 출고"), Triple(14, weekday, "군자기지 입출고"),
-            Triple(16, weekday, "신정기지 출고"), Triple(17, weekday, "신정기지 출고"),
-            Triple(21, weekday, "신정기지 출고"),
-            Triple(1, holiday, "군자기지"), Triple(3, holiday, "군자기지 입출고"),
-            Triple(5, holiday, "신정기지 출고"), Triple(20, holiday, "신정기지 출고"),
-            Triple(21, holiday, "성수 교대"),
+            Triple(1, weekday, "군자기지 편승"),
+            Triple(1, holiday, "군자기지"), Triple(21, holiday, "성수 교대"),
         ).forEach { (n, date, why) ->
             val a = at(n, date)
             assertEquals("$n / $date 는 알람이 없어야", null, a.at)
@@ -674,15 +677,101 @@ class PatternTest {
         }
 
         // ── 켜진 수 / 제외 수 ──
-        val on = MainLegs.WEEKDAY.keys.count { at(it, weekday).at != null } +
-            MainLegs.HOLIDAY.keys.count { at(it, holiday).at != null }
-        assertEquals("후반 알람이 켜진 본선 주간 다이아 수", 42, on)
+        // **편승 42건은 v1.6.34에서도 한 건도 안 바뀐다** — 출고는 `depot` 표시로 따로 센다.
+        fun count(depot: Boolean) =
+            MainLegs.WEEKDAY.keys.count { at(it, weekday).let { a -> a.at != null && a.depot == depot } } +
+                MainLegs.HOLIDAY.keys.count { at(it, holiday).let { a -> a.at != null && a.depot == depot } }
+        assertEquals("후반 편승 알람이 켜진 본선 주간 다이아 수", 42, count(depot = false))
+        assertEquals("후반 기지 출고 알람 다이아 수 (v1.6.34)", 9, count(depot = true))
         assertEquals("본선 주간 조합 수", 54, MainLegs.WEEKDAY.size + MainLegs.HOLIDAY.size)
 
         // 야간 후반은 그대로 익일이라 없다
         MainLegs.NIGHT.keys.forEach { n ->
             assertEquals("야간 $n", null, at(n, weekday).at)
         }
+    }
+
+    /**
+     * **기지 출고 알람 = 출고시각 50분 전** (v1.6.34 사용자 확정) — 대상 전건을 손계산으로 잠근다.
+     *
+     * v1.6.27~33은 출고에 알람이 없었다("알람 없음 + 사유 표시"). 사용자가 다시 필요하다며
+     * **50분 전**으로 확정했다. 원문 예시: *"평일 9번 신정기지 출고 8:02 → 알람 7:12"*.
+     *
+     * | 구간 | 대상 | 기지 |
+     * |---|---|---|
+     * | 전반 | 11건 (평일 2·5·6·8·9 / 휴일 4·8·12·13·14·15) | 전부 신정기지(첫 열번 5xxx·6xxx) |
+     * | 후반 | 9건 (평일 6·13·14·16·17·21 / 휴일 3·5·20) | 신정 6 · 군자 3 |
+     *
+     * 출고가 **아닌** 사유로 빠진 셋(평일 1 군자기지 편승 / 휴일 1 군자→성수 편승 / 휴일 21 성수 교대)은
+     * 대상이 아니다 — 편승·교대는 어디서 몇 시에 열차를 잡는지 표에 없다.
+     */
+    @Test fun depotAlarmIsFiftyMinutesBeforeRollout() {
+        val weekday = LocalDate.of(2026, 8, 18) // 화
+        val holiday = LocalDate.of(2026, 8, 23) // 일
+        fun adv(n: Int, date: LocalDate, second: Boolean = false) =
+            BundledTimetable.advise(DutyCode.parse("$n"), date, second)
+
+        // ── 전반: 출고시각(= MainLegs 전반시작) − 50분. 손계산 표본 ──
+        listOf(
+            Triple(9, weekday, "8:02" to LocalTime.of(7, 12)),   // 사용자 확정 예시
+            Triple(2, weekday, "7:23" to LocalTime.of(6, 33)),
+            Triple(5, weekday, "7:47" to LocalTime.of(6, 57)),
+            Triple(4, holiday, "8:30" to LocalTime.of(7, 40)),
+            Triple(15, holiday, "10:39" to LocalTime.of(9, 49)),
+        ).forEach { (n, date, spec) ->
+            val (out, alarm) = spec
+            val a = adv(n, date)
+            assertEquals("$n / $date", alarm, a.at)
+            assertTrue("$n / $date", a.depot)
+            assertEquals("신정기지 $out 출고 · 알림 ${alarm.hour}:%02d".format(alarm.minute), a.text)
+        }
+
+        // ── 후반: 출고시각(= MainLegs 후반시작, 휴일 15분 보정 없음) − 50분 ──
+        listOf(
+            Triple(6, weekday, Triple("신정기지", "15:26", LocalTime.of(14, 36))),
+            Triple(13, weekday, Triple("군자기지", "16:47", LocalTime.of(15, 57))),
+            Triple(14, weekday, Triple("군자기지", "17:54", LocalTime.of(17, 4))),
+            Triple(21, weekday, Triple("신정기지", "18:07", LocalTime.of(17, 17))),
+            Triple(3, holiday, Triple("군자기지", "15:59", LocalTime.of(15, 9))),
+            Triple(5, holiday, Triple("신정기지", "14:03", LocalTime.of(13, 13))),
+            Triple(20, holiday, Triple("신정기지", "16:47", LocalTime.of(15, 57))),
+        ).forEach { (n, date, spec) ->
+            val (base, out, alarm) = spec
+            val a = adv(n, date, second = true)
+            assertEquals("$n / $date 후반", alarm, a.at)
+            assertTrue("$n / $date 후반", a.depot)
+            assertEquals("$base $out 출고 · 알림 ${alarm.hour}:%02d".format(alarm.minute), a.text)
+        }
+
+        // ── 대상 전수: 전반 11건 · 후반 9건, 그 밖엔 한 건도 없어야 ──
+        val first = mutableListOf<String>()
+        val second = mutableListOf<String>()
+        listOf(weekday to MainLegs.WEEKDAY, holiday to MainLegs.HOLIDAY).forEach { (date, legs) ->
+            val tag = if (date == holiday) "휴" else "평"
+            legs.keys.sorted().forEach { n ->
+                if (adv(n, date).depot) first += "$tag$n"
+                if (adv(n, date, second = true).depot) second += "$tag$n"
+            }
+        }
+        assertEquals(listOf("평2", "평5", "평6", "평8", "평9", "휴4", "휴8", "휴12", "휴13", "휴14", "휴15"), first)
+        assertEquals(listOf("평6", "평13", "평14", "평16", "평17", "평21", "휴3", "휴5", "휴20"), second)
+
+        // 야간은 전건 간격 45분(신도림 교대)이라 전반 출고가 없고, 후반은 익일이라 아예 안 건다
+        MainLegs.NIGHT.keys.forEach { n ->
+            listOf(weekday, holiday).forEach { d ->
+                assertTrue("야간 $n / $d 전반", !adv(n, d).depot)
+                assertTrue("야간 $n / $d 후반", !adv(n, d, second = true).depot)
+            }
+        }
+
+        // 출고가 아닌 사유 셋은 그대로 알람 없음
+        assertEquals(null, adv(1, weekday, second = true).at)
+        assertEquals(null, adv(1, holiday, second = true).at)
+        assertEquals(null, adv(21, holiday, second = true).at)
+
+        // 지선·대기는 출고 표시가 붙지 않는다
+        assertTrue(!BundledTimetable.advise(DutyCode.parse("지1"), weekday).depot)
+        assertTrue(!BundledTimetable.advise(DutyCode.parse("대3"), weekday).depot)
     }
 
     /**

@@ -878,7 +878,8 @@ private fun DayDetailContent(
  * 편승(출근) 알람 버튼 (행로표 바로 아래, 오른쪽 정렬). **전반사업용·후반사업용 두 개**가 나란히 뜬다.
  *
  * 권장 시각과 안내 문구는 [BundledTimetable.advise]가 준다
- * (지선 = 양천구청 도착 / 본선 신도림 교대 = 편승 탑승 / 기지 출고·대기·본선 후반 = 알람 없음).
+ * (지선 = 양천구청 도착 5분 전 / 본선 신도림 교대 = 편승 열차 5분 전 /
+ * **기지 출고 = 출고 50분 전**(v1.6.34) / 대기·야간 후반 = 알람 없음).
  * **자동 예약은 하지 않는다** — 버튼만 띄우고 사용자가 눌러 확인해야 걸린다.
  *
  * 근무변경으로 다이아가 바뀌면 예약해 둔 시각이 안 맞을 수 있으므로,
@@ -928,6 +929,10 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     val on = booked != null
     val disabled = at == null || past
     val half = if (second) "후반" else "전반"
+    // 기지 출고 알람(v1.6.34)은 편승과 계산 규칙이 다르다 — 칩에도 "출고"를 적어 구분한다.
+    // 아이콘·색은 전반 민트 / 후반 라벤더 그대로 둔다(구분은 글자 하나면 충분하고, 색을 더 쪼개면
+    // 네 상태 색 표가 여덟 줄이 된다).
+    val tag = if (advice.depot) "$half 출고" else half
 
     // 아이콘과 같은 계열. `ink`는 아이콘의 딥 톤(#12756A/#513F96)보다 한 단계 진하다 —
     // 파스텔 위 글자를 AA(4.5:1) 위로 올리려면 이만큼 필요하다(3.87 → 5.02).
@@ -958,16 +963,16 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
         ) {
             Image(
                 painterResource(if (second) R.drawable.ic_deadhead_second else R.drawable.ic_deadhead_first),
-                "$half 편승 알람",
+                if (advice.depot) "$half 기지 출고 알람" else "$half 편승 알람",
                 Modifier.size(18.dp),
                 alpha = if (disabled) 0.5f else 1f,
             )
             Text(
                 when {
                     at == null -> "$half 알람없음"
-                    past -> "$half ${hm(at)} 지남"
-                    on -> "$half ${hm(at)} 예약"
-                    else -> "$half ${hm(at)}"
+                    past -> "$tag ${hm(at)} 지남"
+                    on -> "$tag ${hm(at)} 예약"
+                    else -> "$tag ${hm(at)}"
                 },
                 fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
             )
@@ -979,7 +984,15 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     val permWarn = if (ask) AlarmPermission.warning(ctx) else null
     if (ask) AlertDialog(
         onDismissRequest = { ask = false },
-        title = { Text(if (permWarn != null) "알람 권한을 켜 주세요" else "${half}사업 편승 알람") },
+        title = {
+            Text(
+                when {
+                    permWarn != null -> "알람 권한을 켜 주세요"
+                    advice.depot -> "${half}사업 기지 출고 알람"
+                    else -> "${half}사업 편승 알람"
+                },
+            )
+        },
         text = {
             Text(
                 when {

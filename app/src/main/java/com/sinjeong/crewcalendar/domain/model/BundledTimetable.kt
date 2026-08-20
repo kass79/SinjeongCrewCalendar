@@ -30,13 +30,20 @@ object BundledTimetable {
         Row(23, listOf(2,17,31,48), listOf(8,23,39,53)),
     )
 
-    /** 알람 권장 결과. [at]이 null이면 알람을 걸 수 없고 [text]가 그 사유다. */
-    data class Advice(val at: LocalTime?, val text: String)
+    /**
+     * 알람 권장 결과. [at]이 null이면 알람을 걸 수 없고 [text]가 그 사유다.
+     *
+     * [depot]은 **기지 출고 알람**(v1.6.34)이라는 표시다 — 편승 알람과 계산 규칙도
+     * 화면 문구도 갈리므로 호출부가 문자열을 헤집지 않게 여기서 알려 준다.
+     */
+    data class Advice(val at: LocalTime?, val text: String, val depot: Boolean = false)
 
     /**
      * 본선에서 "출근 → 전반시작" 간격이 이 값이면 **신도림역에서 교대**하는 근무다(= 편승 필요).
      *
-     * ⚠ 이 45분이 B(편승 알람)와 C(기지 출고 — 알람 없음)를 가르는 **유일한 판별 기준**이다.
+     * ⚠ 이 45분이 B(편승 알람)와 C(기지 출고 알람 — v1.6.33까지는 알람 없음)를 가르는
+     * **유일한 판별 기준**이다. v1.6.34에서 C에도 알람이 붙었으므로 이제 이 값이 틀리면
+     * 두 갈래 **모두** 틀린 시각을 준다.
      * 행로표가 스캔 이미지라 역명을 코드로 읽을 수 없어서 데이터에서 찾아낸 대리 지표이고,
      * v1.6.27에서 아래 네 갈래로 검증했다(전 다이아 127건 = 주간 평일29·휴일25 + 야간 73):
      *
@@ -88,27 +95,55 @@ object BundledTimetable {
     private const val BOARD_EARLY_MIN = 5L
 
     /**
-     * **본선 후반사업이 신도림 교대가 아닌 다이아 → 사유** (v1.6.30). 여기 없는 다이아 = 신도림 교대.
+     * **기지 출고 알람은 출고시각 50분 전** (v1.6.34 사용자 확정).
+     *
+     * v1.6.27에서 "기지 출고는 1시간 전 알림" 안을 만들었다가 사용자가 "알림 없어도 될 듯"이라
+     * 해서 뺐고([Advice.depot]이 없던 시절), 이번에 다시 필요하다며 **50분**으로 확정했다.
+     * 사용자 예시: *"평일 9번 신정기지 출고(전반시작) 8:02 → 알람 7:12"*.
+     *
+     * 편승과 달리 탈 열차를 고르는 창이 없다 — 기지에서 바로 열차를 끌고 나오므로
+     * **출고시각 하나에서 곧장 뺀다.** 편승 계열의 [BOARD_EARLY_MIN] 5분과는 무관하다.
+     */
+    private const val DEPOT_EARLY_MIN = 50L
+
+    /**
+     * **본선 후반사업이 기지 출고인 다이아 → 기지 이름** (v1.6.34에서 [SECOND_NOT_SINDORIM_*]에서 갈라냄).
+     *
+     * 분류 근거(후반 첫 열번)는 이 파일 맨 아래 주석 그대로다. 여기 값은 **알람을 거는 대상**이고,
+     * [SECOND_NOT_SINDORIM_WEEKDAY]·[SECOND_NOT_SINDORIM_HOLIDAY]에 남은 것은
+     * 출고가 아니라(편승·성수교대) 여전히 알람을 걸 수 없는 것들이다.
+     */
+    private val SECOND_DEPOT_WEEKDAY: Map<Int, String> = mapOf(
+        6 to "신정기지", // 6941 회송
+        13 to "군자기지", // 1942 = 군자 입출고 회송
+        14 to "군자기지", // 2952
+        16 to "신정기지", // 6945
+        17 to "신정기지", // 행로표 실물: 후반 17:24 신정기지 ○출고 → 5961 회송 (RouteTable의 전·후반 구분이 어긋나 있다)
+        21 to "신정기지", // 6953
+    )
+
+    private val SECOND_DEPOT_HOLIDAY: Map<Int, String> = mapOf(
+        3 to "군자기지", // 2934
+        5 to "신정기지", // 5943
+        20 to "신정기지", // 6939
+    )
+
+    /**
+     * **본선 후반사업이 신도림 교대도 기지 출고도 아닌 다이아 → 사유** (v1.6.30).
+     * 여기에도 [SECOND_DEPOT_WEEKDAY]·[SECOND_DEPOT_HOLIDAY]에도 없는 다이아 = 신도림 교대.
      *
      * 근거는 이 파일 맨 아래 주석. 값은 그대로 사용자에게 보여 주는 사유 문구다.
+     * 이 셋은 **출고가 아니라 편승·교대**라 어디서 몇 시에 열차를 잡는지 알 수 없다 —
+     * v1.6.34에서 출고에 알람을 켤 때도 그대로 뒀다.
      */
     private val SECOND_NOT_SINDORIM_WEEKDAY: Map<Int, String> = mapOf(
-        1 to "군자기지 편승", // 후반 열번 "군자기지 편승·2265·2299"
         // 4·7은 v1.6.30에서 "행로표와 시각표가 어긋남"으로 빼 뒀다가, v1.6.31에서 사용자가
         // 실근무로 행로표 쪽을 확정해 [MainLegs]를 바로잡고 알람을 켰다(둘 다 신도림 교대).
-        6 to "신정기지 출고", // 6941 회송
-        13 to "군자기지 출고", // 1942 = 군자 입출고 회송
-        14 to "군자기지 입출고", // 2952
-        16 to "신정기지 출고", // 6945
-        17 to "신정기지 출고", // 행로표 실물: 후반 17:24 신정기지 ○출고 → 5961 회송 (RouteTable의 전·후반 구분이 어긋나 있다)
-        21 to "신정기지 출고", // 6953
+        1 to "군자기지 편승", // 후반 열번 "군자기지 편승·2265·2299"
     )
 
     private val SECOND_NOT_SINDORIM_HOLIDAY: Map<Int, String> = mapOf(
         1 to "군자기지에서 성수까지 편승",
-        3 to "군자기지 입출고", // 2934
-        5 to "신정기지 출고", // 5943
-        20 to "신정기지 출고", // 6939
         21 to "성수 교대",
     )
 
@@ -154,16 +189,24 @@ object BundledTimetable {
         return Advice(alarm, "양천구청역 ${hm(board)} 편승 (신도림 ${hm(start)} 출발) · 알림 ${hm(alarm)}")
     }
 
+    /** 기지 출고 알람 (v1.6.34) — 출고시각 [DEPOT_EARLY_MIN]분 전. 전반·후반이 이 한 곳을 같이 쓴다. */
+    private fun depot(base: String, out: LocalTime): Advice {
+        val alarm = out.minusMinutes(DEPOT_EARLY_MIN)
+        return Advice(alarm, "$base ${hm(out)} 출고 · 알림 ${hm(alarm)}", depot = true)
+    }
+
     /**
      * 그 날 그 근무의 알람 권장 시각. **전반사업**([second] = false)은 세 갈래다(v1.6.27 사용자 확정):
      *
      *  · **지선** — 양천구청에서 바로 승무를 시작하므로 편승이 없다. 전반시작 **5분 전 도착**.
      *  · **본선 신도림 교대**([SINDORIM_GAP_MIN]) — 양천구청에서 신도림 출발 10~21분 전에
      *    떠나는 편승 열차 중 **가장 늦은 편**, 알람은 **그 5분 전**([BOARD_EARLY_MIN]).
-     *  · **기지 출고** — 사용자 요청으로 **알람 없음**(신정기지·군자기지 모두).
+     *  · **기지 출고** — **출고시각 50분 전**([DEPOT_EARLY_MIN], v1.6.34 사용자 확정).
+     *    v1.6.27~33은 "알람 없음"이었다. 전반 출고는 전부 신정기지다(아래 C 분기 주석).
      *
      * **후반사업**([second] = true)은 지선 주간(v1.6.29)에 더해 **본선 주간 중 신도림 교대인
-     * 다이아**(v1.6.30)까지 계산한다. 신도림이 아닌 다이아는 [SECOND_NOT_SINDORIM_WEEKDAY] ·
+     * 다이아**(v1.6.30)와 **기지 출고인 다이아**(v1.6.34, [SECOND_DEPOT_WEEKDAY] ·
+     * [SECOND_DEPOT_HOLIDAY])까지 계산한다. 둘 다 아닌 다이아는 [SECOND_NOT_SINDORIM_WEEKDAY] ·
      * [SECOND_NOT_SINDORIM_HOLIDAY]에 사유를 적어 두고 그 사유를 그대로 보여 준다.
      * 야간 후반은 익일 새벽이라 여전히 제외 — 근거는 이 파일 맨 아래 주석.
      *
@@ -204,6 +247,12 @@ object BundledTimetable {
                 return Advice(null, "후반사업이 신도림 교대로 시작하지 않습니다 ($why). 탈 편승 열차가 없어 알람을 걸지 않습니다.")
             val raw = time(MainLegs.forDay(num, holiday)?.getOrNull(2))
                 ?: return Advice(null, "이 근무는 후반 사업시각이 없어 알람을 걸 수 없습니다. 행로표를 확인하세요.")
+            // C'. 기지 출고 (v1.6.34) — 표 값이 곧 출고시각이다. **휴일 15분 보정을 하지 않는다**:
+            //     그 보정은 "휴일 표는 양천구청 편승 출발을 적는다"는 관측인데, 출고 다이아엔
+            //     편승 자체가 없다. 전반 출고가 평일·휴일 모두 출근 +60분으로 똑같은 것이
+            //     "두 표 다 출고 다이아는 출고시각을 그대로 적는다"는 증거다.
+            (if (holiday) SECOND_DEPOT_HOLIDAY else SECOND_DEPOT_WEEKDAY)[num]
+                ?.let { return depot(it, raw) }
             // 휴일 표의 후반시작은 양천구청 편승 출발시각이라 신도림 출발은 그 15분 뒤다
             return deadhead(raw.plusMinutes(if (holiday) HOLIDAY_SECOND_LEG_SHIFT_MIN else 0L), holiday)
         }
@@ -222,8 +271,12 @@ object BundledTimetable {
         if (start == null || signOn == null)
             return Advice(null, "이 근무는 사업시각이 없어 알람을 걸 수 없습니다. 행로표를 확인하세요.")
 
+        // C. 기지 출고 — 전반시작이 곧 출고시각이다. **전반 출고는 전부 신정기지**:
+        //    간격 60분인 11건(평일 2·5·6·8·9 / 휴일 4·8·12·13·14·15)의 전반 첫 열번이
+        //    전부 5xxx·6xxx(신정 회송)이고 군자 계열(19xx·29xx)은 0건이다. 야간은 전건 45분이라
+        //    전반 출고가 아예 없다. `deadhead_gap_matches_depot_train_number`가 이 대응을 잠근다.
         if (start.mins() - signOn.mins() != SINDORIM_GAP_MIN)
-            return Advice(null, "기지에서 열차를 끌고 나오는 근무(출고)라 편승 알람이 없습니다.")
+            return depot("신정기지", start)
 
         return deadhead(start, holiday)
     }
@@ -238,10 +291,11 @@ object BundledTimetable {
      *
      * 전반에서 127건 전수 일치했던 그 신호가 후반에도 그대로 산다.
      *  · `2xxx`(29xx 제외) = **영업열차** → 이미 굴러가는 열차를 넘겨받는다 = **신도림 교대**
-     *  · `5xxx`·`6xxx` = 신정기지 회송 → **기지 출고**
-     *  · `19xx`·`29xx` = 군자기지 입출고 회송 → **군자기지 출고**
+     *  · `5xxx`·`6xxx` = 신정기지 회송 → **신정기지 출고** ([SECOND_DEPOT_*], v1.6.34부터 알람 O)
+     *  · `19xx`·`29xx` = 군자기지 입출고 회송 → **군자기지 출고** ([SECOND_DEPOT_*], 알람 O)
      *    (`43 HP` 전반의 `"…후반군자출고…"` + 후반 `"1936·2101"`이 직접 증거)
-     *  · 텍스트(`"군자기지 편승"`·`"성수교대"`) = 적힌 그대로
+     *  · 텍스트(`"군자기지 편승"`·`"성수교대"`) = 적힌 그대로 → **출고가 아니라 알람 없음**
+     *    ([SECOND_NOT_SINDORIM_*]). 편승·교대는 어디서 몇 시에 열차를 잡는지 표에 없다.
      *
      * ### 2. 교차검증 ① 열번 맞물림 — 후반시작이 정말 교대 시각인가
      *
