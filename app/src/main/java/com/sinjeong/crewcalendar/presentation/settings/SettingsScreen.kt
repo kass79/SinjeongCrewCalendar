@@ -20,6 +20,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.repeatOnLifecycle
+import com.sinjeong.crewcalendar.BuildConfig
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.User
@@ -276,7 +277,20 @@ fun SettingsScreen(
                 },
             )
 
-            // 문의 · 저작권
+            // 앱 정보 · 문의 · 저작권
+            SectionTitle("앱 정보")
+            SettingRow(
+                title = "앱 버전",
+                sub = "신정승무 캘린더",
+                trailing = {
+                    Text(
+                        "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                },
+            )
+
             SectionTitle("문의")
             SettingRow(title = "kass7942@gmail.com", sub = "근무 수정·건의는 메일로")
             Text(

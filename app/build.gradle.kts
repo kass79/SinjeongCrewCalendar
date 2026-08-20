@@ -56,7 +56,9 @@ android {
         isCoreLibraryDesugaringEnabled = true // java.time on minSdk 26
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    // buildConfig: 설정 화면의 앱 버전 표시(BuildConfig.VERSION_NAME/VERSION_CODE)에 필요.
+    // AGP 8부터 기본값이 false라 켜 주지 않으면 BuildConfig 클래스가 아예 생성되지 않는다.
+    buildFeatures { compose = true; buildConfig = true }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1,DEPENDENCIES,INDEX.LIST}"
     }
