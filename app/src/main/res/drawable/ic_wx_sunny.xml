@@ -1,0 +1,28 @@
+<!--
+  날씨 아이콘 · 맑음 (v1.6.36 직접 제작 — 외부 이미지·타사 아이콘 아님).
+
+  v1.6.29 편승 아이콘([ic_deadhead_first])과 같은 문법: **파스텔 채움 + 딥 톤 외곽선**.
+  파스텔만 쓰면 밝은 칩 배경(#EFF4EC)에서 사라지고, 딥 톤만 쓰면 다크에서 뭉갠다.
+  둘을 겹쳐 두면 라이트에선 외곽선이, 다크에선 채움이 각각 대비를 만든다.
+  ⚠ tint가 먹으면 색이 통째로 날아간다 — `Icon`이 아니라 `Image(painterResource(...))`로 그릴 것.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 햇살 8줄기 -->
+    <path
+        android:pathData="M12,1.8 V4.4 M12,19.6 V22.2 M1.8,12 H4.4 M19.6,12 H22.2 M4.79,4.79 L6.63,6.63 M17.37,17.37 L19.21,19.21 M19.21,4.79 L17.37,6.63 M6.63,17.37 L4.79,19.21"
+        android:strokeColor="#C68A16"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round" />
+
+    <!-- 해 (파스텔 채움 + 딥 톤 외곽선) -->
+    <path
+        android:pathData="M12,6.5 a5.5,5.5 0 1 1 0,11 a5.5,5.5 0 1 1 0,-11 z"
+        android:fillColor="#FFD470"
+        android:strokeColor="#C68A16"
+        android:strokeWidth="1.5" />
+</vector>

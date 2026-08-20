@@ -58,6 +58,7 @@ import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
+import com.sinjeong.crewcalendar.presentation.weather.WeatherCell
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.widget.DeadheadAlarm
 import java.time.DayOfWeek
@@ -377,10 +378,13 @@ private fun CalendarGrid(
     val cells0: List<DaySchedule?> = List(leading) { null } + days
     val trailing = (7 - (cells0.size % 7)) % 7
     val cells: List<DaySchedule?> = cells0 + List(trailing) { null }
-    // 빈 칸(null) 처음 2개 = 근무시각표 / 편승시각표 카드
+    // 빈 칸(null) 처음 2개 = 근무시각표 / 편승시각표 카드, 세 번째 = 현재 날씨(v1.6.36).
+    // 빈 칸이 두 칸뿐인 달(1일이 화요일 등)엔 날씨가 자리를 못 얻어 안 뜬다 — 시각표 카드도
+    // 원래 그런 규칙이라 새로 생긴 제약이 아니고, 못 그릴 땐 조용히 사라지는 게 이 기능의 원칙이다.
     val nullIdx = cells.indices.filter { cells[it] == null }
     val card1 = nullIdx.getOrNull(0)
     val card2 = nullIdx.getOrNull(1)
+    val card3 = nullIdx.getOrNull(2)
     val duty = LocalDutyColors.current
     var dragX by remember { mutableFloatStateOf(0f) }
     val rows = (cells.size + 6) / 7
@@ -422,6 +426,7 @@ private fun CalendarGrid(
                 when (i) {
                     card1 -> TimetableCard("근무시각표", onOpenTimetable, cellHeight, duty.main, duty.onMain)
                     card2 -> TimetableCard("편승시각표", onOpenDeadhead, cellHeight, duty.branch, duty.onBranch)
+                    card3 -> WeatherCell(cellHeight)
                     else -> if (day == null) Spacer(Modifier.height(cellHeight))
                     else DayCell(
                         day, isSelected = day.date == selected, height = cellHeight,
@@ -1201,7 +1206,8 @@ internal fun DutyPickerSheet(
                 )
                 DutySequenceGrid(pattern.sequence, currentIndex) { i -> onPick(group, i) }
                 Text(
-                    "※ 언제든 다시 선택 가능 — 근무가 밀렸을 때 그 날짜 기준으로 다시 찍으면 됩니다.",
+                    "※ 언제든 다시 선택 가능 — 근무가 밀렸을 때 그 날짜 기준으로 다시 찍으면 됩니다.\n" +
+                        "※ 비번(~)은 목록에 없습니다 — 야간 다이아를 고르면 다음날 자동으로 붙습니다.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

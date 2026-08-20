@@ -1,0 +1,33 @@
+<!--
+  날씨 아이콘 · 비 (v1.6.36 직접 제작). 소나기(PTY=4)·비/눈(2)도 이 아이콘을 쓴다.
+  구름은 [ic_wx_cloudy]와 같은 path를 group으로 0.82배 줄여 위로 올리고, 아래에 빗줄기 3개.
+  ⚠ group scale은 strokeWidth도 같이 줄인다 → 1.8×0.82≈1.48 로 흐림(1.5)과 굵기를 맞춰 뒀다.
+  빗줄기는 파스텔/딥 2겹 대신 중간 톤 한 겹(#4A90D9) — 라이트 3.1:1 · 다크 5.7:1 로 양쪽 다 보인다.
+  ⚠ tint 금지 — `Image(painterResource(...))`로 그릴 것.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <group
+        android:pivotX="12"
+        android:pivotY="7.2"
+        android:scaleX="0.82"
+        android:scaleY="0.82">
+        <path
+            android:pathData="M7.6,18.2 A4,4 0 1 1 8.26,10.25 A5.2,5.2 0 0 1 18.02,11.05 A3.6,3.6 0 0 1 17.4,18.2 Z"
+            android:fillColor="#D2E1EE"
+            android:strokeColor="#466884"
+            android:strokeWidth="1.8"
+            android:strokeLineJoin="round" />
+    </group>
+
+    <!-- 빗줄기 -->
+    <path
+        android:pathData="M9.0,17.6 L7.9,21.3 M12.5,17.6 L11.4,21.3 M16.0,17.6 L14.9,21.3"
+        android:strokeColor="#4A90D9"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round" />
+</vector>

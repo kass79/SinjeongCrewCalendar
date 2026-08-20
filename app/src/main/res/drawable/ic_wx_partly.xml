@@ -1,0 +1,40 @@
+<!--
+  날씨 아이콘 · 구름많음 (v1.6.36 직접 제작).
+  해가 구름 뒤로 반쯤 가린 모양 — 구름을 나중에 그려 해를 덮는다.
+  구름 = 파스텔 청회색 채움 + 딥 톤 외곽선. 흐림([ic_wx_cloudy])과는 **해의 유무**로 갈린다
+  (20dp에서 구름 색 농도 차이는 안 읽히고, 해가 보이냐 아니냐는 읽힌다 — 편승 아이콘과 같은 판단).
+  ⚠ tint 금지 — `Image(painterResource(...))`로 그릴 것.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 해 (오른쪽 위에서 살짝 고개 내밈) -->
+    <path
+        android:pathData="M16.8,3.0 V4.9 M21.4,7.2 H19.5 M20.05,3.95 L18.71,5.29"
+        android:strokeColor="#C68A16"
+        android:strokeWidth="1.7"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M16.8,3.4 a3.8,3.8 0 1 1 0,7.6 a3.8,3.8 0 1 1 0,-7.6 z"
+        android:fillColor="#FFD470"
+        android:strokeColor="#C68A16"
+        android:strokeWidth="1.4" />
+
+    <!-- 구름 (왼쪽 아래, 해를 덮는다) -->
+    <group
+        android:pivotX="12"
+        android:pivotY="18.2"
+        android:scaleX="0.8"
+        android:scaleY="0.8"
+        android:translateX="-1">
+        <path
+            android:pathData="M7.6,18.2 A4,4 0 1 1 8.26,10.25 A5.2,5.2 0 0 1 18.02,11.05 A3.6,3.6 0 0 1 17.4,18.2 Z"
+            android:fillColor="#DCEAF5"
+            android:strokeColor="#4E7290"
+            android:strokeWidth="1.9"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>
