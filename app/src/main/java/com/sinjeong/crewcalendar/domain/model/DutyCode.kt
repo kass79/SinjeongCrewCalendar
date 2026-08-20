@@ -116,18 +116,25 @@ data class DutyCode(
 
         /**
          * 근무선택 그리드 **표시 순서** — 다이아 번호순으로 정렬한 인덱스 목록.
-         * 주간 1~29 → 야간 33~51(익일 비번 `~`는 제 다이아 바로 뒤에 짝지어) → 대기 대1~13 → 운휴 휴1~29.
+         * 주간 1~29 → 야간 33~51 → 대기 대1~13 → 운휴 휴1~29.
          * 지선도 같은 규칙: 지1~지8 → 지10~지14 → 지대 → 지휴.
          *
          * ⚠ **돌려주는 값은 반드시 원래 시퀀스 인덱스다.** 교번 offset을
          * `Pattern.offsetFor(date, index)`가 이 인덱스로 계산하므로, 정렬된 자리 번호를 넘기면
          * 고른 다이아와 다른 근무표가 저장된다(사용자 전원의 근무가 어긋남).
          *
-         * 비번(`38비`)을 따로 모으지 않고 제 다이아 옆에 붙이는 이유: [display]가 전부 `~` 한 글자라
-         * 모아 두면 어느 야간의 비번인지 구분할 방법이 사라진다.
+         * **익일 비번(`38비`·`지11비`·`대11비`)은 목록에서 뺀다** (v1.6.36 사용자 요청 —
+         * *"`~` 이게 비번인데 이건 굳이 없어도 될꺼같애"*). [display]가 전부 `~` 한 글자라
+         * 어느 야간의 비번인지 보이지도 않으면서 본선 108칸 중 22칸을 먹고 있었다.
+         * 야간 다이아를 고르면 다음날 비번은 교번 순환이 알아서 붙이므로 직접 고를 이유가 없다.
+         *
+         * ⚠ 뺀 만큼 **그 날짜에서 그 offset을 곧바로 고를 수는 없다.** 오늘이 비번인 사람은
+         * 전날 칸을 눌러 야간 다이아를 고르면 완전히 같은 결과가 된다(시트 안내문 그대로).
          */
         fun displayOrder(sequence: List<String>): List<Int> =
-            sequence.indices.sortedBy { orderKey(sequence[it]) }
+            sequence.indices
+                .filter { parse(sequence[it]).type != DutyType.POST_NIGHT }
+                .sortedBy { orderKey(sequence[it]) }
 
         private fun orderKey(raw: String): Int {
             val s = raw.removePrefix("지")
