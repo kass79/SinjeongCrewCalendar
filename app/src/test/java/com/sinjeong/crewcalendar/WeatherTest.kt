@@ -2,6 +2,7 @@ package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.presentation.weather.Wx
 import com.sinjeong.crewcalendar.presentation.weather.parseUltraSrtFcst
+import com.sinjeong.crewcalendar.presentation.weather.toGrid
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -68,5 +69,42 @@ class WeatherTest {
         // 서비스키 오류 등으로 아예 다른 문서가 올 때
         assertNull(parseUltraSrtFcst("""{"OpenAPI_ServiceResponse":{"cmmMsgHeader":{"returnAuthMsg":"SERVICE_KEY_IS_NOT_REGISTERED_ERROR"}}}"""))
         assertNull(parseUltraSrtFcst(""))
+    }
+
+    /**
+     * 위경도 → 기상청 격자 변환 검산(v1.6.37). **기상청 공개 격자표와 대조한 값이다.**
+     *
+     * 이 변환이 틀어지면 엉뚱한 동네 기온이 조용히 그려진다 — 화면만 보고는 절대 못 잡는다.
+     * 신정차량기지(58,126)는 v1.6.36 까지 상수로 박혀 실호출로 검증됐던 값이라 기준점 노릇을 한다.
+     */
+    @Test
+    fun `위경도를 기상청 격자로 바꾼다`() {
+        assertEquals(58 to 126, toGrid(37.5145, 126.8455))   // 신정차량기지 — v1.6.36 실호출 검증값
+        assertEquals(60 to 127, toGrid(37.5665, 126.9780))   // 서울시청(종로구)
+        assertEquals(61 to 126, toGrid(37.5172, 127.0473))   // 강남구청
+        assertEquals(61 to 129, toGrid(37.6542, 127.0568))   // 노원구청
+        assertEquals(54 to 125, toGrid(37.4738, 126.6216))   // 인천 중구청
+        assertEquals(98 to 76, toGrid(35.1796, 129.0756))    // 부산시청
+        assertEquals(53 to 38, toGrid(33.4996, 126.5312))    // 제주시청
+    }
+
+    /** 격자가 5km라 양천구 안에서 몇 백 m 움직여도 같은 칸이다 — COARSE 권한으로 충분한 근거. */
+    @Test
+    fun `같은 5km 격자 안에서는 좌표가 흔들려도 같은 칸`() {
+        assertEquals(58 to 126, toGrid(37.5170, 126.8664))   // 양천구청
+        assertEquals(58 to 126, toGrid(37.5264, 126.8962))   // 영등포구청
+        assertEquals(58 to 126, toGrid(37.5509, 126.8495))   // 강서구청
+    }
+
+    /**
+     * 국내 격자(1..149 × 1..253) 밖이면 null → 호출부가 신정 폴백으로 간다.
+     * 해외 좌표를 그대로 보내면 `resultCode 10` 이 와서 **날씨가 통째로 안 뜬다** —
+     * v1.6.37 에뮬 확인에서 기본 좌표(마운틴뷰)가 1402,1265 로 나와 실제로 잡힌 자리다.
+     */
+    @Test
+    fun `국내 격자 밖이면 null`() {
+        assertNull(toGrid(37.421998, -122.084))   // 미국 마운틴뷰 = 안드로이드 에뮬 기본 좌표
+        assertNull(toGrid(35.6895, 139.6917))     // 도쿄
+        assertNull(toGrid(0.0, 0.0))              // 좌표를 못 받았을 때 흔한 쓰레기값
     }
 }

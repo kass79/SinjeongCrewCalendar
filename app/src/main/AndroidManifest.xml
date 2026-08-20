@@ -10,6 +10,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 달력 날씨를 현재 위치 기준으로 조회한다(v1.6.37). 기상청 격자가 5km 단위라
+         정밀 위치(ACCESS_FINE_LOCATION)는 필요 없다 — COARSE 만 받는다.
+         좌표는 격자(nx·ny)로 바꾼 뒤 즉시 버린다. 저장·전송 없음.
+         거부하면 신정차량기지 고정 격자로 폴백하므로 날씨는 계속 보인다. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- 구글 캘린더 동기화는 Calendar REST API(인터넷)로 하며 CalendarContract를 쓰지 않으므로
          READ_CALENDAR/WRITE_CALENDAR는 필요 없습니다. VIBRATE도 호출부 0건이라 제거(v1.6.18). -->
     <!-- 출근 1시간 전 브리핑: 정확 알람(12~13 기본허용, 14+는 setWindow 폴백) + 부팅 후 재등록 -->
