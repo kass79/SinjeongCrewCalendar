@@ -65,6 +65,11 @@ data class DutyCode(
             // 달력·동료근무 칸이 좁아 "주간/야간/비번/휴무"는 답답했다. 비번 `~`는 승무 3종 표기와 같다.
             raw in SHORT_LABELS -> SHORT_LABELS.getValue(raw)
             type == DutyType.POST_NIGHT -> "~"
+            // 지선 대기만 "지"를 남긴다 — 떼면 본선 대기(`대1`·`대2`·`대11`)와 **글자가 똑같아진다**
+            // (v1.6.36 사용자 요청: "신정지선 대1,대2,대11은 지대1,지대2,지대11 로 구분해주면 좋겠어!").
+            // 주간·야간 다이아는 번호대가 본선과 갈려(지1~8·지10~14) 헷갈릴 일이 없어 그대로 뗀다.
+            // ⚠ 시퀀스 문자열은 손대지 않는다 — 이미 `지대1`로 저장돼 있고 시각표 키도 그 값이다.
+            type == DutyType.BRANCH_STANDBY -> raw
             isBranch && raw.startsWith("지") && type != DutyType.SPECIAL && type != DutyType.ETC ->
                 raw.removePrefix("지")
             else -> raw

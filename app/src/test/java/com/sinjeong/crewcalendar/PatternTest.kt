@@ -102,6 +102,32 @@ class PatternTest {
         assertEquals(DutyType.REST, DutyCode.parse("휴무").type)         // 빨강
     }
 
+    /**
+     * v1.6.36 — 지선 대기는 `지`를 떼지 않는다. 떼면 본선 대기와 글자가 똑같아져
+     * 달력·동료근무·위젯·공유 이미지에서 `대1`이 본선인지 지선인지 구분이 안 됐다.
+     * **표시만** 바꾼 것이라 저장값(raw)·시각표 조회 키(diaRaw)는 그대로여야 한다.
+     */
+    @Test fun branchStandby_keeps_its_ji_prefix() {
+        val weekday = LocalDate.of(2026, 8, 18)             // 화요일(평일)
+        listOf("지대1", "지대2", "지대11").forEach { raw ->
+            val c = DutyCode.parse(raw)
+            assertEquals(raw, DutyType.BRANCH_STANDBY, c.type)
+            assertEquals(raw, raw, c.display)            // "대1"이 아니라 "지대1"
+            assertEquals(raw, raw, c.displayLong)
+            assertEquals(raw, raw, c.diaRaw)             // 시각표 키는 그대로
+            assertNotNull(raw, Bundled.timeRowFor(c, weekday))
+        }
+        // 본선 대기는 종전 그대로 — 두 계열이 이제 화면에서 갈린다
+        listOf("대1", "대2", "대11").forEach { assertEquals(it, it, DutyCode.parse(it).display) }
+        // 지선 주간·야간 다이아는 번호대가 본선과 갈려 헷갈릴 일이 없어 계속 "지"를 뗀다
+        assertEquals("3", DutyCode.parse("지3").display)
+        assertEquals("12", DutyCode.parse("지12").display)
+        // 지대11의 익일 비번은 여전히 `~` (POST_NIGHT 분기가 먼저다)
+        assertEquals("~", DutyCode.parse("지대11비").display)
+        // 충당 대행 표기도 지선 대기를 그대로 달고 간다
+        assertEquals("대기충당지대11", DutyCode.parse("대기충당 지대11").display)
+    }
+
     @Test fun officePattern_weekday_day_weekend_rest() {
         // 2026-08-10(월) ~ 08-14(금) 주간, 08-15(토)·08-16(일) 휴무
         (0..4).forEach {
