@@ -912,6 +912,35 @@ class PatternTest {
         assertEquals((1..7).map { "지휴$it" }, br.drop(16))
     }
 
+    /**
+     * v1.6.36 ④ — 휴휴 야간 33·34·35(운휴대기)의 기본 출근시각.
+     * 사용자 확정: *"근무하면 보통 야간, 미지정이면 대기 출근."* → 대기 대11~13과 같은 17/18/19시.
+     *
+     * 이 조합만 [MainLegs]에 사업시각이 없어서(`forNight` = null) 상세시트가 행로표
+     * (`hh_33`~`hh_35`, "운휴대기"라고만 적힌 스캔)만 띄우고 **출근시각을 한 줄도 안 보여줬다.**
+     * 시각 자체는 이미 [Bundled.MAIN_NIGHT]에 있었으므로 달력·위젯·브리핑은 종전에도 나왔다.
+     * 여기서 잠그는 것: 시각값 3건 + "사업시각 없음"(=상세시트 출근·종료 분기 조건) + 알람 제외.
+     */
+    @Test fun standbyOnly_nights_have_default_signOn() {
+        val hh = LocalDate.of(2026, 8, 22)                   // 토 → 일 = 휴휴
+        assertEquals(NightCombo.HH, Bundled.comboOf(hh))
+        mapOf(33 to "17:00", 34 to "18:00", 35 to "19:00").forEach { (n, on) ->
+            val c = DutyCode.parse("$n")
+            assertEquals("$n", on, Bundled.signOn(c, hh))    // 달력·위젯·브리핑이 쓰는 값
+            assertNotNull("$n", signOnAt(hh, Bundled.signOn(c, hh)))
+            // 사업시각·행로표 열번이 없다 = 상세시트가 "출근/종료"만 적는 조건
+            assertNull("$n", MainLegs.forNight(n, NightCombo.HH))
+            assertTrue("$n", RouteTable.isStandbyOnly(n, NightCombo.HH))
+            // 대기 성격이라 편승·출고 알람 대상이 아니다 (v1.6.30 판단 유지)
+            assertNull("$n", BundledTimetable.advise(c, hh).at)
+        }
+        // 평일·휴평 조합은 종전 그대로 사업시각이 있다 — 이 분기가 휴휴에만 걸린다는 근거
+        assertNotNull(MainLegs.forNight(33, NightCombo.PP))
+        assertNotNull(MainLegs.forNight(35, NightCombo.HP))
+        // 36 이상은 휴휴에도 사업시각이 있다
+        assertNotNull(MainLegs.forNight(36, NightCombo.HH))
+    }
+
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
     @Test fun mainDay_26to29_have_no_holiday_timetable() {
         assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)

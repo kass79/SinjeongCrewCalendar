@@ -769,6 +769,16 @@ private fun DayDetailContent(
             // 전체화면 행로표는 인라인 표를 탭했을 때만 연다(날짜 탭 자동 오픈은 되돌림).
             // 키를 날짜로 둬서 ① 닫으면 리컴포지션에도 다시 안 열리고 ② 날짜를 바꾸면 닫힌 채 시작.
             var showRoute by remember(day.date) { mutableStateOf(false) }
+            // 사업시각이 없는 근무(대기 대1~13·지대 / **운휴대기 = 휴휴 33·34·35**)는 출근·종료만 적는다.
+            // 행로표가 있어도 여기서 같이 보여 준다 — `hh_33`~`hh_35` 스캔은 "운휴대기"라고만 적혀 있고
+            // 시각이 한 줄도 없어서, 종전엔 이 조합만 상세시트에 출근시각이 아예 안 떴다(v1.6.36 ④).
+            // 시각 자체는 [Bundled.MAIN_NIGHT]의 휴휴값 17:00 / 18:00 / 19:00 = 대기 대11~13과 같은 값이다.
+            if (mainLegs == null && branchLegs == null) row?.let { r ->
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    KvRow("출근", r.signOn)
+                    KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
+                }
+            }
             if (routeAsset != null) {
                 // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로.
                 // 접힘은 폭을 키워 세로를 벌고 넘치는 폭은 가로 스크롤 — 펼침은 이미 커서 1f 유지.
@@ -782,7 +792,7 @@ private fun DayDetailContent(
                     vStretch = if (compact) 1f else 1.4f,
                 ) { showRoute = true }
             } else {
-                row?.let { r ->
+                if (row != null) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         when {
                             mainLegs != null -> {
@@ -799,10 +809,7 @@ private fun DayDetailContent(
                                 KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
                                 trains?.let { KvRow("총근무시간", it.totalWorkTime) }
                             }
-                            else -> {
-                                KvRow("출근", r.signOn)
-                                KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
-                            }
+                            // 사업시각이 없는 근무(출근·종료만)는 위에서 이미 그렸다
                         }
                     }
                 }
