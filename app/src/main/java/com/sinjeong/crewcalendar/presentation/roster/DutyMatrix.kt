@@ -120,7 +120,7 @@ data class MatrixMetrics(
          */
         val Roomy = MatrixMetrics(
             cellW = 36.dp, nameW = 68.dp,
-            codeSp = 13.sp, nameSp = 12.sp, daySp = 11.sp, dowSp = 9.sp,
+            codeSp = 13.sp, nameSp = 12.sp, daySp = 10.5.sp, dowSp = 8.5.sp,
             cellH = 28.dp, rowPadV = 2.dp,
         )
     }
@@ -231,8 +231,7 @@ fun MatrixDateHeader(
                             else MaterialTheme.colorScheme.surfaceVariant
                         )
                         // 주말·공휴일은 헤더에도 같은 띠를 얹어 본문 밴드와 하나로 이어진다
-                        .columnBand(date, today, duty)
-                        .padding(vertical = 1.dp),
+                        .columnBand(date, today, duty),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     val c = when {
@@ -343,8 +342,11 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics) {
     val needed = units * m.codeSp.value
     val (size, lines) = when {
         needed <= availSp -> m.codeSp to 1
-        // 3글자 이상이 안 들어가면 두 줄이 한 줄로 줄이는 것보다 크게 읽힐다
-        units >= 3f -> minOf(m.codeSp.value * 0.75f, availSp / (units / 2f)).sp to 2
+        // 두 줄은 **네 글자짜리 근무변경 코드**(`돌봄휴가`·`대기충당`, units 4.0)에서만 이득이다:
+        // 한 줄 7.8sp vs 두 줄 9.75sp. 반면 `지대11`(units 3.24)은 한 줄 9.6sp ≈ 두 줄 9.75sp로
+        // 크기가 거의 같은데 `지대`/`11`로 접히면 사용자 눈엔 "깨진 것"으로 보인다(v1.6.39 지적).
+        // 그래서 경계를 3.0 → **3.6**으로 올렸다 — 3글자까지는 무조건 한 줄이다.
+        units >= 3.6f -> minOf(m.codeSp.value * 0.75f, availSp / (units / 2f)).sp to 2
         else -> (availSp / units).sp to 1
     }
     // 자동 줄바꿈에 맡기면 `돌봄휴가`가 `돌봄휴 / 가`로 3:1이 된다 → 반씩 직접 끊는다
