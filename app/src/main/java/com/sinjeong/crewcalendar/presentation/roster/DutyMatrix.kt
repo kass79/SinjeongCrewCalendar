@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.roster
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -17,9 +18,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -183,6 +186,25 @@ private fun Modifier.columnBand(date: LocalDate, today: LocalDate, duty: DutyCol
 }
 
 /**
+ * **근무변경(수동)된 날 표시 — 오른쪽 아래 모서리 접힘**(v1.6.41).
+ *
+ * 종전엔 `✱ 수동변경됨`이 상세시트 안에만 있어서 달력에서는 날짜를 하나하나 열어 봐야 했다.
+ * 칸이 좁아 글자·아이콘은 못 넣는다 → **폭·높이 비용 0dp**로 칸 위에 겹쳐 그린다
+ * (`drawWithContent`라 내용 위에 얹히고, 앞선 `clip`의 둥근 모서리에 잘려 접힌 종이처럼 보인다).
+ *
+ * 달력 칸의 취소선 원래근무(`~~13~~`)는 그대로 둔다 — 저건 "무엇이었는지"고 이건 "바뀌었다"다.
+ */
+fun Modifier.changedCorner(color: Color, size: Dp) = drawWithContent {
+    drawContent()
+    val s = size.toPx()
+    val (w, h) = this.size.width to this.size.height
+    drawPath(
+        Path().apply { moveTo(w, h - s); lineTo(w, h); lineTo(w - s, h); close() },
+        color,
+    )
+}
+
+/**
  * 이름 열과 본문 사이 경계선 — 가로로 스크롤해도 "어느 행인지"를 붙잡아 주는 고정 기둥.
  * 이름 Row가 아니라 **행 전체**에 그린다. 이름 Row는 글자 높이라 칸보다 짧아 선이 점선처럼 끊긴다.
  */
@@ -302,6 +324,7 @@ fun MatrixRow(
         }
         Row(Modifier.horizontalScroll(hScroll)) {
             dates.forEach { date ->
+                val changed = overrides[date] != null
                 val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
@@ -312,7 +335,7 @@ fun MatrixRow(
                             vertical = m.rowPadV,
                         ),
                 ) {
-                    DutyChip(code.display.ifBlank { "·" }, bg, fg, m)
+                    DutyChip(code.display.ifBlank { "·" }, bg, fg, m, changed)
                 }
             }
         }
@@ -334,7 +357,7 @@ fun MatrixRow(
  * 한 줄로 찌그러뜨리는 대신 **두 줄**로 접어 훨씬 크게 읽힌다.
  */
 @Composable
-private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics) {
+private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, changed: Boolean = false) {
     // sp ↔ dp 환산을 Density에 맡겨야 시스템 글자 크기 배율(fontScale)이 반영된다
     val availSp = with(LocalDensity.current) { m.codeAvailW.toSp().value }
     // 한글·한자는 정사각(1em), 숫자·`~`·영문은 그 절반 남짓(ExtraBold라 넉넉히 잡는다)
@@ -355,6 +378,9 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics) {
         color = bg, contentColor = fg,
         // 라운드 5dp → 알약(높이의 절반). 칸이 좁아 각진 사각형은 표가 딱딱해 보였다.
         shape = RoundedCornerShape(percent = 50),
+        // 근무변경된 날 = 강조색 테두리(v1.6.41). 알약에 모서리 접힘은 곡선 밖으로 삐져나온다.
+        // 테두리는 칩 **안쪽**에 그려져 폭 비용 0dp — 옆 칸을 한 픽셀도 안 민다.
+        border = if (changed) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         modifier = Modifier.fillMaxSize(),
     ) {
         Box(Modifier.padding(horizontal = MatrixMetrics.CHIP_PAD_H), contentAlignment = Alignment.Center) {
