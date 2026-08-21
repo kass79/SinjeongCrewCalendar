@@ -1,16 +1,14 @@
 package com.sinjeong.crewcalendar.presentation.mates
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -26,15 +24,15 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.domain.model.*
 import com.sinjeong.crewcalendar.domain.repository.MateRepository
+import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.presentation.roster.*
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -54,15 +52,28 @@ class MatesViewModel @Inject constructor(
     val user: StateFlow<User?> = userRepo.observeMe()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    private val monthFlow = MutableStateFlow(YearMonth.now())
+    /** Firebase 연동 시: 로그인 근무자 실데이터 (없으면 빈 목록 → 내장 명단만) */
+    val liveUsers: StateFlow<List<RosterEntry>> = rosterRepo.observeUsers()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** 내 근무변경 실시간 반영 (Firebase 미연동이면 빈 맵) */
-    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    val monthOverrides: StateFlow<Map<String, Map<LocalDate, String>>> =
-        monthFlow.flatMapLatest { rosterRepo.observeMonthOverrides(it) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
-
-    fun setMonth(m: YearMonth) { monthFlow.value = m }
+    /**
+     * 근무변경 실시간 반영 (Firebase 미연동이면 빈 맵).
+     *
+     * 표시 범위가 **오늘부터 한 달**이라 달을 두 개 걸친다(v1.6.39). `observeMonthOverrides`는
+     * 월 단위라 이번 달·다음 달 두 벌을 받아 uid별로 합쳐야 한다 — 한 달치만 보면
+     * 경계 너머(다음 달 초)의 근무변경이 통째로 빠져 **원래 교번**이 그려진다. 조용히 틀리는 자리다.
+     *
+     * 달이 바뀌는 순간은 신경 쓰지 않는다. 화면의 `today`도 진입 시점에 고정되므로
+     * 자정을 넘겨 앱을 계속 켜 두면 둘이 같이 하루 낡을 뿐 서로 어긋나지는 않는다.
+     */
+    val monthOverrides: StateFlow<Map<String, Map<LocalDate, String>>> = combine(
+        rosterRepo.observeMonthOverrides(YearMonth.now()),
+        rosterRepo.observeMonthOverrides(YearMonth.now().plusMonths(1)),
+    ) { thisMonth, nextMonth ->
+        (thisMonth.keys + nextMonth.keys).associateWith {
+            (thisMonth[it] ?: emptyMap()) + (nextMonth[it] ?: emptyMap())
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     /** 등록: 오늘 근무 위치(patternIndex)로 offset 계산 — 근무선택과 같은 원리 */
     fun addMate(name: String, group: CrewGroup, todayPatternIndex: Int) {
@@ -84,7 +95,11 @@ class MatesViewModel @Inject constructor(
         }
     }
 
-    /** 동료근무 화면과 같은 규칙 — Mate가 없으면(=본인) 그 시점에 만든다 */
+    /**
+     * 즐겨찾기 지정/해제. 동료로 등록 안 된 사람(내장 명단·로그인 근무자·본인)은 이 시점에 Mate로 만든다.
+     * 해제는 favGroup=null — Mate는 지우지 않는다(수동 등록분 보호).
+     * 매칭은 **이름+소속** — 이름만으로 찾으면 동명이인(김지환 기관사/차장)이 서로를 덮어쓴다.
+     */
     fun setFav(name: String, group: CrewGroup, offset: Int, fav: FavGroup?) {
         val existing = mates.value.find { it.name == name && it.group == group }
         viewModelScope.launch {
@@ -98,53 +113,136 @@ class MatesViewModel @Inject constructor(
 }
 
 /**
- * 동료 탭 — 저장한 동료 + 본인을 **날짜별로 나란히** 비교하는 매트릭스.
- * 동료근무(RosterScreen)와 같은 컴포저블(`DutyMatrix.kt`)을 쓰되, 인원이 적으므로
- * `MatrixMetrics.Roomy`로 칸을 넉넉하게 잡는다 — 그게 이 화면의 존재 이유다.
+ * 카테고리 칩 2행 3열 (v1.6.39, 사용자가 배치까지 지정).
+ *
+ *     본선 기관사   본선 차장   신정지선
+ *     4조2교대     통상근무    ★즐겨찾기
+ *
+ * `null` = ★즐겨찾기(저장한 동료 + 본인) = 종전 동료 탭. 나머지는 그 소속 전원 = 종전 동료근무.
+ * 종전 `전체` 칩은 없앴다 — 282명을 한 번에 훑는 화면은 소속 칩으로 갈라 보는 것과 정보가 같고,
+ * 칸을 2행 3열로 딱 맞추라는 요청과도 맞지 않는다.
+ */
+private val CATEGORY_ROWS: List<List<CrewGroup?>> = listOf(
+    listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH),
+    listOf(CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY, null),
+)
+
+/**
+ * 동료 탭 — v1.6.39에서 상단바 `동료근무`(RosterScreen)를 흡수한 **통합 화면**.
+ *
+ * 종전엔 같은 매트릭스를 두 화면이 그렸다. 상단바 동료근무는 사업소 전 인원, 하단 동료 탭은
+ * 저장한 동료. 그런데 즐겨찾기를 지정하려면 동료근무로 들어가야 했고 거기 이미 동료가 다 나오니
+ * 사용자 눈엔 같은 화면이 둘이었다("헤더에 동료근무를 없애야 할듯").
+ * → 카테고리 칩 6개(소속 5 + ★즐겨찾기)로 갈라 한 화면에 넣었다.
+ *
+ * 표시 범위는 **오늘부터 한 달** 고정 — v1.6.38의 "오늘~말일"을 대체한다. 말일이 가까우면
+ * 칸이 두세 개만 남아 화면 대부분이 비던 문제를 없앤다. 대신 **달 경계를 넘으므로**:
+ *  · 헤더 날짜는 달이 바뀌는 칸에 `9/1`처럼 월을 적는다([MatrixDateHeader]).
+ *  · 근무변경은 두 달치를 합쳐 받는다([MatesViewModel.monthOverrides]).
+ *  · **월 이동 화살표는 없앴다** — 다음 달이 이미 이 화면 안에 들어와 있고, 지나간 달은
+ *    "남들과 앞으로의 근무를 비교"라는 이 화면 목적에 쓸모가 없다(과거는 달력 탭에서 본다).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     val mates by viewModel.mates.collectAsStateWithLifecycle()
     val user by viewModel.user.collectAsStateWithLifecycle()
+    val liveUsers by viewModel.liveUsers.collectAsStateWithLifecycle()
     val monthOverrides by viewModel.monthOverrides.collectAsStateWithLifecycle()
-    var month by remember { mutableStateOf(YearMonth.now()) }
-    LaunchedEffect(month) { viewModel.setMonth(month) }
     var query by remember { mutableStateOf("") }
-    var filter by remember { mutableStateOf<FavGroup?>(null) }
+    /** 선택된 카테고리. null = ★즐겨찾기 = 첫 화면 (종전 동료 탭과 같은 모습) */
+    var category by remember { mutableStateOf<CrewGroup?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     var sheetTarget by remember { mutableStateOf<MatrixPerson?>(null) }
     var editTarget by remember { mutableStateOf<Mate?>(null) }
 
     val duty = LocalDutyColors.current
     val m = MatrixMetrics.Roomy
-    // 이번 달은 오늘~말일, 다른 달은 1일~말일 (v1.6.38 — 과거는 비교에 쓸모가 없다)
-    val startDay = todayStartDay(month)
-    val hScroll = rememberMatrixScroll(month, m.cellW, startDay)
+    // 오늘부터 한 달. `plusMonths(1)`이라 2월이면 28일, 8월이면 31칸 — "한 달"의 뜻 그대로다.
+    val dates = remember {
+        val today = LocalDate.now()
+        val end = today.plusMonths(1)
+        generateSequence(today) { it.plusDays(1) }.takeWhile { it < end }.toList()
+    }
+    // 오늘이 항상 첫 칸이라 시작 위치는 언제나 0 — 헤더와 전 행이 이 하나를 공유해 같이 움직인다.
+    val hScroll = rememberScrollState()
 
     val q = query.trim()
-    val me = meAsPerson(user)?.takeIf { q.isEmpty() || it.name.contains(q) }
-    // 본인은 ★필터에서 제외 — 동료근무 화면과 같은 규칙(내 근무가 기준선이라 항상 보여야 한다)
-    val rows = listOfNotNull(me) + mates
-        .filter { q.isEmpty() || it.name.contains(q) }
-        .filter { filter == null || it.favGroup == filter }
-        .filter { mateKey(it.name, it.group) != me?.key }
-        .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
-        .map { MatrixPerson(it.name, it.group, it.patternOffset) }
+    val me = meAsPerson(user)
+    val favKeys = remember(mates) {
+        mates.filter { it.favGroup != null }.map { mateKey(it.name, it.group) }.toSet()
+    }
+
+    // 소속 칩용 전체 명단 (종전 동료근무와 같은 합성 규칙).
+    // 우선순위: 나 → 로그인 근무자(실데이터) → 수동등록 동료 → 내장 명단.
+    // 중복 제거는 **이름+소속** — 이름만 보면 동명이인(기관사/차장 김지환)이 서로를 지운다.
+    val roster = remember(user, mates, liveUsers) {
+        val taken = mutableSetOf<String>()
+        me?.let { taken += it.key }
+        val live = liveUsers.filter { mateKey(it.name, it.group) !in taken && it.uid != user?.uid }
+            .map {
+                taken += mateKey(it.name, it.group)
+                MatrixPerson(it.name, it.group, it.patternOffset, isMe = false, uid = it.uid)
+            }
+        val manual = mates.filter { mateKey(it.name, it.group) !in taken }
+            .map {
+                taken += mateKey(it.name, it.group)
+                MatrixPerson(it.name, it.group, it.patternOffset, isMe = false)
+            }
+        val bundled = CrewGroup.entries.flatMap { g ->
+            BundledRoster.forGroup(g)
+                .filterNot { mateKey(it.first, g) in taken }
+                .map { (name, off) -> MatrixPerson(name, g, off, isMe = false) }
+        }
+        listOfNotNull(me) + live + manual + bundled
+    }
+
+    val rows = if (category == null) {
+        // ★즐겨찾기 = 저장한 동료 + 본인. ★그룹이 지정된 사람이 위로, 본인은 항상 맨 위
+        // (내 근무가 모든 비교의 기준선이다).
+        listOfNotNull(me?.takeIf { q.isEmpty() || it.cleanName.contains(q) }) +
+            mates.filter { q.isEmpty() || it.name.contains(q) }
+                .filter { mateKey(it.name, it.group) != me?.key }
+                .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
+                .map { MatrixPerson(it.name, it.group, it.patternOffset) }
+    } else {
+        roster.filter { it.group == category && (q.isEmpty() || it.name.contains(q)) }
+            .sortedWith(compareBy({ !it.isMe }, { it.key !in favKeys }, { it.name }))
+    }
+
+    // 칩을 바꾸면 명단이 통째로 달라지는데 세로 위치는 그대로라 중간부터 보였다 — "나" 행이 화면 밖.
+    // 가로(날짜) 스크롤은 헤더와 공유하는 상태라 건드리지 않는다.
+    val listState = rememberLazyListState()
+    LaunchedEffect(category) { listState.scrollToItem(0) }
 
     Scaffold(
         topBar = {
-            TopAppBar(title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("동료 ${month.year}.${month.monthValue}", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
-                    IconButton(onClick = { month = month.minusMonths(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "이전 달")
-                    }
-                    IconButton(onClick = { month = month.plusMonths(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 달")
-                    }
+            // 달력 헤더와 같은 컴팩트 방식(44dp). 기본 `TopAppBar`를 쓰면 AppRoot의 Scaffold가
+            // 이미 얹은 상태바 인셋 **위에 한 번 더** 얹혀(64dp + 상태바) 화면 위쪽 근 90dp가
+            // 통째로 비었다 — 실화면에서 잡은 것. 날짜를 한 줄이라도 더 보여 주는 게 맞다.
+            Surface(color = MaterialTheme.colorScheme.surface) {
+                Row(
+                    Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("동료", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        "${dates.first().monthValue}/${dates.first().dayOfMonth}" +
+                            " ~ ${dates.last().monthValue}/${dates.last().dayOfMonth}",
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    // v1.6.21의 섹션 인원수를 여기로 옮겼다 — 한 번에 한 소속만 보이므로
+                    // 목록 안 섹션 머리글은 칩과 같은 말을 두 번 하는 셈이 된다.
+                    Text(
+                        "${rows.size}명",
+                        fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-            })
+            }
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "동료 추가") }
@@ -161,26 +259,37 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
                 shape = RoundedCornerShape(999.dp),
             )
-            // ★그룹이 늘어나면 한 줄을 넘길 수 있다 → 가로 스크롤
-            Row(
-                Modifier.horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            // 2행 3열 고정 — 가로 스크롤이 아니라 격자라 여섯 칸이 항상 다 보인다
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                FilterChip(selected = filter == null, onClick = { filter = null },
-                    label = { Text("전체", fontSize = 11.sp) })
-                FavGroup.entries.forEach { g ->
-                    val count = mates.count { it.favGroup == g }
-                    FilterChip(selected = filter == g, onClick = { filter = g },
-                        label = { Text("★ ${g.label}" + if (count > 0) " $count" else "", fontSize = 11.sp) })
+                CATEGORY_ROWS.forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                        row.forEach { g ->
+                            FilterChip(
+                                selected = category == g,
+                                onClick = { category = g },
+                                label = {
+                                    Text(
+                                        g?.label ?: "★즐겨찾기",
+                                        fontSize = 11.sp, maxLines = 1, softWrap = false,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                },
+                                modifier = Modifier.weight(1f).height(32.dp),
+                            )
+                        }
+                    }
                 }
             }
 
-            if (mates.isEmpty()) {
+            if (category == null && mates.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
                     Text(
-                        "아직 등록된 동료가 없습니다.\n+ 버튼으로 추가하세요 — 이름·소속·오늘 근무만 알면 됩니다.\n" +
-                            "추가하면 여기서 내 근무와 날짜별로 나란히 비교됩니다.",
+                        "아직 등록된 동료가 없습니다.\n+ 버튼으로 추가하거나, 위 소속 칩에서 찾아 이름을 눌러 ★로 담으세요.\n" +
+                            "담으면 여기서 내 근무와 날짜별로 나란히 비교됩니다.",
                         textAlign = TextAlign.Center,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -190,19 +299,15 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     Text("조건에 맞는 동료가 없습니다", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             } else {
-                MatrixDateHeader(month, m, hScroll, duty, startDay)
+                MatrixDateHeader(dates, m, hScroll, duty)
                 HorizontalDivider()
-                val favKeys = remember(mates) {
-                    mates.filter { it.favGroup != null }.map { mateKey(it.name, it.group) }.toSet()
-                }
-                LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+                LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
                     items(rows.size, key = { rows[it].key }) { i ->
                         val p = rows[i]
-                        MatrixRow(p, month, m, hScroll, duty,
+                        MatrixRow(p, dates, m, hScroll, duty,
                             isFav = p.key in favKeys,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
                             zebra = i % 2 == 1,
-                            startDay = startDay,
                             onNameClick = { sheetTarget = p })
                     }
                 }

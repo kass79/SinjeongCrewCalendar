@@ -78,7 +78,6 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainCalendarScreen(
-    onOpenRoster: () -> Unit = {},
     onOpenTimetable: () -> Unit = {},
     onOpenDeadhead: () -> Unit = {},
     viewModel: MainCalendarViewModel = hiltViewModel(),
@@ -138,16 +137,6 @@ fun MainCalendarScreen(
                         contentPadding = PaddingValues(horizontal = 6.dp),
                         modifier = Modifier.height(28.dp),
                     ) { Text("근무선택", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
-                    Spacer(Modifier.width(4.dp))
-                    FilledTonalButton(
-                        onClick = onOpenRoster,
-                        contentPadding = PaddingValues(horizontal = 6.dp),
-                        modifier = Modifier.height(28.dp),
-                        colors = ButtonDefaults.filledTonalButtonColors(
-                            containerColor = LocalDutyColors.current.branch,
-                            contentColor = LocalDutyColors.current.onBranch,
-                        ),
-                    ) { Text("동료근무", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
                     // 아이콘 3종은 반대로 한 단계 키웠다(32→36dp, 아이콘 18→21dp) — 44dp 헤더에 아직 여유가 있다
                     IconButton(
                         onClick = { viewModel.toggleTheme(isDark) },

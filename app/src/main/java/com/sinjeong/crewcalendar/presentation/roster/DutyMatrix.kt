@@ -37,14 +37,14 @@ import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.*
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import java.time.LocalDate
-import java.time.YearMonth
 
 /*
- * 날짜 × 사람 근무 매트릭스 (공용).
+ * 날짜 × 사람 근무 매트릭스.
  *
- * 두 화면이 같은 컴포저블을 쓰고 크기만 다르다 — 중복 구현하면 한쪽만 고치는 사고가 난다.
- *   · 동료근무(RosterScreen) = 사업소 전체 명단     → MatrixMetrics.Dense
- *   · 동료 탭(MatesScreen)   = 저장한 동료 + 본인   → MatrixMetrics.Roomy
+ * 쓰는 곳은 동료 탭([com.sinjeong.crewcalendar.presentation.mates.MatesScreen]) 하나다.
+ * v1.6.39에서 동료근무 화면(RosterScreen)을 동료 탭으로 합치면서 두 번째 호출부가 없어졌고,
+ * 그때 크기 한 벌(`MatrixMetrics.Dense`)도 같이 지웠다 — 한 화면이면 한 모양이면 된다.
+ * 파일을 따로 둔 건 그려내는 법(밴드·레일·칩 계산)과 화면 조립을 갈라 두기 위해서다.
  */
 
 /** 동료 식별 키 — 이름만으로는 그룹 간 동명이인 3쌍(김지환·박두원·이용석)이 충돌한다 */
@@ -103,21 +103,15 @@ data class MatrixMetrics(
          */
         val CHIP_PAD_H = 1.dp
 
-        /** 동료근무 — 사업소 전체(282명). v1.6.16의 26dp는 "읽기 힘들다"는 피드백을 받았다 */
-        val Dense = MatrixMetrics(
-            cellW = 32.dp, nameW = 62.dp,
-            codeSp = 11.sp, nameSp = 11.sp, daySp = 10.sp, dowSp = 8.5.sp,
-            cellH = 22.dp, rowPadV = 1.5.dp,
-        )
-
         /**
-         * 동료 탭 — 저장한 동료 + 본인.
+         * 동료 탭 — 이 앱에서 매트릭스를 그리는 **유일한 크기 한 벌**.
          *
          * v1.6.17의 44dp는 "인원이 적으니 넉넉하게"로 정했는데 411dp 화면에 날짜가 **7.5일**밖에
          * 안 들어와 "글자가 커서 최적화가 안 됐다"는 피드백을 받았다(v1.6.38).
          * 이 화면의 목적은 **남과 날짜를 비교하는 것**이라 보이는 날짜 수가 글자 크기보다 중요하다.
-         * → `Dense`(32dp)와 종전 44dp의 중간인 **36dp**. 411dp에서 9.5일 → (오늘~말일 범위와 함께)
-         * 대부분의 달에서 스크롤 없이 열흘치를 본다.
+         * → 종전 동료근무(32dp)와 44dp의 중간인 **36dp**. 411dp에서 9.5일.
+         * v1.6.39부터는 소속 전체(최대 98명)도 이 크기로 그린다 — 종전 동료근무 32dp보다
+         * 오히려 커서 가독성 후퇴는 없다.
          *
          * 코드 13sp는 그냥 고른 값이 아니다 — [DutyChip]의 계산식상 3글자 코드(`대11`·`휴28`)의
          * 필요 폭은 `2.24 × codeSp`이고 칸의 가용 폭은 `cellW − 5`다.
@@ -130,34 +124,6 @@ data class MatrixMetrics(
             cellH = 28.dp, rowPadV = 2.dp,
         )
     }
-}
-
-/**
- * 표시 첫 날 — 이번 달이면 **오늘**, 다른 달이면 1일(v1.6.38).
- *
- * 동료 탭은 "남들과 앞으로의 근무를 비교"하는 화면이라 지나간 날짜는 자리만 차지한다.
- * 이름 열 바로 옆이 오늘이 되도록 범위를 잘라 준다. 동료근무(전체 조망)는 이 함수를 안 쓴다.
- */
-fun todayStartDay(month: YearMonth): Int =
-    if (month == YearMonth.now()) LocalDate.now().dayOfMonth else 1
-
-/**
- * 오늘 열 근처로 맞춰 두는 가로 스크롤 상태 — 헤더와 전 행이 하나를 공유해 같이 움직인다.
- * [startDay]가 오늘이면 오늘이 이미 첫 칸이라 스크롤 값이 자연히 0이 된다.
- */
-@Composable
-fun rememberMatrixScroll(month: YearMonth, cellW: Dp, startDay: Int = 1): ScrollState {
-    val scroll = rememberScrollState()
-    val density = LocalDensity.current
-    LaunchedEffect(month, cellW, startDay) {
-        if (month == YearMonth.now()) {
-            // 오늘이 그려진 칸의 순번 − 2칸(앞뒤 맥락). 종전 식(오늘−3)과 startDay=1에서 완전히 같다.
-            val col = LocalDate.now().dayOfMonth - startDay - 2
-            val px = with(density) { (cellW * col).toPx() }
-            scroll.scrollTo(px.toInt().coerceAtLeast(0))
-        } else scroll.scrollTo(0)
-    }
-    return scroll
 }
 
 /**
@@ -226,15 +192,17 @@ private fun Modifier.nameColumnEdge(color: Color, x: Float) = drawBehind {
 
 /**
  * 헤더: 왼쪽 이름칸 + 가로 스크롤되는 날짜·요일.
- * [startDay]부터 말일까지 그린다 — 기본 1일(동료근무), 동료 탭은 오늘([todayStartDay]).
+ * 그릴 날짜를 **그대로 받는다**(v1.6.39). 종전엔 `YearMonth` + `startDay`라 한 달 안에서만
+ * 잘라 그릴 수 있었고, "오늘부터 한 달"은 달 경계를 넘는다.
+ * 리스트를 받으면 그리는 쪽은 범위를 생각할 필요가 없어진다 — [MatrixRow]와 **같은 리스트**를
+ * 넘기기만 하면 열이 어긋나지 않는다.
  */
 @Composable
 fun MatrixDateHeader(
-    month: YearMonth,
+    dates: List<LocalDate>,
     m: MatrixMetrics,
     hScroll: ScrollState,
     duty: DutyColors,
-    startDay: Int = 1,
 ) {
     val today = LocalDate.now()
     val edge = MaterialTheme.colorScheme.outline
@@ -252,8 +220,7 @@ fun MatrixDateHeader(
             )
         }
         Row(Modifier.horizontalScroll(hScroll)) {
-            (startDay..month.lengthOfMonth()).forEach { d ->
-                val date = month.atDay(d)
+            dates.forEach { date ->
                 val isToday = date == today
                 val hol = Bundled.PUBLIC_HOLIDAYS.containsKey(date)
                 Column(
@@ -274,7 +241,13 @@ fun MatrixDateHeader(
                         date.dayOfWeek.value == 6 -> duty.saturday
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
-                    Text("$d", fontSize = m.daySp, fontWeight = FontWeight.Bold, color = c)
+                    // 달이 바뀜는 칸은 `9/1`로 적는다 — 범위가 두 달에 걸치므로
+                    // 날짜만 있으면 31 다음 1이 뭐지 알 수 없다(v1.6.39).
+                    Text(
+                        if (date.dayOfMonth == 1) "${date.monthValue}/1" else "${date.dayOfMonth}",
+                        fontSize = m.daySp, fontWeight = FontWeight.Bold, color = c,
+                        maxLines = 1, softWrap = false,
+                    )
                     Text(
                         listOf("월", "화", "수", "목", "금", "토", "일")[date.dayOfWeek.value - 1],
                         fontSize = m.dowSp, color = c,
@@ -285,11 +258,11 @@ fun MatrixDateHeader(
     }
 }
 
-/** 한 사람의 한 달 근무 행 */
+/** 한 사람의 근무 행 — [dates]는 [MatrixDateHeader]에 넘긴 것과 **같은 리스트**여야 한다 */
 @Composable
 fun MatrixRow(
     p: MatrixPerson,
-    month: YearMonth,
+    dates: List<LocalDate>,
     m: MatrixMetrics,
     hScroll: ScrollState,
     duty: DutyColors,
@@ -298,8 +271,6 @@ fun MatrixRow(
     overrides: Map<LocalDate, String> = emptyMap(),
     /** 홀짝 줄무늬 — 사람이 많을 때 가로로 눈이 미끄러지는 걸 막는다 */
     zebra: Boolean = false,
-    /** 표시 첫 날. 헤더와 **같은 값**이어야 열이 어긋나지 않는다 */
-    startDay: Int = 1,
     onNameClick: () -> Unit = {},
 ) {
     val pattern = Bundled.patternFor(p.group)
@@ -331,8 +302,7 @@ fun MatrixRow(
             if (isFav) Text("★", fontSize = m.dowSp, color = duty.onStandby)
         }
         Row(Modifier.horizontalScroll(hScroll)) {
-            (startDay..month.lengthOfMonth()).forEach { d ->
-                val date = month.atDay(d)
+            dates.forEach { date ->
                 val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
@@ -373,7 +343,7 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics) {
     val needed = units * m.codeSp.value
     val (size, lines) = when {
         needed <= availSp -> m.codeSp to 1
-        // 3글자 이상이 안 들어가면 두 줄이 한 줄로 줄이는 것보다 크게 읽힌다
+        // 3글자 이상이 안 들어가면 두 줄이 한 줄로 줄이는 것보다 크게 읽힐다
         units >= 3f -> minOf(m.codeSp.value * 0.75f, availSp / (units / 2f)).sp to 2
         else -> (availSp / units).sp to 1
     }

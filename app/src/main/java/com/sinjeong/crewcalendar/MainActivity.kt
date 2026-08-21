@@ -40,7 +40,6 @@ import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
-import com.sinjeong.crewcalendar.presentation.roster.RosterScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
 import com.sinjeong.crewcalendar.presentation.timetable.DeadheadScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
@@ -139,12 +138,8 @@ private fun AppRoot() {
             startDestination = Tab.Calendar.route,
             modifier = Modifier.padding(padding),
         ) {
-            composable(Tab.Calendar.route) {
-                MainCalendarScreen(
-                    onOpenRoster = { nav.navigate("roster") },
-                )
-            }
-            composable("roster") { RosterScreen(onBack = { nav.popBackStack() }) }
+            // 동료근무("roster") 라우트는 v1.6.39에서 사라졌다 — 동료 탭으로 통합.
+            composable(Tab.Calendar.route) { MainCalendarScreen() }
             composable("deadhead") { DeadheadScreen(onBack = { nav.popBackStack() }) }
             composable(Tab.Mates.route) { MatesScreen() }
             composable(Tab.Settings.route) {
