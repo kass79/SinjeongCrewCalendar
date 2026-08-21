@@ -12,34 +12,77 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 
-// ── 2호선 그린 시드 팔레트 (디자인 시안 v1과 동일 토큰) ──
-private val LightColors = lightColorScheme(
+/**
+ * **이 앱의 UI 강조색 = 2호선 그린 하나다** (v1.6.41).
+ *
+ * ### 왜 secondary·tertiary 까지 직접 적어야 했나
+ *
+ * 종전엔 `primary` 계열만 적고 나머지는 `lightColorScheme()` 기본값에 맡겼다. 그런데 M3 기본값은
+ * **베이스라인 보라 팔레트**(`secondaryContainer = #E8DEF8`)라, secondary 역할을 쓰는 컴포넌트가
+ * 전부 연보라로 그려졌다 — 활성 `FilterChip`(동료 탭 소속·★그룹 칩), `SegmentedButton`(설정 테마·
+ * 편승 평일/휴일), `FilledTonalButton`(달력 상단 `근무선택`), `NavigationBar` 선택 표시.
+ * 그 연보라가 **야간·비번 근무색(#F6F0FD)과 같은 계열**이라 "근무색과 UI색이 헷갈린다"는
+ * 지적의 실제 원인이었다.
+ *
+ * → `secondaryContainer`·`tertiaryContainer`를 **`primaryContainer`와 같은 값**으로 못박는다.
+ *   호출부를 한 곳도 안 고치고 위 네 컴포넌트가 한꺼번에 같은 강조색이 된다.
+ *   (색을 화면마다 지정하면 또 갈라진다 — 스킴 한 곳에서 끝내는 게 이 파일의 존재 이유다.)
+ */
+internal val LightColors = lightColorScheme(
     primary = Color(0xFF14713F),
     onPrimary = Color.White,
     primaryContainer = Color(0xFFA8F2C1),
     onPrimaryContainer = Color(0xFF00210E),
+    // secondary·tertiary = primary 와 같은 강조색. 기본 보라 팔레트를 덮는 것이 목적이다
+    secondary = Color(0xFF14713F),
+    onSecondary = Color.White,
+    secondaryContainer = Color(0xFFA8F2C1),
+    onSecondaryContainer = Color(0xFF00210E),
+    tertiary = Color(0xFF14713F),
+    onTertiary = Color.White,
+    tertiaryContainer = Color(0xFFA8F2C1),
+    onTertiaryContainer = Color(0xFF00210E),
+    inversePrimary = Color(0xFF85DBA3),   // 스낵바 액션 — 기본값은 보라(#D0BCFF)였다
     surface = Color(0xFFFBFDF8),
     onSurface = Color(0xFF191D19),
     surfaceVariant = Color(0xFFEFF4EC),
     onSurfaceVariant = Color(0xFF454D46),
     outline = Color(0xFFC3CABF),
+    outlineVariant = Color(0xFFD7DED3),   // 구분선 — 기본값은 보라기 회색(#CAC4D0)
     error = Color(0xFFB3271E),
     errorContainer = Color(0xFFFFDAD5),
 )
 
-private val DarkColors = darkColorScheme(
+internal val DarkColors = darkColorScheme(
     primary = Color(0xFF85DBA3),
     onPrimary = Color(0xFF00391B),
     primaryContainer = Color(0xFF005229),
     onPrimaryContainer = Color(0xFFA8F2C1),
+    secondary = Color(0xFF85DBA3),
+    onSecondary = Color(0xFF00391B),
+    secondaryContainer = Color(0xFF005229),
+    onSecondaryContainer = Color(0xFFA8F2C1),
+    tertiary = Color(0xFF85DBA3),
+    onTertiary = Color(0xFF00391B),
+    tertiaryContainer = Color(0xFF005229),
+    onTertiaryContainer = Color(0xFFA8F2C1),
+    inversePrimary = Color(0xFF14713F),
     surface = Color(0xFF131712),
     onSurface = Color(0xFFE0E4DC),
     surfaceVariant = Color(0xFF1B211B),
     onSurfaceVariant = Color(0xFFADB5AA),
     outline = Color(0xFF3C443C),
+    outlineVariant = Color(0xFF2C332C),
     error = Color(0xFFFFB4AB),
     errorContainer = Color(0xFF521811),
 )
+
+/**
+ * 로그인 화면 전용 고정 강조색 — 위 [LightColors]의 `primary`와 같은 값이다.
+ * 로그인 배경은 다크에서도 밝은 파스텔 그라데이션으로 고정이라 스킴 색(다크에서 연두)을 쓰면
+ * 흰 글자가 날아간다. 그래서 값만 나눠 쓰고 **색은 하나로 유지**한다.
+ */
+val BrandGreen = Color(0xFF14713F)
 
 /** 근무 종별 시맨틱 컬러 — M3 스킴 밖의 도메인 토큰 */
 data class DutyColors(
@@ -83,10 +126,16 @@ private val DarkDutyColors = DutyColors(
 
 val LocalDutyColors = staticCompositionLocalOf { LightDutyColors }
 
+/**
+ * @param dynamicColor **기본 off**(v1.6.41). 켜 두면 Android 12+ 에서 `primary`가 배경화면에서
+ * 뽑혀 나온다 — 에뮬 기본 배경화면에서 실제로 파랑이 나왔고(오늘 칸·현재선택 테두리가 전부 파랑),
+ * 보라 계열 배경화면이면 **야간 근무색과 같은 보라**가 된다. 근무 종별 색이 의미를 지는 앱이라
+ * 강조색이 기기마다 달라지면 안 된다. 되살리려면 호출부에서 `dynamicColor = true`.
+ */
 @Composable
 fun SinjeongTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true, // Android 12+ 배경화면 다이나믹 컬러
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val colorScheme = when {

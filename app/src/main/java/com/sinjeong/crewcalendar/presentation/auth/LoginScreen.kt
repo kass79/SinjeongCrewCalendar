@@ -32,6 +32,7 @@ import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.theme.BrandGreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -115,7 +116,7 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
                 "신정승무 캘린더",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF1D3FA8),
+                color = BrandGreen,
             )
 
             CredentialCard(error, viewModel::submitCredential)
@@ -128,7 +129,7 @@ fun LoginScreen(viewModel: AuthViewModel = hiltViewModel()) {
                 fontSize = if (compactTop) 11.sp else 12.sp,
                 letterSpacing = if (compactTop) 1.5.sp else 2.5.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color(0xFF1D3FA8),
+                color = BrandGreen,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -151,9 +152,9 @@ private fun loginFieldColors() = OutlinedTextFieldDefaults.colors(
     unfocusedContainerColor = Color.White,
     focusedTextColor = Color(0xFF232030),
     unfocusedTextColor = Color(0xFF232030),
-    focusedBorderColor = Color(0xFF1D3FA8),
+    focusedBorderColor = BrandGreen,
     unfocusedBorderColor = Color(0xFFD9CFE4),
-    focusedLabelColor = Color(0xFF1D3FA8),
+    focusedLabelColor = BrandGreen,
     unfocusedLabelColor = Color(0xFF8A8496),
 )
 
@@ -181,7 +182,7 @@ private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) 
         modifier = Modifier.fillMaxWidth().height(52.dp),
         shape = RoundedCornerShape(14.dp),
         colors = ButtonDefaults.buttonColors(
-            containerColor = Color(0xFF1D3FA8),
+            containerColor = BrandGreen,
             contentColor = Color.White,
         ),
     ) { Text(label, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold) }

@@ -79,7 +79,15 @@ class DutyWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
-            GlanceTheme {
+            // 앱과 **같은 강조색**을 쓴다(v1.6.41). 인자 없는 `GlanceTheme`는 Android 12+ 에서
+            // 배경화면 다이나믹 컬러를 집어 와, 앱의 오늘 칸은 초록인데 위젯의 오늘 칸만 파랑이었다
+            // (에뮬 실측). 앱 스킴(`presentation.theme`)을 그대로 물려 준다.
+            GlanceTheme(
+                colors = androidx.glance.material3.ColorProviders(
+                    light = com.sinjeong.crewcalendar.presentation.theme.LightColors,
+                    dark = com.sinjeong.crewcalendar.presentation.theme.DarkColors,
+                ),
+            ) {
                 val prefs = currentState<androidx.datastore.preferences.core.Preferences>()
                 val cells = prefs[KEY_WEEK].orEmpty().split(";").mapNotNull { rec ->
                     val p = rec.split("|")
