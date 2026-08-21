@@ -1255,7 +1255,7 @@ private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: 
     }
 }
 
-/* ── 근무변경 시트: 직접입력 / 변경없음 / 25종 목록 ─────── */
+/* ── 근무변경 시트: 직접입력 / 변경없음 / 23종 목록(휴가 3묶음으로 접어 13칸, v1.6.40) ─────── */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DutyChangeSheet(
@@ -1271,6 +1271,10 @@ private fun DutyChangeSheet(
     // 시트를 닫았다 열면 remember가 초기화돼 다시 목록부터 시작한다.
     var fillFor by remember { mutableStateOf<String?>(null) }
     var fillGroup by remember { mutableStateOf<CrewGroup?>(null) }
+    // 휴가 계열 3묶음(연차·대휴·기타휴가) 중 펼쳐 둔 것. 이미 그 안의 코드가 저장돼 있으면 열고 시작한다.
+    var openGroup by remember {
+        mutableStateOf(DutyCode.CHANGE_GROUPS.entries.find { day.duty.raw in it.value }?.key)
+    }
     val dateLabel = day.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
     val originalLabel = DutyCode.parse(day.originalDutyRaw ?: day.duty.raw).display
 
@@ -1353,30 +1357,46 @@ private fun DutyChangeSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
+            // 펼친 그룹 하나 뒤에 하위 칩이 그대로 이어 붙는다(3열 흐름). 상위 칩만 ▾/▴가 붙고
+            // 하위엔 가운뎃점을 달아 구분한다 — 캐럿만으론 `연차 ▴` 옆 `연차`가 같은 칩 두 번으로 보였다.
+            // 최대 6줄(기타휴가 5개)이라 heightIn 360dp면 안쪽 스크롤 없이 다 보인다.
+            val kids = openGroup?.let { DutyCode.CHANGE_GROUPS.getValue(it) }.orEmpty()
+            val options: List<Pair<String, Boolean>> = DutyCode.CHANGE_TOP.flatMap { top ->
+                if (top == openGroup) listOf(top to true) + kids.map { it to false }
+                else listOf(top to (top in DutyCode.CHANGE_GROUPS))
+            }
             LazyVerticalGrid(
                 columns = GridCells.Fixed(3),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.heightIn(max = 300.dp),
+                modifier = Modifier.heightIn(max = 360.dp),
                 userScrollEnabled = true,
             ) {
-                items(DutyCode.CHANGE_OPTIONS.size) { i ->
-                    val code = DutyCode.CHANGE_OPTIONS[i]
-                    val parsed = DutyCode.parse(code)
-                    val (bg, fg) = dutyCellColors(parsed.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                items(options.size) { i ->
+                    val (code, isGroup) = options[i]
+                    // "기타휴가"는 근무코드가 아니라 parse가 ETC(투명)로 준다 → 휴가색(v1.6.23)으로 고정
+                    val colorType = if (isGroup) DutyType.REST else DutyCode.parse(code).colorType
+                    val (bg, fg) = dutyCellColors(colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     Surface(
                         // 충당 계열은 바로 확정하지 않고 다이아 선택 단계로 넘어간다
                         onClick = {
-                            if (code in DutyCode.FILL_OPTIONS) { fillFor = code; fillGroup = null }
-                            else onChange(code)
+                            when {
+                                isGroup -> openGroup = if (openGroup == code) null else code
+                                code in DutyCode.FILL_OPTIONS -> { fillFor = code; fillGroup = null }
+                                else -> onChange(code)
+                            }
                         },
                         color = bg, contentColor = fg,
                         shape = RoundedCornerShape(9.dp),
-                        border = if (code == (day.duty.fill ?: day.duty.raw))
+                        border = if (!isGroup && code == (day.duty.fill ?: day.duty.raw))
                             BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     ) {
                         Text(
-                            code,
+                            when {
+                                isGroup -> "$code ${if (openGroup == code) "▴" else "▾"}"
+                                code in kids -> "· $code"
+                                else -> code
+                            },
                             modifier = Modifier.padding(vertical = 10.dp).fillMaxWidth(),
                             textAlign = TextAlign.Center,
                             fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,

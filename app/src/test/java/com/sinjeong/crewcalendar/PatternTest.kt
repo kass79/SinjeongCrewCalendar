@@ -941,6 +941,36 @@ class PatternTest {
         assertNotNull(MainLegs.forNight(36, NightCombo.HH))
     }
 
+    /**
+     * 근무변경 시트 휴가 3묶음(v1.6.40). **저장값이 바뀌지 않는 것**이 이 테스트의 요점이다 —
+     * 그룹은 화면 묶음일 뿐이라 하위 칩은 전부 종전 `CHANGE_OPTIONS` 코드 그대로여야 하고,
+     * 접힌 목록 + 하위 목록을 합치면 23종이 하나도 빠짐없이 정확히 한 번씩 나와야 한다.
+     */
+    @Test fun changeGroups_are_screen_only_and_lose_nothing() {
+        val kids = DutyCode.CHANGE_GROUPS.values.flatten()
+        // 하위 칩은 전부 실제 근무코드다 = 고르면 그 문자열이 그대로 저장된다
+        assertTrue(kids.all { it in DutyCode.CHANGE_OPTIONS })
+        assertEquals(kids.size, kids.toSet().size)          // 두 묶음에 겹쳐 든 항목 없음
+        // 상위 이름은 화면에만 있는 "기타휴가"를 빼면 그 자체로 쓰는 근무코드 → 하위 첫 칸이 자기 자신
+        DutyCode.CHANGE_GROUPS.forEach { (top, list) ->
+            assertEquals(top, top in DutyCode.CHANGE_OPTIONS, list.first() == top)
+        }
+        assertTrue("기타휴가" !in DutyCode.CHANGE_OPTIONS)  // 저장될 수 없어야 한다
+        // 접힌 목록(그룹 이름 제외) + 하위 = 23종 전부, 중복 없음
+        assertEquals(
+            DutyCode.CHANGE_OPTIONS.toSet(),
+            (DutyCode.CHANGE_TOP - DutyCode.CHANGE_GROUPS.keys).toSet() + kids,
+        )
+        assertEquals(13, DutyCode.CHANGE_TOP.size)          // 23칸 → 13칸(3열 5줄)
+        // 그룹에 안 든 항목은 종전 자리 순서 그대로
+        assertEquals(
+            DutyCode.CHANGE_OPTIONS.filter { it !in kids },
+            DutyCode.CHANGE_TOP.filter { it !in DutyCode.CHANGE_GROUPS },
+        )
+        // 색: 하위·상위 모두 옅은 붉은색(REST, v1.6.23). "기타휴가"만 코드가 아니라 화면에서 고정한다
+        kids.forEach { assertEquals(it, DutyType.REST, DutyCode.parse(it).colorType) }
+    }
+
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
     @Test fun mainDay_26to29_have_no_holiday_timetable() {
         assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)
