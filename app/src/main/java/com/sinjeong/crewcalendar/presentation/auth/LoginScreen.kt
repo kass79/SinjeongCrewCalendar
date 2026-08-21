@@ -32,6 +32,7 @@ import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.calendar.DutyPickGate
 import com.sinjeong.crewcalendar.presentation.theme.BrandGreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,6 +46,7 @@ import javax.inject.Inject
 @HiltViewModel
 class AuthViewModel @Inject constructor(
     private val userRepo: UserRepository,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val appContext: android.content.Context,
 ) : ViewModel() {
     val user: StateFlow<User?> = userRepo.observeMe()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -63,6 +65,9 @@ class AuthViewModel @Inject constructor(
             return
         }
         _error.value = null
+        // 아래 register()가 patternId·offset을 임의값으로 채워 넣는다 = 달력이 아직 아무것도 안 맞는 상태.
+        // 근무선택을 마칠 때까지 달력이 안내를 띄우도록 여기서 "아직 안 골랐음"을 찍는다(v1.6.41 ⑤).
+        DutyPickGate.mark(appContext, false)
         viewModelScope.launch {
             userRepo.register(
                 User(
