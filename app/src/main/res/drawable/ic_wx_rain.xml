@@ -1,8 +1,13 @@
 <!--
-  날씨 아이콘 · 비 (v1.6.36 직접 제작). 소나기(PTY=4)·비/눈(2)도 이 아이콘을 쓴다.
-  구름은 [ic_wx_cloudy]와 같은 path를 group으로 0.82배 줄여 위로 올리고, 아래에 빗줄기 3개.
-  ⚠ group scale은 strokeWidth도 같이 줄인다 → 1.8×0.82≈1.48 로 흐림(1.5)과 굵기를 맞춰 뒀다.
+  날씨 아이콘 · 비 (v1.6.36 직접 제작, v1.6.40 확대). 소나기(PTY=4)·비/눈(2)도 이 아이콘을 쓴다.
+  구름은 [ic_wx_cloudy]와 같은 path를 group으로 0.83배 줄여 위로 올리고, 아래에 빗줄기 3개.
+  ⚠ group scale은 strokeWidth도 같이 줄인다 → 1.81x0.83≈1.5 로 흐림(1.5)과 굵기를 맞춰 뒀다.
   빗줄기는 파스텔/딥 2겹 대신 중간 톤 한 겹(#4A90D9) — 라이트 3.1:1 · 다크 5.7:1 로 양쪽 다 보인다.
+
+  ⚠ v1.6.40 — 비·눈은 **아래로 떨어지는 요소가 있어 세로 여백을 위아래로 똑같이 나눌 수 없다.**
+  구름을 위로 올려(윗선 3.0) 빗줄기 자리를 만들고, 빗줄기를 3.7 → 5.3 길이로 늘렸다.
+  아래 끝은 캡까지 22.4로 뷰포트 안(24)에 1.6 남는다 — 잘리지 않는다.
+  전체 73% x 84%로 시각표 전동차(76% x 94%)와 같은 무게가 됐다.
   ⚠ tint 금지 — `Image(painterResource(...))`로 그릴 것.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -13,21 +18,22 @@
 
     <group
         android:pivotX="12"
-        android:pivotY="7.2"
-        android:scaleX="0.82"
-        android:scaleY="0.82">
+        android:pivotY="12"
+        android:scaleX="0.83"
+        android:scaleY="0.83"
+        android:translateY="-3.69">
         <path
-            android:pathData="M7.6,18.2 A4,4 0 1 1 8.26,10.25 A5.2,5.2 0 0 1 18.02,11.05 A3.6,3.6 0 0 1 17.4,18.2 Z"
+            android:pathData="M6.71,19.57 A4.9,4.9 0 0 1 6.33,9.89 A6.3,6.3 0 0 1 18.53,10.98 A4.4,4.4 0 0 1 17.81,19.57 Z"
             android:fillColor="#D2E1EE"
             android:strokeColor="#466884"
-            android:strokeWidth="1.8"
+            android:strokeWidth="1.81"
             android:strokeLineJoin="round" />
     </group>
 
-    <!-- 빗줄기 -->
+    <!-- 빗줄기 (구름 아랫선 14.59 + 외곽선 0.75 아래에서 시작) -->
     <path
-        android:pathData="M9.0,17.6 L7.9,21.3 M12.5,17.6 L11.4,21.3 M16.0,17.6 L14.9,21.3"
+        android:pathData="M8.6,16.1 L7.1,21.4 M12.4,16.1 L10.9,21.4 M16.2,16.1 L14.7,21.4"
         android:strokeColor="#4A90D9"
-        android:strokeWidth="1.8"
+        android:strokeWidth="2.0"
         android:strokeLineCap="round" />
 </vector>

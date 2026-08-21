@@ -1,8 +1,14 @@
 <!--
-  날씨 아이콘 · 구름많음 (v1.6.36 직접 제작).
+  날씨 아이콘 · 구름많음 (v1.6.36 직접 제작, v1.6.40 확대).
   해가 구름 뒤로 반쯤 가린 모양 — 구름을 나중에 그려 해를 덮는다.
   구름 = 파스텔 청회색 채움 + 딥 톤 외곽선. 흐림([ic_wx_cloudy])과는 **해의 유무**로 갈린다
   (20dp에서 구름 색 농도 차이는 안 읽히고, 해가 보이냐 아니냐는 읽힌다 — 편승 아이콘과 같은 판단).
+
+  ⚠ v1.6.40 — 구름은 [ic_wx_cloudy]의 새 path를 0.80배로, 해는 r3.8 → 4.4로 키웠다.
+  ⚠ group scale이 strokeWidth도 줄이므로 1.88x0.80≈1.5 로 흐림과 굵기를 맞춘다.
+  햇살은 오른쪽 끝이 캡까지 23.0 — 뷰포트(24) 안이다. 해를 더 키우면 햇살이 잘린다.
+  해·구름을 통째로 0.4 내려 글리프 중심을 10.6 → 11.4로 맞췄다(시계는 12.0) — 카드 셋을
+  나란히 놨을 때 날씨만 위로 뜨는 걸 없앤다.
   ⚠ tint 금지 — `Image(painterResource(...))`로 그릴 것.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -11,30 +17,31 @@
     android:viewportWidth="24"
     android:viewportHeight="24">
 
-    <!-- 해 (오른쪽 위에서 살짝 고개 내밈) -->
+    <!-- 해 (오른쪽 위에서 살짝 고개 내밈) · 햇살 3줄기: 위 · 오른쪽 위 · 오른쪽 -->
     <path
-        android:pathData="M16.8,3.0 V4.9 M21.4,7.2 H19.5 M20.05,3.95 L18.71,5.29"
+        android:pathData="M16.4,2.7 V4.4 M22.1,8.4 H20.4 M20.43,4.37 L19.23,5.57"
         android:strokeColor="#C68A16"
-        android:strokeWidth="1.7"
+        android:strokeWidth="1.8"
         android:strokeLineCap="round" />
     <path
-        android:pathData="M16.8,3.4 a3.8,3.8 0 1 1 0,7.6 a3.8,3.8 0 1 1 0,-7.6 z"
+        android:pathData="M16.4,4.0 a4.4,4.4 0 1 1 0,8.8 a4.4,4.4 0 1 1 0,-8.8 z"
         android:fillColor="#FFD470"
         android:strokeColor="#C68A16"
-        android:strokeWidth="1.4" />
+        android:strokeWidth="1.5" />
 
     <!-- 구름 (왼쪽 아래, 해를 덮는다) -->
     <group
         android:pivotX="12"
-        android:pivotY="18.2"
+        android:pivotY="12"
         android:scaleX="0.8"
         android:scaleY="0.8"
-        android:translateX="-1">
+        android:translateX="-1.7"
+        android:translateY="2.0">
         <path
-            android:pathData="M7.6,18.2 A4,4 0 1 1 8.26,10.25 A5.2,5.2 0 0 1 18.02,11.05 A3.6,3.6 0 0 1 17.4,18.2 Z"
+            android:pathData="M6.71,19.57 A4.9,4.9 0 0 1 6.33,9.89 A6.3,6.3 0 0 1 18.53,10.98 A4.4,4.4 0 0 1 17.81,19.57 Z"
             android:fillColor="#DCEAF5"
             android:strokeColor="#4E7290"
-            android:strokeWidth="1.9"
+            android:strokeWidth="1.88"
             android:strokeLineJoin="round" />
     </group>
 </vector>

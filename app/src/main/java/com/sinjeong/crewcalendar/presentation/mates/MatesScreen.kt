@@ -1,5 +1,11 @@
 package com.sinjeong.crewcalendar.presentation.mates
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -134,6 +140,8 @@ private val CATEGORY_ROWS: List<List<CrewGroup?>> = listOf(
  * 저장한 동료. 그런데 즐겨찾기를 지정하려면 동료근무로 들어가야 했고 거기 이미 동료가 다 나오니
  * 사용자 눈엔 같은 화면이 둘이었다("헤더에 동료근무를 없애야 할듯").
  * → 카테고리 칩 6개(소속 5 + ★즐겨찾기)로 갈라 한 화면에 넣었다.
+ * ★즐겨찾기를 고르면 그 아래에 **★그룹 하위 필터**(전체·동호회·우리 조·기타)가 한 줄 더 펼쳐진다
+ * (v1.6.40 복원 — v1.6.39에서 2행 3열로 정리하며 빠졌던 것). 다른 소속 칩을 고르면 도로 접힌다.
  *
  * 표시 범위는 **오늘부터 한 달** 고정 — v1.6.38의 "오늘~말일"을 대체한다. 말일이 가까우면
  * 칸이 두세 개만 남아 화면 대부분이 비던 문제를 없앤다. 대신 **달 경계를 넘으므로**:
@@ -152,6 +160,8 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     var query by remember { mutableStateOf("") }
     /** 선택된 카테고리. null = ★즐겨찾기 = 첫 화면 (종전 동료 탭과 같은 모습) */
     var category by remember { mutableStateOf<CrewGroup?>(null) }
+    /** ★그룹 하위 필터. `null` = 전체. ★즐겨찾기를 고른 동안에만 쓰인다(셋째 줄). */
+    var favFilter by remember { mutableStateOf<FavGroup?>(null) }
     var showAdd by remember { mutableStateOf(false) }
     var sheetTarget by remember { mutableStateOf<MatrixPerson?>(null) }
     var editTarget by remember { mutableStateOf<Mate?>(null) }
@@ -197,11 +207,20 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
         listOfNotNull(me) + live + manual + bundled
     }
 
+    // ★그룹별 인원수 (셋째 줄 칩에 붙는다). 본인 행은 필터와 무관하게 늘 보이므로 세지 않는다 —
+    // 세면 `우리 조 3`인데 동료는 둘만 보이는 어긋남이 생긴다.
+    val favCounts = remember(mates, me) {
+        FavGroup.entries.associateWith { g ->
+            mates.count { it.favGroup == g && mateKey(it.name, it.group) != me?.key }
+        }
+    }
+
     val rows = if (category == null) {
         // ★즐겨찾기 = 저장한 동료 + 본인. ★그룹이 지정된 사람이 위로, 본인은 항상 맨 위
-        // (내 근무가 모든 비교의 기준선이다).
+        // (내 근무가 모든 비교의 기준선이다 — ★그룹 필터를 걸어도 빠지지 않는다).
         listOfNotNull(me?.takeIf { q.isEmpty() || it.cleanName.contains(q) }) +
             mates.filter { q.isEmpty() || it.name.contains(q) }
+                .filter { favFilter == null || it.favGroup == favFilter }
                 .filter { mateKey(it.name, it.group) != me?.key }
                 .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
                 .map { MatrixPerson(it.name, it.group, it.patternOffset) }
@@ -213,7 +232,10 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     // 칩을 바꾸면 명단이 통째로 달라지는데 세로 위치는 그대로라 중간부터 보였다 — "나" 행이 화면 밖.
     // 가로(날짜) 스크롤은 헤더와 공유하는 상태라 건드리지 않는다.
     val listState = rememberLazyListState()
-    LaunchedEffect(category) { listState.scrollToItem(0) }
+    LaunchedEffect(category, favFilter) { listState.scrollToItem(0) }
+    // 소속 칩으로 옮겨 가면 셋째 줄이 사라지므로 필터도 같이 풀어 둔다 —
+    // 안 풀면 ★로 돌아왔을 때 보이지 않던 필터가 걸린 채라 "동료가 없어졌다"가 된다.
+    LaunchedEffect(category) { if (category != null) favFilter = null }
 
     Scaffold(
         topBar = {
@@ -285,6 +307,28 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 }
             }
 
+            // 셋째 줄 = ★그룹 하위 필터. **★즐겨찾기를 고른 동안에만** 나온다(v1.6.40 복원).
+            // 항상 세 줄이면 "깔끔하게 2행 3열"이라는 v1.6.39 요청과 정면으로 어긋나고,
+            // 소속 칩(98명 명단)에는 ★그룹이라는 개념 자체가 없어 걸 것도 없다.
+            // 위 격자 밖에 두는 이유: 안에 넣으면 `spacedBy(5.dp)`가 숨어 있는 동안에도
+            // 5dp를 차지해 화면이 그만큼 빈 채로 남는다.
+            AnimatedVisibility(
+                visible = category == null,
+                enter = expandVertically(tween(180)) + fadeIn(tween(180)),
+                exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    // `전체`는 인원수를 안 붙인다 — 상단바가 이미 `N명`으로 같은 말을 하고 있다.
+                    FavChip("전체", favFilter == null) { favFilter = null }
+                    FavGroup.entries.forEach { g ->
+                        FavChip("${g.label} ${favCounts[g] ?: 0}", favFilter == g) { favFilter = g }
+                    }
+                }
+            }
+
             if (category == null && mates.isEmpty()) {
                 Box(Modifier.weight(1f).fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
                     Text(
@@ -347,6 +391,27 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             edit = target,
         )
     }
+}
+
+/**
+ * 셋째 줄 ★그룹 칩. 위 2행 3열 칩과 **같은 치수**(weight 1f · 32dp · 11sp)라
+ * 나타났을 때 세 줄이 한 격자로 읽힌다.
+ */
+@Composable
+private fun RowScope.FavChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = {
+            Text(
+                label,
+                fontSize = 11.sp, maxLines = 1, softWrap = false,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        },
+        modifier = Modifier.weight(1f).height(32.dp),
+    )
 }
 
 /**

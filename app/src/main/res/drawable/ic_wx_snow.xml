@@ -1,7 +1,10 @@
 <!--
-  날씨 아이콘 · 눈 (v1.6.36 직접 제작).
+  날씨 아이콘 · 눈 (v1.6.36 직접 제작, v1.6.40 확대).
   구름은 [ic_wx_rain]과 완전히 같고 아래만 눈송이(6갈래 별) 3개 — 20dp에서 색으로 비/눈을 가르려 하면
   둘 다 파란 계열이라 안 읽힌다. **모양**으로 가른다(빗줄기=사선 / 눈송이=별).
+
+  ⚠ v1.6.40 — 눈송이 팔 길이 1.5 → 1.85, 굵기 1.3 → 1.5. 아래 끝은 캡까지 23.35로
+  종전(23.55)보다 오히려 안쪽이다 — 구름을 위로 올려 확보한 자리를 쓴 것이라 안 잘린다.
   ⚠ tint 금지 — `Image(painterResource(...))`로 그릴 것.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -12,21 +15,22 @@
 
     <group
         android:pivotX="12"
-        android:pivotY="7.2"
-        android:scaleX="0.82"
-        android:scaleY="0.82">
+        android:pivotY="12"
+        android:scaleX="0.83"
+        android:scaleY="0.83"
+        android:translateY="-3.69">
         <path
-            android:pathData="M7.6,18.2 A4,4 0 1 1 8.26,10.25 A5.2,5.2 0 0 1 18.02,11.05 A3.6,3.6 0 0 1 17.4,18.2 Z"
+            android:pathData="M6.71,19.57 A4.9,4.9 0 0 1 6.33,9.89 A6.3,6.3 0 0 1 18.53,10.98 A4.4,4.4 0 0 1 17.81,19.57 Z"
             android:fillColor="#D2E1EE"
             android:strokeColor="#466884"
-            android:strokeWidth="1.8"
+            android:strokeWidth="1.81"
             android:strokeLineJoin="round" />
     </group>
 
-    <!-- 눈송이 3개 (6갈래) -->
+    <!-- 눈송이 3개 (6갈래, 팔 길이 1.85) -->
     <path
-        android:pathData="M6.9,19.0 h3.0 M7.65,17.7 l1.5,2.6 M9.15,17.7 l-1.5,2.6 M14.1,19.0 h3.0 M14.85,17.7 l1.5,2.6 M16.35,17.7 l-1.5,2.6 M10.5,21.6 h3.0 M11.25,20.3 l1.5,2.6 M12.75,20.3 l-1.5,2.6"
+        android:pathData="M6.15,17.9 h3.7 M7.08,16.3 l1.85,3.2 M8.93,16.3 l-1.85,3.2 M14.15,17.9 h3.7 M15.08,16.3 l1.85,3.2 M16.93,16.3 l-1.85,3.2 M10.15,21.0 h3.7 M11.08,19.4 l1.85,3.2 M12.93,19.4 l-1.85,3.2"
         android:strokeColor="#5B9BD5"
-        android:strokeWidth="1.3"
+        android:strokeWidth="1.5"
         android:strokeLineCap="round" />
 </vector>
