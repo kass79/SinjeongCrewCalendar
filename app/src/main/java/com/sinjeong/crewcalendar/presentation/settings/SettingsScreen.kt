@@ -3,6 +3,7 @@ package com.sinjeong.crewcalendar.presentation.settings
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -50,6 +51,31 @@ fun openSafetyApp(context: Context) {
         runCatching { context.startActivity(launch) }
         return
     }
+    runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))) }
+        .onFailure {
+            runCatching {
+                context.startActivity(
+                    Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$pkg")),
+                )
+            }
+        }
+}
+
+/**
+ * 이 앱의 플레이스토어 페이지 열기 — 설정 > 앱 버전을 누를 때(v1.6.39).
+ *
+ * **왜 In-App Update API가 아니라 스토어 페이지인가.**
+ * 이 앱은 플레이(비공개 테스트)와 사이드로드 APK **양쪽**으로 배포된다.
+ * `com.google.android.play:app-update`는 플레이로 설치된 사본에서만 동작하고
+ * 사이드로드에선 조용히 아무것도 안 한다 — "업데이트가 안 된다"는 지금 문제가
+ * 그대로 반복된다. 반면 스토어 페이지는 **설치 출처와 무관하게** 열리고,
+ * 테스터 계정이면 거기서 바로 업데이트 버튼을 누를 수 있다.
+ * 안전앱("슬기로운 승무생활")도 같은 방식이라 두 앱의 사용감이 같아진다.
+ * 한계: 사이드로드로만 쓰고 테스터 등록도 안 된 기기에선 "페이지를 찾을 수 없음"이 뜼다.
+ * 새 의존성 0건.
+ */
+fun openPlayStore(context: Context) {
+    val pkg = context.packageName
     runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$pkg"))) }
         .onFailure {
             runCatching {
@@ -281,7 +307,8 @@ fun SettingsScreen(
             SectionTitle("앱 정보")
             SettingRow(
                 title = "앱 버전",
-                sub = "신정승무 캘린더",
+                sub = "눌러서 최신 버전 확인하기",
+                onClick = { openPlayStore(ctx) },
                 trailing = {
                     Text(
                         "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
@@ -335,9 +362,16 @@ private fun SectionTitle(title: String) {
 }
 
 @Composable
-private fun SettingRow(title: String, sub: String, trailing: (@Composable () -> Unit)? = null) {
+private fun SettingRow(
+    title: String,
+    sub: String,
+    trailing: (@Composable () -> Unit)? = null,
+    onClick: (() -> Unit)? = null,
+) {
     Row(
-        Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        Modifier.fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f)) {
