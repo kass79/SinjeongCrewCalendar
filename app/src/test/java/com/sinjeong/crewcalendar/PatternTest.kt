@@ -944,7 +944,7 @@ class PatternTest {
     /**
      * 근무변경 시트 휴가 3묶음(v1.6.40). **저장값이 바뀌지 않는 것**이 이 테스트의 요점이다 —
      * 그룹은 화면 묶음일 뿐이라 하위 칩은 전부 종전 `CHANGE_OPTIONS` 코드 그대로여야 하고,
-     * 접힌 목록 + 하위 목록을 합치면 23종이 하나도 빠짐없이 정확히 한 번씩 나와야 한다.
+     * 접힌 목록 + 하위 목록을 합치면 22종이 하나도 빠짐없이 정확히 한 번씩 나와야 한다.
      */
     @Test fun changeGroups_are_screen_only_and_lose_nothing() {
         val kids = DutyCode.CHANGE_GROUPS.values.flatten()
@@ -956,12 +956,12 @@ class PatternTest {
             assertEquals(top, top in DutyCode.CHANGE_OPTIONS, list.first() == top)
         }
         assertTrue("기타휴가" !in DutyCode.CHANGE_OPTIONS)  // 저장될 수 없어야 한다
-        // 접힌 목록(그룹 이름 제외) + 하위 = 23종 전부, 중복 없음
+        // 접힌 목록(그룹 이름 제외) + 하위 = 22종 전부, 중복 없음
         assertEquals(
             DutyCode.CHANGE_OPTIONS.toSet(),
             (DutyCode.CHANGE_TOP - DutyCode.CHANGE_GROUPS.keys).toSet() + kids,
         )
-        assertEquals(13, DutyCode.CHANGE_TOP.size)          // 23칸 → 13칸(3열 5줄)
+        assertEquals(12, DutyCode.CHANGE_TOP.size)          // 22칸 → 12칸(3열 4줄)
         // 그룹에 안 든 항목은 종전 자리 순서 그대로
         assertEquals(
             DutyCode.CHANGE_OPTIONS.filter { it !in kids },
@@ -969,6 +969,21 @@ class PatternTest {
         )
         // 색: 하위·상위 모두 옅은 붉은색(REST, v1.6.23). "기타휴가"만 코드가 아니라 화면에서 고정한다
         kids.forEach { assertEquals(it, DutyType.REST, DutyCode.parse(it).colorType) }
+    }
+
+    /**
+     * `작연차` 제거(v1.6.41). **고를 수는 없지만 이미 저장된 기록은 그대로 보여야 한다.**
+     * 목록에서만 빼고 파싱은 남기는 것이 이 항목의 전부라, 둘을 한 번에 잠근다.
+     */
+    @Test fun retiredCode_jagyeoncha_is_unpickable_but_still_parses() {
+        assertTrue("작연차" !in DutyCode.CHANGE_OPTIONS)   // 시트 목록의 유일한 출처
+        assertTrue("작연차" !in DutyCode.CHANGE_TOP)
+        assertTrue(DutyCode.CHANGE_GROUPS.values.none { "작연차" in it })
+        // 저장분 표시: 휴가색(REST) + 글자 그대로. 여기가 깨지면 옛 기록이 야간 보라로 돌변한다
+        assertEquals(DutyType.REST, DutyCode.parse("작연차").type)
+        assertEquals(DutyType.REST, DutyCode.parse("작연차").colorType)
+        assertEquals("작연차", DutyCode.parse("작연차").display)
+        assertTrue(DutyCode.parse("작연차").isRest)
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
