@@ -1,0 +1,37 @@
+<!--
+  근무시각표 카드 아이콘 (v1.6.39 직접 제작 — 외부 이미지·타사 아이콘 아님).
+
+  달력 아래 세 칸(근무시각표·편승시각표·날씨)의 **한 벌 디자인**. 종전엔 시각표 둘만
+  Material 라인 아이콘(`Icons.Default.Schedule`)이라 파스텔 날씨 아이콘 옆에서 따로 놀았다.
+  문법은 v1.6.29 편승 알람 아이콘·v1.6.36 날씨 아이콘과 같다: **파스텔 채움 + 딥 톤 외곽선**
+  · 24dp 뷰포트 · 둥근 끝단. 색은 전반 알람과 같은 민트 계열(#A7E3D8 / #12756A).
+  ⚠ tint가 먹으면 색이 통째로 날아간다 — `Icon`이 아니라 `Image(painterResource(...))`로 그릴 것.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 시계 몸통 (파스텔 채움 + 딥 톤 외곽선) -->
+    <path
+        android:pathData="M12,3.1 a8.9,8.9 0 1 1 0,17.8 a8.9,8.9 0 1 1 0,-17.8 z"
+        android:fillColor="#A7E3D8"
+        android:strokeColor="#12756A"
+        android:strokeWidth="1.6" />
+
+    <!-- 12·3·6·9시 눈금 -->
+    <path
+        android:pathData="M12,5.5 V6.9 M18.5,12 H17.1 M12,18.5 V17.1 M5.5,12 H6.9"
+        android:strokeColor="#12756A"
+        android:strokeWidth="1.3"
+        android:strokeLineCap="round" />
+
+    <!-- 시침·분침 (10시 10분 — 시각표라는 뜻이 가장 잘 읽히는 각도) -->
+    <path
+        android:pathData="M12,7.6 V12 L15.3,14.2"
+        android:strokeColor="#12756A"
+        android:strokeWidth="1.9"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

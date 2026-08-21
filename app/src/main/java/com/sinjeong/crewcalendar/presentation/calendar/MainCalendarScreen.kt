@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.presentation.calendar
 
 import androidx.compose.foundation.BorderStroke
+import androidx.annotation.DrawableRes
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -16,7 +17,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -424,8 +424,8 @@ private fun CalendarGrid(
             items(cells.size, key = { it }) { i ->
                 val day = cells[i]
                 when (i) {
-                    card1 -> TimetableCard("근무시각표", onOpenTimetable, cellHeight, duty.main, duty.onMain)
-                    card2 -> TimetableCard("편승시각표", onOpenDeadhead, cellHeight, duty.branch, duty.onBranch)
+                    card1 -> TimetableCard("근무시각표", R.drawable.ic_tt_work, onOpenTimetable, cellHeight, duty.main, duty.onMain)
+                    card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.branch, duty.onBranch)
                     card3 -> WeatherCell(cellHeight)
                     else -> if (day == null) Spacer(Modifier.height(cellHeight))
                     else DayCell(
@@ -442,7 +442,14 @@ private fun CalendarGrid(
 
 /* ── 빈 칸에 들어가는 시각표 바로가기 카드 ─────────────── */
 @Composable
-private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Color, fg: Color) {
+private fun TimetableCard(
+    label: String,
+    @DrawableRes icon: Int,
+    onClick: () -> Unit,
+    height: Dp,
+    bg: Color,
+    fg: Color,
+) {
     // "근무시각표" → "근무\n시각표" 의도적 2줄 — 좁은 칸에서 어색한 중간 줄바꿈 방지 + 큰 글씨
     val twoLine = if (label.length >= 5) label.substring(0, 2) + "\n" + label.substring(2) else label
     Column(
@@ -455,7 +462,9 @@ private fun TimetableCard(label: String, onClick: () -> Unit, height: Dp, bg: Co
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Icon(Icons.Default.Schedule, null, tint = fg, modifier = Modifier.size(22.dp))
+        // ⚠ Icon이 아니라 Image — tint가 파스텔 색을 통째로 지운다(날씨·편승 아이콘과 같은 함정).
+        // 아이콘 뜻은 카드 글자가 이미 말하므로 contentDescription은 null(중복 낭독 방지).
+        Image(painterResource(icon), null, Modifier.size(22.dp))
         Spacer(Modifier.height(4.dp))
         // 칸이 좁거나 시스템 글꼴 확대 시 가로로 짤리지 않게 자동 축소 (DayCell 다이아 칩과 같은 방식)
         var fitSize by remember(twoLine, height) { mutableStateOf(12.5.sp) }

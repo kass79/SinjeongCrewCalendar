@@ -1,0 +1,43 @@
+<!--
+  편승시각표 카드 아이콘 (v1.6.39 직접 제작).
+
+  [ic_tt_work]와 한 벌 — 같은 24dp 뷰포트·같은 "파스텔 채움 + 딥 톤 외곽선" 문법이고
+  색만 후반 알람과 같은 라벤더(#C9BCEF / #513F96)다. 형태는 [ic_deadhead_second]의
+  전동차 앞면을 그대로 쓰되 알람 배지를 뺐다 — 여기선 "알람"이 아니라 "편승 열차"라는 뜻이다.
+  시계(근무시각표) vs 전동차(편승시각표)는 22dp에서도 한눈에 갈린다.
+  ⚠ tint 금지 — `Image(painterResource(...))`로 그릴 것.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 전동차 앞면 (파스텔 채움 + 딥 톤 외곽선) -->
+    <path
+        android:pathData="M7.6,2.4 h8.8 a3.8,3.8 0 0 1 3.8,3.8 v11.2 a2.8,2.8 0 0 1 -2.8,2.8 h-10.8 a2.8,2.8 0 0 1 -2.8,-2.8 v-11.2 a3.8,3.8 0 0 1 3.8,-3.8 z"
+        android:fillColor="#C9BCEF"
+        android:strokeColor="#513F96"
+        android:strokeWidth="1.6"
+        android:strokeLineJoin="round" />
+
+    <!-- 전면 유리창 -->
+    <path
+        android:pathData="M8.0,6.1 h8.0 a1.3,1.3 0 0 1 1.3,1.3 v2.6 a1.3,1.3 0 0 1 -1.3,1.3 h-8.0 a1.3,1.3 0 0 1 -1.3,-1.3 v-2.6 a1.3,1.3 0 0 1 1.3,-1.3 z"
+        android:fillColor="#F6F3FE" />
+
+    <!-- 헤드라이트 2개 -->
+    <path
+        android:pathData="M7.3,14.6 a1.15,1.15 0 1 1 2.3,0 a1.15,1.15 0 1 1 -2.3,0 z"
+        android:fillColor="#513F96" />
+    <path
+        android:pathData="M14.4,14.6 a1.15,1.15 0 1 1 2.3,0 a1.15,1.15 0 1 1 -2.3,0 z"
+        android:fillColor="#513F96" />
+
+    <!-- 레일 위 다리 — 시계와 실루엣이 겹치지 않게 아래를 벌려 준다 -->
+    <path
+        android:pathData="M8.9,20.4 L7.1,22.4 M15.1,20.4 L16.9,22.4"
+        android:strokeColor="#513F96"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+</vector>
