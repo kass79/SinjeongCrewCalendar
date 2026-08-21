@@ -315,6 +315,9 @@ fun WeatherCell(height: Dp, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     // 초기값을 캐시에서 읽는다 → 회전·월 이동 시 깜빡임 없이 바로 그려진다.
     var weather by remember { mutableStateOf(WxCache.value) }
+    // 조회를 한 번이라도 끝냈나. 안내 문구를 **시도한 뒤에만** 띄우려는 것 —
+    // 첫 프레임부터 "날씨 없음"을 그리면 성공하는 경우에도 한 번 깜빡인다(v1.6.41 ③).
+    var tried by remember { mutableStateOf(false) }
     var granted by remember { mutableStateOf(hasCoarse(ctx)) }
     // 허용되면 granted 가 바뀌어 아래 LaunchedEffect 가 한 번 더 돈다 → 현재 위치 격자로 재조회.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -324,6 +327,7 @@ fun WeatherCell(height: Dp, modifier: Modifier = Modifier) {
     // v1.6.36 에뮬 확인에서 정규식 하나(ICU 문법)로 실제 FATAL 이 났다.
     LaunchedEffect(granted) {
         weather = withContext(Dispatchers.IO) { runCatching { currentWeather(ctx) }.getOrNull() }
+        tried = true
         // 날씨가 실제로 떴을 때만 묻는다. 오프라인이라 칸이 비어 있으면 물을 맥락 자체가 없다.
         val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
         if (weather != null && !granted && !prefs.getBoolean("wx_loc_asked", false)) {
@@ -333,13 +337,27 @@ fun WeatherCell(height: Dp, modifier: Modifier = Modifier) {
     }
 
     val w = weather
-    if (w == null) {
-        Spacer(modifier.height(height))
-        return
-    }
-
     // 시각 언어는 TimetableCard 와 맞춘다 — 둥근 사각 배경 + 아이콘 + 자동 축소 글자.
     val fg = MaterialTheme.colorScheme.onSurfaceVariant
+    if (w == null) {
+        // 아직 시도 전이면 자리만 지킨다(안 그러면 7열 그리드가 한 칸 밀린다).
+        // 시도해 보고도 없으면 **왜 비었는지**를 적는다 — 종전엔 아무 말 없이 빈 칸이었다(v1.6.41 ③).
+        if (!tried) { Spacer(modifier.height(height)); return }
+        Column(
+            modifier.height(height).clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                .padding(4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+        ) {
+            Text("날씨", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = fg.copy(alpha = 0.7f))
+            Text(
+                "연결되면\n표시", fontSize = 8.sp, lineHeight = 10.sp,
+                textAlign = TextAlign.Center, color = fg.copy(alpha = 0.55f),
+            )
+        }
+        return
+    }
     Column(
         modifier
             .height(height)

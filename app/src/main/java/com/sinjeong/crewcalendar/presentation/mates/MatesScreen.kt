@@ -329,18 +329,32 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 }
             }
 
-            if (category == null && mates.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
-                    Text(
-                        "아직 등록된 동료가 없습니다.\n+ 버튼으로 추가하거나, 위 소속 칩에서 찾아 이름을 눌러 ★로 담으세요.\n" +
-                            "담으면 여기서 내 근무와 날짜별로 나란히 비교됩니다.",
-                        textAlign = TextAlign.Center,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else if (rows.isEmpty()) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    Text("조건에 맞는 동료가 없습니다", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            // 빈 상태는 **왜 비었는지 + 무엇을 하면 채워지는지**를 같이 적는다(v1.6.41 ③).
+            // 조건 순서가 곧 우선순위다: 검색어 > ★그룹 필터 > 아무도 안 담음 > 그 소속에 사람 없음.
+            //
+            // `onlyMe` = ★즐겨찾기 화면에 내 행 하나만 남은 상태(담은 동료 0명 또는 ★그룹 필터가 0명).
+            // **내 행은 필터와 무관하게 늘 들어 있어 `rows`가 절대 비지 않는다** — 따로 안 잡으면
+            // 한 줄만 덩그러니 뜨고 아무 설명이 없다. 검색 중일 때는 제외(내가 검색에 걸린 정상 결과다).
+            val onlyMe = category == null && q.isEmpty() && rows.none { !it.isMe }
+            if (onlyMe || rows.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                when {
+                    q.isNotEmpty() -> EmptyHint(
+                        "'$q' 와 맞는 이름이 없습니다",
+                        "이름 일부만 넣어도 찾습니다. 다른 소속에 있는 사람이면 위 칩을 바꿔 보세요.",
+                        "검색 지우기",
+                    ) { query = "" }
+                    favFilter != null -> EmptyHint(
+                        "★${favFilter?.label}에 담긴 동료가 없습니다",
+                        "이름을 눌러 뜨는 시트에서 ★그룹을 골라 담으면 여기 모입니다.",
+                        "전체 보기",
+                    ) { favFilter = null }
+                    category == null -> EmptyHint(
+                        "아직 담은 동료가 없습니다",
+                        "위 소속 칩에서 사람을 찾아 이름을 누르면 ★로 담을 수 있습니다.\n" +
+                            "담으면 내 근무와 날짜별로 나란히 비교됩니다.",
+                        "동료 직접 추가",
+                    ) { showAdd = true }
+                    else -> EmptyHint("이 소속에 표시할 사람이 없습니다", "명단이 갱신되면 자동으로 나타납니다.")
                 }
             } else {
                 MatrixDateHeader(dates, m, hScroll, duty)
@@ -390,6 +404,38 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             onDismiss = { editTarget = null },
             edit = target,
         )
+    }
+}
+
+/**
+ * 빈 화면 안내 한 벌 — **제목 한 줄 + 무엇을 하면 채워지는지 + (있으면) 그걸 바로 하는 버튼**.
+ * 일러스트는 안 넣는다. 화면이 비었을 때 필요한 건 그림이 아니라 다음 행동이다.
+ */
+@Composable
+private fun EmptyHint(
+    title: String,
+    body: String,
+    action: String? = null,
+    onAction: (() -> Unit)? = null,
+) {
+    Column(
+        Modifier.padding(horizontal = 28.dp).padding(bottom = 40.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        Text(
+            title, textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.ExtraBold,
+        )
+        Text(
+            body, textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (action != null && onAction != null) {
+            Spacer(Modifier.height(2.dp))
+            FilledTonalButton(onClick = onAction) { Text(action, fontSize = 13.sp) }
+        }
     }
 }
 

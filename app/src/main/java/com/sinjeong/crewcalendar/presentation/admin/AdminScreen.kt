@@ -139,7 +139,12 @@ fun AdminScreen(onBack: () -> Unit, viewModel: AdminViewModel = hiltViewModel())
             HorizontalDivider()
             if (members.isEmpty()) {
                 Box(Modifier.fillMaxWidth().padding(40.dp), contentAlignment = Alignment.Center) {
-                    Text("등록한 동료가 없습니다.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        "아직 대신 등록한 동료가 없습니다.\n오른쪽 아래 [동료 등록]으로 이름·사번·근무를 넣으세요.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
                 }
             }
             LazyColumn {
