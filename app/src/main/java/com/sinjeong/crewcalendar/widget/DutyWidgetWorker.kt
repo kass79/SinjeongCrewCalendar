@@ -76,19 +76,27 @@ internal fun signOnAt(date: LocalDate, s: String?): LocalDateTime? {
 }
 
 /**
- * 위젯 부제 한 줄. 오늘 출근시각을 지났으면(또는 오늘이 비번·휴무라 출근이 없으면) 내일을 보여준다.
- * 모레까지는 안 본다 — 이틀 뒤 정보는 위젯 스트립 7칸에 이미 보인다.
+ * **"지금 알려줄 날" = 오늘 / 내일.** 오늘 출근시각을 지났으면(또는 오늘이 비번·휴무라 출근이
+ * 아예 없으면) 내일로 넘어간다. 모레까지는 안 본다.
+ *
+ * 위젯 부제([subLine])와 달력 상단 오늘 카드가 **같은 규칙을 봐야 해서** 여기 한 곳에만 둔다
+ * (v1.6.41에 카드가 생기며 뽑아냈다 — 두 벌로 두면 위젯은 내일인데 카드는 오늘인 상태가 난다).
+ */
+internal fun focusDate(today: LocalDate, todaySignOn: String?): LocalDate =
+    if (signOnAt(today, todaySignOn)?.isAfter(LocalDateTime.now()) == true) today else today.plusDays(1)
+
+/**
+ * 위젯 부제 한 줄. 보여줄 날은 [focusDate]가 정한다.
  */
 internal fun subLine(today: LocalDate, byDate: Map<LocalDate, com.sinjeong.crewcalendar.domain.model.DaySchedule>): String {
-    val todayOn = signOnAt(today, byDate[today]?.signOn)
-    if (todayOn != null && LocalDateTime.now().isBefore(todayOn)) return "오늘 출근 ${byDate[today]?.signOn}"
-
-    val t = byDate[today.plusDays(1)] ?: return ""
-    t.signOn?.let { return "내일 출근 $it" }
+    val date = focusDate(today, byDate[today]?.signOn)
+    val head = if (date == today) "오늘" else "내일"
+    val t = byDate[date] ?: return ""
+    t.signOn?.let { return "$head 출근 $it" }
     return when {
-        t.duty.type == DutyType.POST_NIGHT -> "내일 비번"
-        t.duty.isRest -> "내일 휴무"
-        t.duty.display.isNotBlank() -> "내일 ${t.duty.displayLong}"
+        t.duty.type == DutyType.POST_NIGHT -> "$head 비번"
+        t.duty.isRest -> "$head 휴무"
+        t.duty.display.isNotBlank() -> "$head ${t.duty.displayLong}"
         else -> ""
     }
 }

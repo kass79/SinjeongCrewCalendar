@@ -20,6 +20,35 @@ import java.time.LocalDate
 import java.time.YearMonth
 import javax.inject.Inject
 
+/**
+ * **"근무선택을 한 번이라도 했나"** — 첫 실행 유도(v1.6.41)의 유일한 판단 근거.
+ *
+ * 사용자 정보만으로는 알 수 없다. 로그인([com.sinjeong.crewcalendar.presentation.auth.AuthViewModel])이
+ * `patternId`를 이미 채워 넣고 `patternOffset = 0`으로 저장하기 때문에 "안 고른 상태"와
+ * "0번 칸을 고른 상태"가 값으로는 똑같다.
+ *
+ * → 로그인할 때 **false를 찍고**, 근무선택을 마치면 true로 바꾼다.
+ * 값이 아예 없으면 **true(이미 골랐다)**로 본다 — 업데이트로 넘어온 기존 사용자는 로그인을 다시
+ * 하지 않으므로 키가 없다. 기본값이 false면 282명 전원에게 안내가 다시 뜬다.
+ */
+object DutyPickGate {
+    private const val KEY = "duty_picked"
+
+    /**
+     * 이번 실행에서 근무선택 시트를 자동으로 한 번 띄웠나. 프로세스 메모리에만 있다
+     * (관리자 잠금 `AdminGate.unlocked`와 같은 방식).
+     * 탭을 오갈 때마다 시트가 다시 떠서 **갇힌 느낌**이 나지 않게 하려는 것이고,
+     * 앱을 새로 켜면 다시 한 번 뜬다 — 아직 안 골랐으면 그게 맞다.
+     */
+    var autoShown = false
+    private fun prefs(ctx: android.content.Context) =
+        ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+
+    fun needsPick(ctx: android.content.Context) = !prefs(ctx).getBoolean(KEY, true)
+    fun mark(ctx: android.content.Context, picked: Boolean) =
+        prefs(ctx).edit().putBoolean(KEY, picked).apply()
+}
+
 /** 근무선택 피커 상태: 1단계(소속) → 2단계(근무 그리드) */
 data class DutyPickerState(
     val date: LocalDate,
@@ -74,6 +103,16 @@ class MainCalendarViewModel @Inject constructor(
             }
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * 달력 위 **오늘 카드** 전용 근무 목록. 보고 있는 달([days])과 따로 두는 이유는 두 가지다:
+     *  · 다른 달을 넘겨봐도 카드는 계속 오늘을 보여야 한다(카드가 사라지면 달력 칸 높이가 튄다).
+     *  · 오늘 출근시각을 지나면 카드가 **내일**로 넘어가는데, 31일이면 내일이 다음 달이다
+     *    → 두 달치를 합쳐 둔다(동료 탭 `monthOverrides`와 같은 이유·같은 방식).
+     */
+    val cardDays: StateFlow<List<DaySchedule>> = YearMonth.now().let { m ->
+        combine(getMonthSchedule(m), getMonthSchedule(m.plusMonths(1))) { a, b -> a + b }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     val uiState: StateFlow<CalendarUiState> = combine(
         month, days, userRepo.observeMe(), selectedDate, picker, changeDate, error,
