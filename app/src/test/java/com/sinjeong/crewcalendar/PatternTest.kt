@@ -1087,6 +1087,37 @@ class PatternTest {
         assertTrue(DutyCode.parse("작연차").isRest)
     }
 
+    /**
+     * **동료 탭 격자가 한 크기로 유지되는 근거**(v1.6.51). `DutyMatrix.UNIFORM_UNITS = 4.00`은
+     * 격자에 나올 수 있는 **모든** 라벨의 줄별 최대 폭을 전수 조사해 박은 값이고,
+     * 표 전체 글자 크기가 그 하나로만 정해진다. 여기보다 넓은 라벨이 새로 생기면 그 칸만
+     * 잘리거나 눌려서 **"크기가 다르다"는 지적이 다시 나온다**(v1.6.49·v1.6.50이 그렇게 거부됐다).
+     *
+     * 조사 범위: 내장 패턴 4종 시퀀스 + 근무변경으로 고를 수 있는 전부 + 퇴역값 + 충당 계열 4종 ×
+     * 고를 수 있는 다이아 전부. 표시값은 동료 탭 전용 `mateLabel`(DutyMatrix.kt, private이라
+     * 여기 한 줄로 옮겨 적는다 — 규칙이 바뀌면 양쪽을 같이 고칠 것)로 뽑는다.
+     */
+    @Test fun mateGrid_every_label_line_fits_uniform_units() {
+        fun units(s: String) = s.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 }
+        fun maxLine(s: String) = s.split('\n').maxOf(::units)
+
+        val raws = linkedSetOf<String>()
+        Bundled.ALL_PATTERNS.forEach { raws += it.sequence }
+        raws += DutyCode.CHANGE_OPTIONS
+        raws += listOf("작연차", "비번")                       // 고를 수 없지만 저장돼 있을 수 있다
+        val dias = Bundled.ALL_PATTERNS.flatMap { p ->
+            DutyCode.displayOrder(p.sequence).map { p.sequence[it] }
+        }
+        DutyCode.FILL_OPTIONS.forEach { f -> dias.forEach { d -> raws += "$f $d" } }
+
+        val widest = raws.map { DutyCode.parse(it) }.map { c ->
+            if (c.fill == null && (c.type == DutyType.BRANCH || c.type == DutyType.BRANCH_NIGHT)) c.raw
+            else c.gridLabel
+        }.maxByOrNull(::maxLine)!!
+        // 4.00 = `돌봄휴가`·`동행휴가`·`대기충당`(충당 계열 윗줄). 넘으면 DutyMatrix도 같이 고쳐야 한다
+        assertEquals(widest.replace("\n", "/"), 4.00, maxLine(widest), 0.001)
+    }
+
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
     @Test fun mainDay_26to29_have_no_holiday_timetable() {
         assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)
