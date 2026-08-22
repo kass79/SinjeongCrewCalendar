@@ -942,33 +942,21 @@ class PatternTest {
     }
 
     /**
-     * 근무변경 시트 휴가 3묶음(v1.6.40). **저장값이 바뀌지 않는 것**이 이 테스트의 요점이다 —
-     * 그룹은 화면 묶음일 뿐이라 하위 칩은 전부 종전 `CHANGE_OPTIONS` 코드 그대로여야 하고,
-     * 접힌 목록 + 하위 목록을 합치면 22종이 하나도 빠짐없이 정확히 한 번씩 나와야 한다.
+     * 근무변경 시트 목록(v1.6.42 ④ — 휴가 3묶음 아코디언을 걷어내고 22종 평면 격자로).
+     * **저장값이 바뀌지 않는 것**이 요점이다: 화면에 뜨는 칩이 곧 저장되는 문자열이고,
+     * 묶음 이름(`기타휴가`)처럼 근무코드가 아닌 항목이 목록에 섞여 있으면 안 된다.
      */
-    @Test fun changeGroups_are_screen_only_and_lose_nothing() {
-        val kids = DutyCode.CHANGE_GROUPS.values.flatten()
-        // 하위 칩은 전부 실제 근무코드다 = 고르면 그 문자열이 그대로 저장된다
-        assertTrue(kids.all { it in DutyCode.CHANGE_OPTIONS })
-        assertEquals(kids.size, kids.toSet().size)          // 두 묶음에 겹쳐 든 항목 없음
-        // 상위 이름은 화면에만 있는 "기타휴가"를 빼면 그 자체로 쓰는 근무코드 → 하위 첫 칸이 자기 자신
-        DutyCode.CHANGE_GROUPS.forEach { (top, list) ->
-            assertEquals(top, top in DutyCode.CHANGE_OPTIONS, list.first() == top)
-        }
-        assertTrue("기타휴가" !in DutyCode.CHANGE_OPTIONS)  // 저장될 수 없어야 한다
-        // 접힌 목록(그룹 이름 제외) + 하위 = 22종 전부, 중복 없음
-        assertEquals(
-            DutyCode.CHANGE_OPTIONS.toSet(),
-            (DutyCode.CHANGE_TOP - DutyCode.CHANGE_GROUPS.keys).toSet() + kids,
-        )
-        assertEquals(12, DutyCode.CHANGE_TOP.size)          // 22칸 → 12칸(3열 4줄)
-        // 그룹에 안 든 항목은 종전 자리 순서 그대로
-        assertEquals(
-            DutyCode.CHANGE_OPTIONS.filter { it !in kids },
-            DutyCode.CHANGE_TOP.filter { it !in DutyCode.CHANGE_GROUPS },
-        )
-        // 색: 하위·상위 모두 옅은 붉은색(REST, v1.6.23). "기타휴가"만 코드가 아니라 화면에서 고정한다
-        kids.forEach { assertEquals(it, DutyType.REST, DutyCode.parse(it).colorType) }
+    @Test fun changeOptions_are_all_real_codes_and_unique() {
+        val opts = DutyCode.CHANGE_OPTIONS
+        assertEquals(22, opts.size)                       // 4열 6줄
+        assertEquals(opts.size, opts.toSet().size)        // 중복 없음
+        assertTrue("기타휴가" !in opts)                    // 묶음 이름은 코드가 아니다 → 목록에도 없다
+        // 고르면 그 문자열이 그대로 저장·재파싱된다
+        opts.forEach { assertEquals(it, it, DutyCode.parse(it).raw) }
+        // 휴가 계열은 전부 옅은 붉은색(REST, v1.6.23) — 야간 보라로 새지 않는다
+        listOf("연차", "촉연", "가연차", "대휴", "보상", "장휴", "학습", "만휴",
+               "청휴", "돌봄휴가", "동행휴가", "병가", "공가")
+            .forEach { assertEquals(it, DutyType.REST, DutyCode.parse(it).colorType) }
     }
 
     /**
@@ -977,8 +965,6 @@ class PatternTest {
      */
     @Test fun retiredCode_jagyeoncha_is_unpickable_but_still_parses() {
         assertTrue("작연차" !in DutyCode.CHANGE_OPTIONS)   // 시트 목록의 유일한 출처
-        assertTrue("작연차" !in DutyCode.CHANGE_TOP)
-        assertTrue(DutyCode.CHANGE_GROUPS.values.none { "작연차" in it })
         // 저장분 표시: 휴가색(REST) + 글자 그대로. 여기가 깨지면 옛 기록이 야간 보라로 돌변한다
         assertEquals(DutyType.REST, DutyCode.parse("작연차").type)
         assertEquals(DutyType.REST, DutyCode.parse("작연차").colorType)

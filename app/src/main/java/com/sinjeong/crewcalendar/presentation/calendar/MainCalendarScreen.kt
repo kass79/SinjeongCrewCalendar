@@ -28,6 +28,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
@@ -1382,7 +1383,19 @@ private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: 
     }
 }
 
-/* ── 근무변경 시트: 직접입력 / 변경없음 / 23종 목록(휴가 3묶음으로 접어 13칸, v1.6.40) ─────── */
+/* ── 근무변경 시트: 직접입력 / 변경없음 / 22종 평면 격자 (v1.6.42 ④) ──────────────────
+
+   v1.6.40의 휴가 3묶음 아코디언을 **걷어냈다.** 사용자: *"근무변경에 들어가도 한번에 보이지 않네..?
+   연차,대휴 누르면 내려가버리네? 불편하네?"* — 접기는 두 가지를 동시에 어겼다.
+    · 펼치면 하위 칩이 **아래로 끼어들어** 방금 누른 칩이 밑으로 밀린다(누른 자리가 움직인다).
+    · 그래도 한 화면에 안 들어왔다. 진짜 원인은 접기가 아니라 **시트가 절반 높이로 열린 것**이다
+      (기본 `sheetState`는 내용이 화면 절반을 넘으면 PartiallyExpanded에서 시작한다. 실측:
+      1080x2400·420dpi에서 시트 상단 y=1200px = 정확히 절반, 마지막 줄과 `닫기`가 잘림).
+
+   → `skipPartiallyExpanded` + **22종 평면 4열**. 4열이면 6줄, 칩 세로여백 10→8dp로 격자가
+   211dp(fs 1.0)·253dp(fs 1.3)라 시트 전체가 465dp(fs 1.0)·530dp(fs 1.3) — 914dp 화면에 다 들어온다.
+   접기가 없으니 **어느 칩을 눌러도 레이아웃이 움직이지 않는다**(충당 계열만 같은 자리에서 화면이
+   통째로 다이아 선택으로 교체된다 — 원래부터 그랬다). 저장값은 종전 그대로 하위 코드다(`촉연`→`촉연`). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DutyChangeSheet(
@@ -1398,18 +1411,26 @@ private fun DutyChangeSheet(
     // 시트를 닫았다 열면 remember가 초기화돼 다시 목록부터 시작한다.
     var fillFor by remember { mutableStateOf<String?>(null) }
     var fillGroup by remember { mutableStateOf<CrewGroup?>(null) }
-    // 휴가 계열 3묶음(연차·대휴·기타휴가) 중 펼쳐 둔 것. 이미 그 안의 코드가 저장돼 있으면 열고 시작한다.
-    var openGroup by remember {
-        mutableStateOf(DutyCode.CHANGE_GROUPS.entries.find { day.duty.raw in it.value }?.key)
-    }
     val dateLabel = day.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
     val originalLabel = DutyCode.parse(day.originalDutyRaw ?: day.duty.raw).display
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
+      Box {
+        // 🔄 워터마크(v1.6.42 ④ 사용자 요청). `matchParentSize`라 **시트 높이에 한 톨도 안 얹힌다**
+        // — 크기는 아래 Column이 정하고 이모지는 그 안에서 가운데 정렬만 한다.
+        // 알파 0.06: 라이트(연보라 바탕)·다크 양쪽에서 "있는 줄은 알겠고 글자는 안 방해하는" 선.
+        // 먼저 선언 = 먼저 그려짐 = 내용 뒤.
+        Text(
+            "🔄", fontSize = 190.sp,
+            modifier = Modifier.matchParentSize().wrapContentSize(Alignment.Center).alpha(0.06f),
+        )
         Column(
             Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
         val fill = fillFor
         if (fill != null) {
@@ -1439,7 +1460,7 @@ private fun DutyChangeSheet(
                 // 사업소 근무형태(통상·4조2교대)는 다이아가 없어 뺀다 — 승무 3종만 대행 대상이다
                 CrewGroup.entries.filter { it !in SITE_GROUPS }.forEach { grp ->
                     OutlinedCard(onClick = { fillGroup = grp }) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(grp.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text("${Bundled.patternFor(grp).length}칸 교번 순환",
                                 style = MaterialTheme.typography.labelSmall,
@@ -1484,54 +1505,44 @@ private fun DutyChangeSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            // 펼친 그룹 하나 뒤에 하위 칩이 그대로 이어 붙는다(3열 흐름). 상위 칩만 ▾/▴가 붙고
-            // 하위엔 가운뎃점을 달아 구분한다 — 캐럿만으론 `연차 ▴` 옆 `연차`가 같은 칩 두 번으로 보였다.
-            // 최대 6줄(기타휴가 5개)이라 heightIn 360dp면 안쪽 스크롤 없이 다 보인다.
-            val kids = openGroup?.let { DutyCode.CHANGE_GROUPS.getValue(it) }.orEmpty()
-            val options: List<Pair<String, Boolean>> = DutyCode.CHANGE_TOP.flatMap { top ->
-                if (top == openGroup) listOf(top to true) + kids.map { it to false }
-                else listOf(top to (top in DutyCode.CHANGE_GROUPS))
-            }
+            // 22종 평면 4열 6줄. `heightIn` 상한은 안전장치일 뿐 실제로는 안 걸린다
+            // (fs 1.3에서도 약 253dp) — 걸리면 격자만 따로 스크롤되므로 화면이 깨지지는 않는다.
+            val options = DutyCode.CHANGE_OPTIONS
             LazyVerticalGrid(
-                columns = GridCells.Fixed(3),
+                columns = GridCells.Fixed(4),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.heightIn(max = 360.dp),
-                userScrollEnabled = true,
+                modifier = Modifier.heightIn(max = 480.dp),
             ) {
                 items(options.size) { i ->
-                    val (code, isGroup) = options[i]
-                    // "기타휴가"는 근무코드가 아니라 parse가 ETC(투명)로 준다 → 휴가색(v1.6.23)으로 고정
-                    val colorType = if (isGroup) DutyType.REST else DutyCode.parse(code).colorType
-                    val (bg, fg) = dutyCellColors(colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+                    val code = options[i]
+                    val (bg, fg) = dutyCellColors(
+                        DutyCode.parse(code).colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                     Surface(
                         // 충당 계열은 바로 확정하지 않고 다이아 선택 단계로 넘어간다
                         onClick = {
-                            when {
-                                isGroup -> openGroup = if (openGroup == code) null else code
-                                code in DutyCode.FILL_OPTIONS -> { fillFor = code; fillGroup = null }
-                                else -> onChange(code)
-                            }
+                            if (code in DutyCode.FILL_OPTIONS) { fillFor = code; fillGroup = null }
+                            else onChange(code)
                         },
                         color = bg, contentColor = fg,
                         shape = RoundedCornerShape(9.dp),
-                        border = if (!isGroup && code == (day.duty.fill ?: day.duty.raw))
+                        border = if (code == (day.duty.fill ?: day.duty.raw))
                             BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
                     ) {
+                        // 4글자(`대기충당`·`돌봄휴가`)까지 한 줄로 들어가야 해서 12.5 → 11.5sp.
+                        // 411dp 폭 기준 칸이 89dp라 fs 1.3에서도(4 x 11.5 x 1.3 = 60dp) 남는다.
                         Text(
-                            when {
-                                isGroup -> "$code ${if (openGroup == code) "▴" else "▾"}"
-                                code in kids -> "· $code"
-                                else -> code
-                            },
-                            modifier = Modifier.padding(vertical = 10.dp).fillMaxWidth(),
+                            code,
+                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp).fillMaxWidth(),
                             textAlign = TextAlign.Center,
-                            fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+                            fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
                         )
                     }
                 }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }
         }
+      }
     }
 }
