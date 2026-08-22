@@ -454,6 +454,12 @@ private fun DrawScope.drawChevron(x: Float, y: Float, h: Float, color: Color, po
     }, color, style = Stroke(width = 2.6.dp.toPx(), cap = StrokeCap.Round))
 }
 
+/**
+ * 열차 아이콘. [faceRight]=true는 **신도림행**(까치산→양천구청→신도림)이라
+ * 증기기관차 실루엣으로, false는 까치산행·입고 회송이라 종전 삼각 노즈로 그린다.
+ * 승무원이 양천구청에서 잡아 타는 건 신도림행뿐이라 그 방향만 한눈에 갈려야 한다.
+ * **열번 알약은 양쪽 모두 그대로** — 열차를 식별하는 정보라 실루엣이 대체할 수 없다.
+ */
 private fun DrawScope.drawTrainIcon(
     tm: TextMeasurer, no: String, cxRaw: Float, cy: Float,
     faceRight: Boolean, alpha: Float, body: Color,
@@ -462,12 +468,17 @@ private fun DrawScope.drawTrainIcon(
         fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color.White))
     val bodyW = maxOf(44.dp.toPx(), label.size.width + 14.dp.toPx())
     val bodyH = 24.dp.toPx()
-    val noseW = 11.dp.toPx()
+    // 증기기관차 쪽은 보일러·배장기가 들어갈 앞머리가 조금 더 길다. totalW에 그대로 반영되므로
+    // 아래 clamp가 늘어난 폭까지 알아서 막아 준다(종착역 잘림 회귀 방지).
+    val noseW = (if (faceRight) 19 else 11).dp.toPx()
     val totalW = bodyW + noseW
     // 종착역은 `xOf`가 캔버스 여백(20dp)까지만 물러나 있어서 아이콘 반폭(~27dp)이
     // 그대로 넘친다 — 신도림에 선 열차가 카드 밖으로 잘려 나갔다(실기기 확인).
     // 원본은 방면 라벨·회차 배지만 clamp 하고 아이콘은 빠뜨렸다. 같은 규칙을 아이콘에도 준다.
-    val cx = cxRaw.coerceIn(totalW / 2, size.width - totalW / 2)
+    // **여백 3dp는 후광·흰 윤곽 몫**이다 — v1.6.43은 반폭까지만 물려서 종착역에서 윤곽선
+    // 바깥쪽 절반과 후광이 카드 경계에 딱 잘렸다(증기기관차는 앞머리가 길어 더 눈에 띈다).
+    val edge = totalW / 2 + 3.dp.toPx()
+    val cx = cxRaw.coerceIn(edge, (size.width - edge).coerceAtLeast(edge))
     val left = if (faceRight) cx - totalW / 2 else cx - totalW / 2 + noseW
     val right = left + bodyW
     val top = cy - bodyH / 2
@@ -478,22 +489,80 @@ private fun DrawScope.drawTrainIcon(
         size = Size(totalW + 6.dp.toPx(), bodyH + 6.dp.toPx()),
         cornerRadius = CornerRadius(13.dp.toPx()))
 
-    // 2) 진행 방향 노즈: 삼각형 (차체색 + 흰 윤곽)
-    val nose = Path().apply {
-        if (faceRight) {
-            moveTo(right - 1.dp.toPx(), cy - bodyH * 0.36f)
-            lineTo(right + noseW, cy)
-            lineTo(right - 1.dp.toPx(), cy + bodyH * 0.36f)
-        } else {
+    // 2) 앞머리 — 신도림행만 증기기관차 느낌(보일러·굴뚝·연기·배장기·동륜),
+    //    나머지는 종전 삼각 노즈. 어느 쪽이든 3)의 알약이 나중에 덮으므로 뒷부분은 매끈하게 이어진다.
+    val outline = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round)
+    if (faceRight) {
+        val boilerH = bodyH * 0.72f
+        val boilerFront = right + noseW - 2.dp.toPx()
+        val stackX = right + noseW * 0.42f
+        val stackTop = cy - 19.dp.toPx()
+
+        // 연기: 굴뚝 위로 커지며 흐려지는 동그라미 3개. 방면 라벨과 세로로 겹칠 수 있어
+        // 알파를 낮게 잡았다 — 라벨이 나중에 그려져 위에 얹힌다(글자 가림 없음).
+        repeat(3) { i ->
+            drawCircle(Color.White.copy(alpha = (0.42f - i * 0.12f) * alpha),
+                radius = (2.6f + i * 1.3f).dp.toPx(),
+                center = Offset(stackX - (i * 1.8f).dp.toPx(),
+                    stackTop - (2f + i * 4.2f).dp.toPx()))
+        }
+        // 배장기: 보일러 앞 아래로 비스듬히 내려오는 쐐기
+        val pilot = Path().apply {
+            moveTo(right + 5.dp.toPx(), cy + 2.dp.toPx())
+            lineTo(boilerFront + 2.dp.toPx(), cy + bodyH * 0.52f)
+            lineTo(right + 5.dp.toPx(), cy + bodyH * 0.52f)
+            close()
+        }
+        drawPath(pilot, body.copy(alpha = alpha))
+        drawPath(pilot, Color.White.copy(alpha = alpha), style = Stroke(width = 1.8.dp.toPx()))
+        // 굴뚝: 위로 벌어지고 갓이 튀어나온 실루엣을 **한 path**로. 갓을 따로 그리면 이 크기에선
+        // 흰 윤곽끼리 겹쳐 뭉개진다. 보일러보다 먼저 그려 밑동을 보일러가 덮게 한다.
+        val stack = Path().apply {
+            moveTo(stackX - 3.0.dp.toPx(), cy)
+            lineTo(stackX - 3.6.dp.toPx(), stackTop + 3.dp.toPx())
+            lineTo(stackX - 5.4.dp.toPx(), stackTop + 3.dp.toPx())
+            lineTo(stackX - 5.4.dp.toPx(), stackTop)
+            lineTo(stackX + 5.4.dp.toPx(), stackTop)
+            lineTo(stackX + 5.4.dp.toPx(), stackTop + 3.dp.toPx())
+            lineTo(stackX + 3.6.dp.toPx(), stackTop + 3.dp.toPx())
+            lineTo(stackX + 3.0.dp.toPx(), cy)
+            close()
+        }
+        drawPath(stack, body.copy(alpha = alpha))
+        drawPath(stack, Color.White.copy(alpha = alpha), style = Stroke(width = 1.6.dp.toPx()))
+        // 보일러: 앞이 둥근 원통 + 스모크박스 문
+        drawRoundRect(body.copy(alpha = alpha),
+            topLeft = Offset(right - 6.dp.toPx(), cy - boilerH / 2),
+            size = Size(boilerFront - right + 6.dp.toPx(), boilerH),
+            cornerRadius = CornerRadius(boilerH / 2))
+        drawRoundRect(Color.White.copy(alpha = alpha),
+            topLeft = Offset(right - 6.dp.toPx(), cy - boilerH / 2),
+            size = Size(boilerFront - right + 6.dp.toPx(), boilerH),
+            cornerRadius = CornerRadius(boilerH / 2), style = outline)
+        drawCircle(Color.White.copy(alpha = 0.85f * alpha), boilerH * 0.24f,
+            Offset(boilerFront - boilerH * 0.46f, cy), style = Stroke(width = 1.4.dp.toPx()))
+        // 동륜 + 연결봉: 알약 밑으로 아랫부분만 내민다(윗부분은 3)이 덮는다)
+        val wy = cy + bodyH / 2 - 0.5.dp.toPx()
+        val wr = 4.5.dp.toPx()
+        val wxs = listOf(0.24f, 0.55f, 0.86f).map { left + bodyW * it }
+        wxs.forEach { wx ->
+            drawCircle(Color(0xFF13170F).copy(alpha = alpha), wr, Offset(wx, wy))
+            drawCircle(Color.White.copy(alpha = 0.9f * alpha), wr, Offset(wx, wy),
+                style = Stroke(width = 1.8.dp.toPx()))
+        }
+        drawLine(Color.White.copy(alpha = 0.75f * alpha),
+            Offset(wxs.first(), wy + wr * 0.55f), Offset(wxs.last(), wy + wr * 0.55f),
+            strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
+    } else {
+        val nose = Path().apply {
             moveTo(left + 1.dp.toPx(), cy - bodyH * 0.36f)
             lineTo(left - noseW, cy)
             lineTo(left + 1.dp.toPx(), cy + bodyH * 0.36f)
+            close()
         }
-        close()
+        drawPath(nose, body.copy(alpha = alpha))
+        drawPath(nose, Color.White.copy(alpha = alpha), style = outline)
     }
-    drawPath(nose, body.copy(alpha = alpha))
-    drawPath(nose, Color.White.copy(alpha = alpha),
-        style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
 
     // 3) 차체: 둥근 사각 (노즈 밑변을 덮어 매끈하게 연결)
     drawRoundRect(body.copy(alpha = alpha), Offset(left, top), Size(bodyW, bodyH),
