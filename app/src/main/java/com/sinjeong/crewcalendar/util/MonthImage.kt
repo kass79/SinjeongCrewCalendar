@@ -83,18 +83,38 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
             else 0xFF755B00.toInt()
             txt(name, left + cellW - 10, top + 34f, s, nc, right = true)
         }
-        // 근무 칩
-        val label = day.duty.display
-        if (label.isNotBlank()) {
+        // 근무 칩. 충당 계열만 두 줄(`대기충당`⏎`지2`)로 온다 — DutyCode.gridLabel 참고.
+        val lines = day.duty.gridLabel.split('\n')
+        val label = lines.last()
+        if (lines.any { it.isNotBlank() }) {
             val (bg, fg) = dutyColors(day.duty.colorType)
-            val chipW = cellW * 0.62f; val chipH = 52f
+            val two = lines.size > 1
+            // 두 줄이면 알약을 조금 키운다 — 좁은 알약에선 윗줄이 위쪽 곡선에 걸려 삐져나왔다(실측)
+            val chipW = cellW * (if (two) 0.74f else 0.62f); val chipH = if (two) 62f else 52f
             val cx = left + cellW / 2; val cy = top + 82f
             if (bg != 0) {
                 p.color = bg
                 // 알약 = 라운드 높이의 절반 (앱 RoundedCornerShape(percent = 50), v1.6.23)
                 c.drawRoundRect(cx - chipW / 2, cy - chipH / 2, cx + chipW / 2, cy + chipH / 2, chipH / 2, chipH / 2, p)
             }
-            txt(label, cx, cy + 13f, if (label.length >= 3) 30f else 36f, fg, bold = true, center = true)
+            // 알약 폭에 맞을 때까지 축소. 캔버스엔 앱 칩 같은 자동축소가 없어 긴 라벨(`대기충당지2`·`돌봄휴가`)이
+            // 알약 밖으로 흘러 옆 칸을 침범했다(v1.6.46). 두 줄이면 **아랫줄 다이아를 크게** — 앱 달력 칩과 같은 규칙.
+            // margin = 알약 곡선 여유. 윗줄은 위쪽 곡선에 가까워 더 크게 잡는다.
+            fun fitSize(s: String, base: Float, margin: Float): Float {
+                p.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                var ts = base
+                p.textSize = ts
+                while (p.measureText(s) > chipW - margin && ts > 12f) { ts *= 0.92f; p.textSize = ts }
+                return ts
+            }
+            if (two) {
+                // 두 줄 세로 배치: 윗줄 baseline cy-7 / 아랫줄 cy+21. 아랫줄을 28f 위로 더 키우면
+                // 그 어센더가 윗줄 baseline을 침범해 글자가 겹친다(실측).
+                txt(lines[0], cx, cy - 7f, fitSize(lines[0], 24f, 24f), fg, bold = true, center = true)
+                txt(lines[1], cx, cy + 21f, fitSize(lines[1], 28f, 12f), fg, bold = true, center = true)
+            } else {
+                txt(label, cx, cy + 13f, fitSize(label, if (label.length >= 3) 30f else 36f, 12f), fg, bold = true, center = true)
+            }
             // 야간 초승달 배지 — 앱은 Icons.Default.DarkMode 벡터(MainCalendarScreen.kt:660).
             // Canvas엔 벡터가 없어 원 두 개 차집합으로 직접 그린다. 위치도 앱과 같은 칩 왼쪽 위 모서리.
             // 공유 이미지는 배경이 흰색 고정(c.drawColor(WHITE))이라 라이트 값 0xFFE09600만 쓴다.

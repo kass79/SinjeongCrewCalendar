@@ -2,6 +2,7 @@ package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -102,6 +103,41 @@ class BranchLiveTest {
             BranchLive.apiError(
                 """{"errorMessage":{"status":500,"code":"ERROR-337","message":"일일 트래픽 제한을 넘었습니다."}}"""),
         )
+    }
+
+    /**
+     * v1.6.46 — 실패는 **사람 말로** 화면에 뜬다. 종전엔 `Snapshot.error`를 카드가 아예 안 읽어
+     * 비행기 모드든 한도 소진이든 `"실시간 조회 중…"` 에 영원히 머물렀다.
+     */
+    @Test
+    fun `실패 사유를 사람 말로 바꾼다`() {
+        assertEquals("인터넷 연결 안 됨",
+            BranchLive.humanError(java.net.UnknownHostException("Unable to resolve host \"swopenapi.seoul.go.kr\"")))
+        assertEquals("인터넷 연결 안 됨",
+            BranchLive.humanError(java.io.IOException("Network is unreachable")))
+        assertEquals("응답이 없어요 · 다시 시도",
+            BranchLive.humanError(java.net.SocketTimeoutException("timed out")))
+        // 한도 문구는 fetch()가 이미 사람 말로 만들어 던진다 — 그대로 통과시킨다
+        assertEquals("모든 키 일일 한도 초과 (자정 리셋)",
+            BranchLive.humanError(Exception("모든 키 일일 한도 초과 (자정 리셋)")))
+        // 정체 모를 오류(HTTP 500·JSON 깨짐)도 침묵하지 않는다
+        assertEquals("실시간 정보를 못 받았어요",
+            BranchLive.humanError(java.io.IOException("...HTTP response code: 500")))
+    }
+
+    /**
+     * 한도 응답이면 **다음 키로 넘어가고**(5개 로테이션), 일시 오류면 재시도만 한다.
+     * 이 판정이 틀리면 키가 하나 소진된 채로 온종일 실패하거나(로테이션 안 함),
+     * 잠깐 끊긴 네트워크에 키 5개를 헛돌린다.
+     */
+    @Test
+    fun `한도 응답만 다음 키로 넘어간다`() {
+        // 서울 열린데이터광장 실제 응답 문구 (apiError가 만든 그대로)
+        assertTrue(BranchLive.isQuotaError("일일 트래픽 제한을 넘었습니다. (ERROR-337)"))
+        assertTrue(BranchLive.isQuotaError("인증키 호출 횟수를 초과하였습니다"))
+        // 일시 오류는 키를 넘기지 않는다
+        assertFalse(BranchLive.isQuotaError("Unable to resolve host \"swopenapi.seoul.go.kr\""))
+        assertFalse(BranchLive.isQuotaError("timed out"))
     }
 
     /** 회차: 까치산(0)에 닿은 까치산행은 열번 +1로 신도림행 대기가 된다(승무 실무 규칙). */

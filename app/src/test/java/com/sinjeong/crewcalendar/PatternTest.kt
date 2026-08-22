@@ -301,6 +301,32 @@ class PatternTest {
     }
 
     /**
+     * v1.6.46 — 격자 칸(달력 칩·동료 탭·공유 이미지) 라벨. 사용자 지적:
+     * *"대기 충당이 지2면 캘린더에도 표시해줘야지"* — 한 줄 `대기충당지2`(6글자)가 34dp 칩에서
+     * 자동축소 하한(7sp)까지 줄어도 넘쳐 흘러 다이아가 안 읽혔다. 충당 계열만 두 줄로 접는다.
+     *
+     * ⚠ 저장값·조회 키는 그대로여야 한다 — [DutyCode.diaRaw]가 행로표·편승알람 키다.
+     */
+    @Test fun gridLabel_folds_only_fill_codes() {
+        listOf("대기충당 지2" to "대기충당\n지2", "충당 9" to "충당\n9", "교체 45" to "교체\n45")
+            .forEach { (raw, expected) ->
+                val c = DutyCode.parse(raw)
+                assertEquals(raw, expected, c.gridLabel)
+                // 표시만 바꾼다: 저장값·조회 키·색은 불변
+                assertEquals(raw, raw, c.raw)
+                assertEquals(raw, raw.substringAfter(' '), c.diaRaw)
+                assertEquals(raw, DutyType.STANDBY, c.colorType)
+                // 폭 넉넉한 곳(위젯·알림·상세시트)은 줄바꿈 없는 한 줄 그대로
+                assertTrue(raw, '\n' !in c.display && '\n' !in c.displayLong)
+            }
+        // 충당 계열이 아니면 display 그대로 — 한 줄이다
+        listOf("지대11", "휴5", "3", "돌봄휴가", "충당").forEach {
+            val c = DutyCode.parse(it)
+            assertEquals(it, c.display, c.gridLabel)
+        }
+    }
+
+    /**
      * 출근 알람 세 갈래를 손계산으로 고정한다 (v1.6.27 사용자 확정 규칙,
      * 세 번째 갈래 "기지 출고"는 v1.6.34에서 알람 없음 → **출고 50분 전**으로 바뀌었다).
      *

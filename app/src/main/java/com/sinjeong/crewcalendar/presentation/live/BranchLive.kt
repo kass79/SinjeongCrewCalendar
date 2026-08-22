@@ -136,6 +136,25 @@ internal object BranchLive {
     private fun field(o: String, key: String) =
         Regex("\"$key\":\"([^\"]*)\"").find(o)?.groupValues?.get(1)
 
+    /**
+     * 예외 → **사람이 읽는 한 줄**. 카드 빈 상태에 그대로 찍히는 문구다(v1.6.46).
+     *
+     * 종전엔 [Snapshot.error]를 화면이 아예 안 읽어서, 비행기 모드·서버 오류·한도 소진 어느 쪽이든
+     * 열차 0대 → `"실시간 조회 중…"` 에 **영원히 머물렀다**. 사용자는 고장인지 알 수 없었다.
+     * 원문 예외 메시지(`Unable to resolve host …`)는 logcat에만 남기고 여기서 사람 말로 바꾼다.
+     */
+    internal fun humanError(t: Throwable): String {
+        val m = t.message.orEmpty()
+        return when {
+            // 한도 문구는 fetch()가 이미 사람 말로 만들어 던진다
+            "한도" in m -> m
+            t is java.net.UnknownHostException || t is java.net.ConnectException ||
+                "resolve host" in m || "Network is unreachable" in m -> "인터넷 연결 안 됨"
+            t is java.net.SocketTimeoutException || "timed out" in m -> "응답이 없어요 · 다시 시도"
+            else -> "실시간 정보를 못 받았어요"
+        }
+    }
+
     /** 응답 상태코드: INFO-000 외에는 에러(ERROR-337 = 일일 한도 초과) */
     internal fun apiError(json: String): String? {
         val code = field(json, "code") ?: return null
@@ -362,6 +381,12 @@ internal object BranchLive {
 
     /* ── 네트워크 ────────────────────────────────────────────────── */
 
+    /**
+     * 이 오류가 **일일 한도**인가 = 다음 키로 넘어갈 이유인가. 아니면 일시 오류라 재시도만 한다.
+     * ([fetch]에 인라인으로 있던 판정 — BranchLiveTest가 실제 ERROR-337 응답 문구로 잠근다)
+     */
+    internal fun isQuotaError(msg: String) = "337" in msg || "제한" in msg || "초과" in msg
+
     /** 키 로테이션 호출: 한도(ERROR-337) 감지 시 다음 키, 전부 소진 시 5분 백오프 */
     private suspend fun fetch(pathAfterKey: String): Result<String> = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() < quotaBlockedUntil)
@@ -385,7 +410,7 @@ internal object BranchLive {
             lastErr = r.exceptionOrNull()
             val m = lastErr?.message.orEmpty()
             when {
-                "337" in m || "제한" in m || "초과" in m -> keyIdx++          // 한도 → 다음 키
+                isQuotaError(m) -> keyIdx++                                   // 한도 → 다음 키
                 attempts >= 2 -> return@withContext Result.failure(lastErr!!) // 일시 오류는 1회만 재시도
             }
         }
@@ -446,13 +471,15 @@ internal object BranchLive {
                 }),
                 inbound = inboundFromPositions(posRows),
                 fetchedAtMillis = System.currentTimeMillis(),
-                error = listOfNotNull(
-                    pos.exceptionOrNull()?.let { "열차위치: ${it.message}" },
-                    yang.exceptionOrNull()?.let { "도착정보: ${it.message}" },
-                ).joinToString(" · ").ifBlank { null },
+                // 두 호출이 같은 이유로 죽으면 문구도 하나만 (`인터넷 연결 안 됨 · 인터넷 연결 안 됨` 방지).
+                // 원문은 logcat으로 — 진단은 그쪽에서 한다.
+                error = listOfNotNull(pos.exceptionOrNull(), yang.exceptionOrNull())
+                    .onEach { Log.w(TAG, "조회 실패", it) }
+                    .map(::humanError).distinct().joinToString(" · ").ifBlank { null },
             )
         }
     } catch (t: Throwable) {
-        Snapshot(error = t.message ?: "네트워크 오류", fetchedAtMillis = System.currentTimeMillis())
+        Log.w(TAG, "조회 실패", t)
+        Snapshot(error = humanError(t), fetchedAtMillis = System.currentTimeMillis())
     }
 }

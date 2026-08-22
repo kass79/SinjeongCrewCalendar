@@ -37,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
@@ -602,22 +603,48 @@ private fun DayCell(
         if (day.duty.raw.isNotBlank()) Box {
             Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
                 // 칩 폭 통일(글자수 무관 동일) — 높이는 글자에 맞춰(시스템 글꼴 확대 시 짤림 방지)
-                val label = day.duty.display
+                // 충당 계열만 두 줄(`대기충당`⏎`지2`)로 온다 — DutyCode.gridLabel 참고.
+                val lines = day.duty.gridLabel.split('\n')
+                val two = lines.size > 1
+                val dens = LocalDensity.current
+                // 두 줄 칩은 칸에서 **줄 하나를 더 먹는다**. 시스템 글꼴을 키우면 그만큼 아래
+                // 출근시각이 칸 밖으로 밀려 잘렸다(fontScale 1.5 실측: `7:47`이 반토막).
+                // 지도([BranchLiveMap])와 같은 처방 — **이 칩 안에서만** 글자배율에 상한을 둔다.
+                // dp 배율(density)은 손대지 않아 칸·알약 크기는 그대로고, 큰 글꼴 사용자도
+                // 1.15배까지는 커진 글자를 본다. 한 줄 칩(대다수)은 종전대로 시스템 배율을 따른다.
+                CompositionLocalProvider(
+                    LocalDensity provides
+                        if (two) Density(dens.density, dens.fontScale.coerceAtMost(1.15f)) else dens
+                ) {
                 Box(
-                    Modifier.width(if (big) 42.dp else 34.dp).padding(vertical = 2.dp),
+                    // 두 줄은 세로 여백을 절반으로 — 줄이 하나 늘어난 만큼 아껴야 한다
+                    Modifier.width(if (big) 42.dp else 34.dp).padding(vertical = if (two) 1.dp else 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    // 다이아 텍스트 자동 맞춤: 칩 폭을 넘치면 들어갈 때까지 축소 (시스템 글꼴 확대에도 안 짤림)
-                    val baseSize = if (label.length >= 3) chipSizeSmall else chipSizeBig
-                    var fitSize by remember(label, big) { mutableStateOf(baseSize) }
-                    Text(
-                        label,
-                        fontSize = fitSize,
-                        lineHeight = fitSize * 1.15,
-                        fontWeight = FontWeight.ExtraBold,
-                        maxLines = 1, softWrap = false,
-                        onTextLayout = { if (it.hasVisualOverflow && fitSize > 7.sp) fitSize *= 0.92f },
-                    )
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        lines.forEachIndexed { i, label ->
+                            // 두 줄일 때 윗줄은 `대기충당`류 접두어라 작게 깔고, **아랫줄 다이아를 크게** 준다.
+                            // 승무원이 칸에서 실제로 읽어야 하는 건 대신 뛰는 다이아 번호다(v1.6.46).
+                            val prefix = two && i == 0
+                            val baseSize = when {
+                                prefix -> chipSizeSmall * 0.7f
+                                label.length >= 3 -> chipSizeSmall
+                                else -> chipSizeBig
+                            }
+                            // 다이아 텍스트 자동 맞춤: 칩 폭을 넘치면 들어갈 때까지 축소 (시스템 글꼴 확대에도 안 짤림)
+                            var fitSize by remember(label, big) { mutableStateOf(baseSize) }
+                            Text(
+                                label,
+                                fontSize = fitSize,
+                                // ⚠ 1.0 밑으로는 내리지 말 것 — 한글 받침이 줄상자에 잘린다.
+                                lineHeight = fitSize * if (two) 1.05 else 1.15,
+                                fontWeight = FontWeight.ExtraBold,
+                                maxLines = 1, softWrap = false,
+                                onTextLayout = { if (it.hasVisualOverflow && fitSize > 7.sp) fitSize *= 0.92f },
+                            )
+                        }
+                    }
+                }
                 }
             }
             // 야간 근무(본선/지선 야간 다이아)에만 노란 초승달 배지 — 다이아 왼쪽 위 모서리에 걸침.

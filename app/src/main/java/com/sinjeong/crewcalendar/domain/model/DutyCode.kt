@@ -78,6 +78,21 @@ data class DutyCode(
     /** 공간이 넉넉한 곳(상단 요약·상세 시트)용 — 한 글자로 줄인 낱말 코드만 원래대로 되돌린다 */
     val displayLong: String get() = if (raw in SHORT_LABELS || fill != null) raw else display
 
+    /**
+     * **격자 칸 전용** 표기 (달력 칩·동료 탭·근무표 공유 이미지). 충당 계열만 `대기충당` ⏎ `지2`
+     * 두 줄로 접고, 나머지는 [display] 그대로 한 줄이다.
+     *
+     * 한 줄 `대기충당지2`(6글자)는 34dp 칩에서 자동축소 하한(7sp)까지 줄여도 넘쳐 흘러
+     * **다이아가 안 읽혔다**(v1.6.46 사용자 지적: *"대기 충당이 지2면 캘린더에도 표시해줘야지"*).
+     * 승무원에게 실질 정보는 "어느 다이아를 뛰는가"라 **아랫줄(다이아)이 크게** 온다 — 세 렌더러가
+     * 전부 아랫줄에 큰 글자를 준다.
+     *
+     * ⚠ 저장값([raw])·[diaRaw]·[colorType]은 건드리지 않는다. 행로표·편승알람 조회 키는 [diaRaw]고
+     * 색은 [colorType]이 늘 대기(노랑)로 되돌린다 — 표시만 바꾸는 값이다.
+     * ⚠ 위젯·알림·상세시트는 폭이 넉넉해 [display]/[displayLong]을 그대로 쓴다(줄바꿈이 섞이면 안 된다).
+     */
+    val gridLabel: String get() = if (fill != null) "$fill\n$diaRaw" else display
+
     companion object {
 
         /** 낱말 근무코드 → 한 글자 표기. `parse` 결과 타입(색)은 그대로 두고 **표시만** 바꾼다 */

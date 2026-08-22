@@ -335,7 +335,7 @@ fun MatrixRow(
                             vertical = m.rowPadV,
                         ),
                 ) {
-                    DutyChip(code.display.ifBlank { "·" }, bg, fg, m, changed)
+                    DutyChip(code.gridLabel.ifBlank { "·" }, bg, fg, m, changed)
                 }
             }
         }
@@ -375,8 +375,17 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, chang
     val availPx = with(d) { m.codeAvailW.toPx() } * 0.95f
     val basePx = m.codeSp.value * spToPx
     // 한글·한자는 정사각(1em), 숫자·`~`·영문은 그 절반 남짓(ExtraBold라 넉넉히 잡는다)
-    val units = text.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 }.toFloat()
+    fun widthUnits(s: String) = s.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 }.toFloat()
+    // 줄바꿈이 이미 들어온 라벨 = 충당 계열(`대기충당`⏎`지2`, DutyCode.gridLabel). **그 자리에서** 접는다 —
+    // 아래 chunked에 맡기면 `대기충당지2`가 `대기충`/`당지2`로 갈려 다이아가 두 줄에 걸쳐 깨진다.
+    val preSplit = '\n' in text
+    val units = widthUnits(text)
     val (sizePx, lines) = when {
+        preSplit -> minOf(
+            basePx * 0.75f,
+            availPx / text.split('\n').maxOf(::widthUnits),
+            with(d) { m.cellH.toPx() } * 0.42f,
+        ) to 2
         units * basePx <= availPx -> basePx to 1
         // 두 줄은 **네 글자짜리 근무변경 코드**(`돌봄휴가`·`대기충당`, units 4.0)에서만 이득이다:
         // 한 줄 7.8sp vs 두 줄 9.75sp. 반면 `지대11`(units 3.24)은 한 줄 9.6sp ≈ 두 줄 9.75sp로
@@ -392,7 +401,7 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, chang
     // px → sp도 **선형 역산**이다. `Float.toSp()`를 쓰면 다시 비선형 표를 타서 어긋난다.
     val size = (sizePx / spToPx).sp
     // 자동 줄바꿈에 맡기면 `돌봄휴가`가 `돌봄휴 / 가`로 3:1이 된다 → 반씩 직접 끊는다
-    val shown = if (lines == 2) text.chunked((text.length + 1) / 2).joinToString("\n") else text
+    val shown = if (lines == 2 && !preSplit) text.chunked((text.length + 1) / 2).joinToString("\n") else text
     // ⚠ **글자는 알약 `Surface` 안이 아니라 위에 겹쳐 그린다**(v1.6.42 ⑥).
     // `Surface`는 shape로 내용을 잘라내는데 알약은 위아래 가장자리에서 폭이 급격히 좁아진다 —
     // 두 줄짜리 코드(`돌봄휴가`)는 바깥 줄이 그 곡선에 걸려 잘렸다(fs 1.3 실측: 가장자리에서

@@ -123,6 +123,7 @@ internal fun BranchLiveMap(modifier: Modifier = Modifier) {
         inbound = snap.inbound,
         fetchedAtMillis = snap.fetchedAtMillis,
         nowMillis = now,
+        error = snap.error,
         onRefresh = { scope.launch { snap = BranchLive.loadSnapshot(force = true) } },
         modifier = modifier,
     )
@@ -134,6 +135,7 @@ private fun LineMapCard(
     inbound: List<InboundTrain>,
     fetchedAtMillis: Long,
     nowMillis: Long,
+    error: String?,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -401,14 +403,28 @@ private fun LineMapCard(
                             drawText(l, topLeft = Offset(tx, 10.dp.toPx()))
                         }
 
-                    // 표시할 열차가 없을 때: 이유를 알려주는 빈 상태 안내
+                    // 표시할 열차가 없을 때: 이유를 알려주는 빈 상태 안내.
+                    // ⚠ **실패를 반드시 말로 한다**(v1.6.46). 종전엔 [error]를 화면이 안 읽어서
+                    // 비행기 모드·서버 오류·API 한도 소진 어느 쪽이든 `"실시간 조회 중…"` 에 영원히
+                    // 머물렀다 — 사용자는 앱이 고장인지 알 수 없었다. 새로고침(↻)은 카드 우상단에 있다.
                     if (animated.isEmpty() && runnerAnimated.isEmpty()) {
-                        val empty = tm.measure(
-                            if (inService()) "실시간 조회 중…" else "금일 운행 종료 (영업 05:30~)",
-                            TextStyle(fontSize = 11.sp, color = Color(0xFF9AA39C)))
-                        drawText(empty, topLeft = Offset(
-                            size.width / 2 - empty.size.width / 2,
-                            (railY + bandY) / 2 - empty.size.height / 2))
+                        val msg = error
+                            ?: if (inService()) "실시간 조회 중…" else "금일 운행 종료 (영업 05:30~)"
+                        val failed = error != null
+                        val empty = tm.measure(msg, TextStyle(fontSize = 11.sp,
+                            color = if (failed) Color(0xFFE9A23B) else Color(0xFF9AA39C)))
+                        val hint = if (!failed) null else tm.measure("오른쪽 위 ↻ 를 눌러 다시 시도",
+                            TextStyle(fontSize = 10.sp, color = Color(0xFF9AA39C)))
+                        // 두 줄일 때도 **묶음 전체**를 선로 사이 가운데에 둔다 — 첫 줄만 가운데에 두면
+                        // 둘째 줄이 아래 초록 띠에 겹쳐 안 읽힌다(실측).
+                        val gap = 3.dp.toPx()
+                        val blockH = empty.size.height + (hint?.let { gap + it.size.height } ?: 0f)
+                        var ty = (railY + bandY) / 2 - blockH / 2
+                        drawText(empty, topLeft = Offset(size.width / 2 - empty.size.width / 2, ty))
+                        hint?.let {
+                            ty += empty.size.height + gap
+                            drawText(it, topLeft = Offset(size.width / 2 - it.size.width / 2, ty))
+                        }
                     }
                 }
                 }
