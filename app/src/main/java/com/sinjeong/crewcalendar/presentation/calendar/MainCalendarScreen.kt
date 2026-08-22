@@ -54,6 +54,7 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
 import com.sinjeong.crewcalendar.presentation.roster.AutoFitText
 import com.sinjeong.crewcalendar.presentation.roster.changedCorner
 import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
@@ -959,6 +960,20 @@ private fun DayDetailContent(
                     }
                 }
             }
+            // 실시간 신정지선 열차 지도 — **오늘 상세시트에만** (v1.6.43).
+            //
+            // 편승지키미(SinjeongShuttle2)의 노선도를 코드째 이식한 것이다(앱 실행 연결이 아니라
+            // 이식이라 편승지키미가 안 깔려 있어도 뜬다). 배치를 행로표 바로 밑으로 잡은 이유:
+            // 행로표에서 내 열번을 확인한 직후 그 열차가 지금 어디쯤인지를 같은 화면에서 잇는다.
+            //
+            // ⚠ **달력 그리드에는 절대 넣지 않는다.** 그 화면은 앱이 켜 있는 내내 떠 있어서
+            //   5초 폴링이 배터리와 일 1,000회 API 한도를 그대로 태운다. 상세시트는 열었다
+            //   닫는 화면이라 [BranchLiveMap]의 LaunchedEffect가 닫힘과 함께 취소된다 —
+            //   소모 범위가 "시트가 열려 있는 동안"으로 갇히는 게 이 배치의 핵심이다.
+            //
+            // 오늘이 아닌 날짜에선 아예 컴포지션에 들어가지 않는다(과거·미래 날짜에 실시간
+            // 위치는 의미가 없고, 그날 시트를 열 때마다 API를 태울 이유도 없다).
+            if (day.date == LocalDate.now()) BranchLiveMap()
             // 출근 알람 — 시각이 있는 근무(본선·지선·대기)에만 띄운다. 계산은 BundledTimetable.advise.
             // 후반 칩은 후반사업이 실제로 있는 근무(본선 다이아 / 지선 사업시각)에만 붙인다 —
             // 대기 근무에 "알람 없음" 칩이 두 개 겹쳐 뜨는 걸 막는다.

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  서울 열린데이터광장 실시간 지하철 API는 **HTTPS(443)를 안 연다** — 실측으로 확인했다
+  (https://swopenapi.seoul.go.kr 는 connect timeout, http:// 만 200을 준다).
+  안드로이드 9(API 28)부터 cleartext 가 기본 차단이라 그대로는 호출이 실패한다.
+
+  `android:usesCleartextTraffic="true"` 로 앱 전체를 열지 않고 **이 호스트 하나만** 예외로 둔다.
+  나머지(Firebase·기상청)는 종전대로 HTTPS 강제 상태를 유지한다.
+  이 API가 HTTPS를 지원하는 날 이 파일과 매니페스트 한 줄을 지우면 된다.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">swopenapi.seoul.go.kr</domain>
+    </domain-config>
+</network-security-config>
