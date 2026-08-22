@@ -96,15 +96,6 @@ fun MainCalendarScreen(
     }
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
-    // ⑤ 첫 실행 유도 — 로그인 직후엔 patternId가 임의값이라 달력이 통째로 안 맞는다.
-    // 근거는 [DutyPickGate] 주석. `remember`(rememberSaveable 아님 — CLAUDE.md 함정 참고).
-    var needsDutyPick by remember { mutableStateOf(DutyPickGate.needsPick(context)) }
-    LaunchedEffect(Unit) {
-        if (needsDutyPick && !DutyPickGate.autoShown) {
-            DutyPickGate.autoShown = true
-            viewModel.openDutyPicker(LocalDate.now())
-        }
-    }
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
     // 폭 600dp 이상(폴드 펼침·태블릿) = 좌우 2패널. 그 미만은 기존 바텀시트 그대로
     val wide = LocalConfiguration.current.screenWidthDp >= 600
@@ -195,8 +186,6 @@ fun MainCalendarScreen(
             Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
                 TodayCard(
                     days = cardDays,
-                    needsDutyPick = needsDutyPick,
-                    onPickDuty = { viewModel.openDutyPicker(LocalDate.now()) },
                     onOpenDay = { d ->
                         // 다른 달을 보고 있어도 카드를 누르면 그 날로 데려간다.
                         // (31일 밤이면 카드가 가리키는 "내일"이 다음 달이라 goToday로는 못 간다)
@@ -312,11 +301,7 @@ fun MainCalendarScreen(
             currentOffset = state.user?.patternOffset ?: 0,
             onPickGroup = viewModel::pickGroup,
             onBack = viewModel::backToGroupStep,
-            onPick = { g, i ->
-                viewModel.confirmDutyPosition(g, i)
-                DutyPickGate.mark(context, true)   // 골랐다 → 안내 배너·자동 시트 종료
-                needsDutyPick = false
-            },
+            onPick = viewModel::confirmDutyPosition,
             onDismiss = viewModel::closeDutyPicker,
         )
     }
@@ -359,13 +344,13 @@ fun MainCalendarScreen(
  * 오늘 칸이 이미 화면에 보여도 중복이 아니다: 칸은 다이아·출근시각까지고, **편승 시각과
  * 알람 예약 버튼은 여기에만** 있다(칸에서는 날짜를 눌러 시트를 열어야 나온다).
  *
- * `needsDutyPick`이면 같은 자리가 **근무선택 안내**로 바뀐다(⑤) — 자리를 새로 만들지 않는다.
+ * 첫 실행 유도(v1.6.41 ⑤ — 시트 자동 오픈 + 안내 배너)는 **v1.6.42에서 걷어냈다**.
+ * 사용자: *"소속과 근무를 골라주세요 ← 이거 한번 없어도 될듯! 헤더에 근무선택하니까.."*
+ * 헤더의 `근무선택` 버튼이 그 자리를 대신한다.
  */
 @Composable
 private fun TodayCard(
     days: List<DaySchedule>,
-    needsDutyPick: Boolean,
-    onPickDuty: () -> Unit,
     onOpenDay: (LocalDate) -> Unit,
 ) {
     val today = LocalDate.now()
@@ -383,21 +368,13 @@ private fun TodayCard(
             Modifier.height(40.dp).padding(start = 12.dp, end = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            if (needsDutyPick || day == null) {
+            if (day == null) {
                 Text(
-                    if (needsDutyPick) "소속과 근무를 골라주세요 — 그래야 달력이 맞습니다"
-                    else "근무를 불러오는 중…",
+                    "근무를 불러오는 중…",
                     modifier = Modifier.weight(1f),
                     fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
                     maxLines = 1, overflow = TextOverflow.Ellipsis,
                 )
-                // 카드 바탕이 이미 primaryContainer라 FilledTonalButton(= 같은 색)은 글자만 남아
-                // 버튼으로 안 보인다(에뮬 실측). 꽉 찬 primary로 대비를 준다.
-                if (needsDutyPick) Button(
-                    onClick = onPickDuty,
-                    contentPadding = PaddingValues(horizontal = 12.dp),
-                    modifier = Modifier.height(28.dp),
-                ) { Text("근무선택", fontSize = 11.sp, fontWeight = FontWeight.ExtraBold) }
                 return@Row
             }
             // 긴 문구("내일 · 대기충당 지3 다이아 대행 · 출근 9:00")도 칩을 밀지 않게 자동 축소
