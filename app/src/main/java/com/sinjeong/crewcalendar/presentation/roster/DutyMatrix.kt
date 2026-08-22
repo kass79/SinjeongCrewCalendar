@@ -228,16 +228,22 @@ fun MatrixDateHeader(
 ) {
     val today = LocalDate.now()
     val edge = MaterialTheme.colorScheme.outline
+    val headerBg = MaterialTheme.colorScheme.surfaceVariant
     val nameEdgeX = with(LocalDensity.current) { m.nameW.toPx() }
-    Row {
-        Box(
-            Modifier.width(m.nameW)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .nameColumnEdge(edge, nameEdgeX)
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-        ) {
+    // 이름칸 바탕·경계선은 **행 전체**에 그린다(v1.6.48). `Box`에 걸면 글자 높이만큼만 칠해져
+    // 날짜 칸보다 짧고 아래쪽에 바탕이 끊긴 홈이 남는다 — 420dpi 실측 68px vs 126px.
+    // [nameColumnEdge]가 선을 행에 그리는 이유와 똑같은 문제다.
+    Row(
+        Modifier.drawBehind {
+            drawRect(headerBg, size = Size(nameEdgeX, size.height))
+            drawLine(edge, Offset(nameEdgeX, 0f), Offset(nameEdgeX, size.height), 1.dp.toPx())
+        },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.width(m.nameW).padding(horizontal = 4.dp)) {
             Text(
-                "이름", fontSize = m.dowSp, fontWeight = FontWeight.Bold,
+                "이름", fontSize = m.dowSp, lineHeight = m.dowSp * 1.4,
+                fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -264,20 +270,51 @@ fun MatrixDateHeader(
                     }
                     // 달이 바뀜는 칸은 `9/1`로 적는다 — 범위가 두 달에 걸치므로
                     // 날짜만 있으면 31 다음 1이 뭐지 알 수 없다(v1.6.39).
+                    //
+                    // ⚠ **`lineHeight`를 반드시 같이 준다**(v1.6.48). `fontSize`만 줄이면 줄 높이는
+                    // M3 기본 스타일(`bodyLarge`)의 **24sp 그대로**라, 10.5sp 날짜도 8.5sp 요일도
+                    // 한 줄에 24dp씩 먹어 헤더가 48dp였다(420dpi 실측 126px = 글자 두 줄에 딸린
+                    // 빈칸이 대부분). 사용자 지적 *"이름 날짜 밑에 요일이 있는데 거기도 칸이 넓네?"*.
+                    // 글자 크기는 그대로 두고 줄 높이만 1.4배로 못 박아 26dp대로 내린다 —
+                    // sp 배수라 글자배율을 키우면 칸도 같이 커진다(고정 dp였다면 잘렸을 자리).
                     Text(
                         if (date.dayOfMonth == 1) "${date.monthValue}/1" else "${date.dayOfMonth}",
-                        fontSize = m.daySp, fontWeight = FontWeight.Bold, color = c,
+                        fontSize = m.daySp, lineHeight = m.daySp * 1.4,
+                        fontWeight = FontWeight.Bold, color = c,
                         maxLines = 1, softWrap = false,
                     )
                     Text(
                         listOf("월", "화", "수", "목", "금", "토", "일")[date.dayOfWeek.value - 1],
-                        fontSize = m.dowSp, color = c,
+                        fontSize = m.dowSp, lineHeight = m.dowSp * 1.4, color = c,
                     )
                 }
             }
         }
     }
 }
+
+/**
+ * **동료 탭 전용** 칩 라벨 — 지선 주간·야간 다이아만 `지`를 되살린다(v1.6.48).
+ *
+ * [DutyCode.display]는 지선 다이아의 `지`를 뗀다(칸이 좁아 정한 기존 앱 방식). 달력은 **내 근무
+ * 하나**만 보여 주니 그래도 됐지만, 이 화면은 여러 사람이 세로로 나란히 오는데 지선 `지1`과 본선
+ * `1`번이 **글자도 색도 똑같아져** 구분이 안 됐다(사용자: *"1이랑 지선1이랑 구분이 잘 안가네?"*).
+ * → 여기서만 [DutyCode.raw]를 그대로 쓴다.
+ *
+ * ⚠ [DutyCode.display]·[DutyCode.gridLabel]은 **손대지 않는다.** 달력·위젯·알림·근무표 공유
+ * 이미지가 전부 그걸 쓰고, 사용자가 *"달력탭 말고 거기 만이라도"*라고 못 박았다.
+ * 이 파일에 private으로 두는 것이 곧 그 보증이다 — 매트릭스를 그리는 곳은 동료 탭 하나뿐이다
+ * (파일 첫 주석). [DutyCode]에 프로퍼티로 뒀다면 다음 사람이 달력에서도 부를 수 있다.
+ *
+ * 걸리는 건 지선 **주간(지1~지8)·야간(지10~지14)** 뿐이다. 지선 대기는 [DutyCode.display]가
+ * 이미 `지대1`로 살려 두고(v1.6.36), 충당 계열 아랫줄은 [DutyCode.diaRaw]라 이미 `지2`로 온다.
+ *
+ * 폭: 가장 긴 `지14`가 [DutyChip] 글자폭 모델로 2.24 units — 이미 쓰이는 `대34`·`휴28`과
+ * **같은 값**이라 36dp 칸에 13sp 한 줄로 그대로 들어간다(축소 경계 2.265, 두 줄 경계 3.6).
+ */
+private val DutyCode.mateLabel: String
+    get() = if (fill == null && (type == DutyType.BRANCH || type == DutyType.BRANCH_NIGHT)) raw
+    else gridLabel
 
 /** 한 사람의 근무 행 — [dates]는 [MatrixDateHeader]에 넘긴 것과 **같은 리스트**여야 한다 */
 @Composable
@@ -335,7 +372,7 @@ fun MatrixRow(
                             vertical = m.rowPadV,
                         ),
                 ) {
-                    DutyChip(code.gridLabel.ifBlank { "·" }, bg, fg, m, changed)
+                    DutyChip(code.mateLabel.ifBlank { "·" }, bg, fg, m, changed)
                 }
             }
         }

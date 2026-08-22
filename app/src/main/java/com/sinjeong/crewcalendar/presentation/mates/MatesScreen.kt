@@ -7,6 +7,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -14,6 +16,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -22,8 +25,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -321,16 +327,65 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
-            OutlinedTextField(
-                value = query, onValueChange = { query = it },
-                placeholder = { Text("이름으로 검색", fontSize = 13.sp) }, singleLine = true,
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 14.sp),
-                trailingIcon = if (query.isNotEmpty()) {
-                    { TextButton(onClick = { query = "" }) { Text("지움", fontSize = 12.sp) } }
-                } else null,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
-                shape = RoundedCornerShape(999.dp),
-            )
+            // 검색칸 — M3 `OutlinedTextField`의 **껍데기만** 빌리고 알맹이는 `BasicTextField`로
+            // 짠다(v1.6.48). 기본 `OutlinedTextField`는 높이가 56dp에 못 박혀 있고 modifier로
+            // 줄이면 내부 여백이 그대로라 글자가 잘린다 — `contentPadding`을 열어 주는 길은
+            // 껍데기(`OutlinedTextFieldDefaults.DecorationBox`)를 직접 부르는 것뿐이다.
+            //   **56dp → 42dp.** 입력 글자 14sp와 placeholder 13sp가 따로 놀던 것도 **둘 다 13sp**로
+            //   맞췄다(사용자: *"검색 칸이 너무 크지 않아? 텍스트 크기를 동일한 크기가 좋을꺼 같은데?"*).
+            //   42dp 밑으로는 안 내린다 — 장갑 낀 손으로 누르는 화면이라 여기가 터치 타깃 하한이다.
+            //   글자배율을 키우면 `heightIn(min)`이라 칸이 알아서 자란다(고정 height였다면 잘렸다).
+            // ⚠ 커서색은 `onSurface`로 못 박는다 — 기본 `primary`는 포커스 테두리와 같은 초록이라
+            //   커서가 테두리에 묻힌다(v1.6.47에서 근무변경 검색칸에 한 처리와 같다).
+            val searchSource = remember { MutableInteractionSource() }
+            BasicTextField(
+                value = query, onValueChange = { query = it }, singleLine = true,
+                textStyle = LocalTextStyle.current.copy(
+                    fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface,
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                interactionSource = searchSource,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp).heightIn(min = 42.dp),
+            ) { field ->
+                OutlinedTextFieldDefaults.DecorationBox(
+                    value = query,
+                    innerTextField = field,
+                    enabled = true, singleLine = true,
+                    visualTransformation = VisualTransformation.None,
+                    interactionSource = searchSource,
+                    placeholder = { Text("이름으로 검색", fontSize = 13.sp) },
+                    // 지우기는 `trailingIcon`이 아니라 **`suffix` 슬롯**에 넣는다(실측으로 갈린 것).
+                    // `trailingIcon` 슬롯은 M3가 48dp 최소칸(`IconDefaultSizeModifier`)을 박아 놔서
+                    // 지움이 뜨는 순간 칸이 42 → **48dp로 도로 뛴다**. `suffix`의 하한은 24dp라
+                    // 42dp 안에 들어온다. `TextButton`도 같은 이유로 못 쓴다(터치 타깃 48dp 강제).
+                    // ⚠ `lineHeight`를 같이 주는 이유는 헤더와 같다 — 12sp 글자가 M3 기본 24sp
+                    //   줄 높이를 끌고 오면 그것만으로 24dp를 먹는다.
+                    // 누르는 면은 여백 포함 **48×40dp**(실측) — 42dp 칸 안에 들어오면서 손가락
+                    //   하나는 충분히 받는다. `trailingIcon`이었다면 이 40dp 위에 48dp 최소칸이
+                    //   덧씌워져 칸이 부풀었다.
+                    suffix = if (query.isNotEmpty()) {
+                        {
+                            Text(
+                                "지움", fontSize = 12.sp, lineHeight = 12.sp * 1.4,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(999.dp))
+                                    .clickable { query = "" }
+                                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                            )
+                        }
+                    } else null,
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
+                    container = {
+                        OutlinedTextFieldDefaults.Container(
+                            enabled = true, isError = false,
+                            interactionSource = searchSource,
+                            shape = RoundedCornerShape(999.dp),
+                        )
+                    },
+                )
+            }
             // 2행 3열 고정 — 가로 스크롤이 아니라 격자라 여섯 칸이 항상 다 보인다
             Column(
                 Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
