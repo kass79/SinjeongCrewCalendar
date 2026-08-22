@@ -149,21 +149,30 @@ class MatesViewModel @Inject constructor(
 }
 
 /**
- * 카테고리 칩 2행 3열 (v1.6.39, 사용자가 배치까지 지정).
+ * 카테고리 칩 2행 (v1.6.49로 3+4 재배치).
  *
- *     본선 기관사   본선 차장   신정지선
- *     4조2교대     통상근무    ★즐겨찾기
+ *     전체      ★즐겨찾기   본선 기관사
+ *     본선 차장  신정지선  4조2교대  통상근무
+ *
+ * 첫 줄은 **소속이 아닌 두 가지 보기**(전체·★)로 시작하고, 이어서 소속 5종이 차례대로 온다.
+ * ★즐겨찾기가 넓은 3칸 줄에 있는 건 **360dp에서 잘렸기 때문**이다 —
+ * 4칸 줄의 글자 자리는 65dp인데 `★즐겨찾기`는 ★까지 다섯 글자라 70dp가 필요하다(실측).
  *
  * `null` = ★즐겨찾기(저장한 동료 + 본인). 나머지는 그 소속 전원.
+ * **`전체`는 이 목록에 없다** — 필터가 아니라 필터 **해제**라서 [MatesScreen]이 첫 줄 맨 앞에
+ * 직접 붙인다(v1.6.49 사용자: *"위에 검색 탭에 전체탭이 없네?"*).
  *
  * **아무 칩도 안 눌린 상태 = 전체 명단**이고 그게 진입 기본값이다(v1.6.42 ⑤ —
  * *"동료탭에 들어가면 먼저 전체를 보여줘야지..?"*). 칩은 **필터로만** 동작한다:
- * 누르면 그 갈래만, 눌린 칩을 다시 누르면 해제되어 전체로 돌아온다.
- * 칸을 하나 더 만들지 않으므로 v1.6.39의 2행 3열 배치가 그대로 유지된다.
+ * 누르면 그 갈래만, 눌린 칩을 다시 누르거나 `전체`를 누르면 해제되어 전체로 돌아온다.
+ *
+ * 3+3이 아니라 **3+4**인 이유: 칩 글자를 11 → 13dp로 키우면서(*"탭의 텍스트 크기를 가독성 있게
+ * 키워죠"*) 칸이 하나 늘었다. 긴 라벨 셋을 넓은 3칸 줄에, 네 글자짜리 넷을 4칸 줄에 둔다 —
+ * 360dp 화면에서도 잘림·줄바꿈이 없다.
  */
 private val CATEGORY_ROWS: List<List<CrewGroup?>> = listOf(
-    listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH),
-    listOf(CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY, null),
+    listOf(null, CrewGroup.MAIN_DRIVER),
+    listOf(CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH, CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY),
 )
 
 /**
@@ -386,13 +395,21 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     },
                 )
             }
-            // 2행 3열 고정 — 가로 스크롤이 아니라 격자라 여섯 칸이 항상 다 보인다
+            // 2행 고정(3+4) — 가로 스크롤이 아니라 격자라 일곱 칸이 항상 다 보인다.
+            // 좌우 여백 12 → 10dp, 칸 사이 5 → 4dp: 키운 글자(13dp)가 360dp 화면 4칸 줄에
+            // 들어가도록 되찾은 폭이다(`★즐겨찾기` 실측이 가장 빠듯하다).
             Column(
-                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp),
             ) {
-                CATEGORY_ROWS.forEach { row ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                CATEGORY_ROWS.forEachIndexed { i, row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                        // 첫 칸 `전체` = 필터 해제. 진입 기본값(아무것도 안 걸린 상태)이 곧 이 칩이라
+                        // 소속을 눌렀다가 전체 명단으로 돌아올 길이 화면에 생긴다(v1.6.49).
+                        if (i == 0) MatesChip("전체", category == null && !favMode) {
+                            category = null
+                            favMode = false
+                        }
                         row.forEach { g ->
                             // 눌린 칩을 다시 누르면 해제 = 전체로 복귀(v1.6.42 ⑤)
                             if (g == null) MatesChip("★즐겨찾기", favMode) {
@@ -418,11 +435,13 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
             ) {
                 Row(
-                    Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 10.dp).padding(bottom = 6.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     // `전체`는 인원수를 안 붙인다 — 상단바가 이미 `N명`으로 같은 말을 하고 있다.
-                    MatesChip("전체", favFilter == null) { favFilter = null }
+                    // ★를 붙이는 이유: 첫 줄에 생긴 `전체`(= 필터 해제, 전 인원)와 **다른 것**이다.
+                    // 이건 ★로 담은 사람 안에서의 전체라, 같은 이름이면 눌러 보고 나서야 안다(v1.6.49).
+                    MatesChip("★전체", favFilter == null) { favFilter = null }
                     FavGroup.entries.forEach { g ->
                         MatesChip("${g.label} ${favCounts[g] ?: 0}", favFilter == g) { favFilter = g }
                     }
@@ -540,30 +559,36 @@ private fun EmptyHint(
 }
 
 /**
- * 동료 탭 칩 한 벌 — 2행 3열 카테고리와 셋째 줄 ★그룹이 **같은 컴포저블**을 쓴다
- * (weight 1f · 32dp). 두 벌로 두면 한쪽만 고치는 사고가 난다.
+ * 동료 탭 칩 한 벌 — 카테고리 격자와 셋째 줄 ★그룹이 **같은 컴포저블**을 쓴다
+ * (weight 1f · 34dp). 두 벌로 두면 한쪽만 고치는 사고가 난다.
  *
- * 글자 크기는 **11sp가 아니라 11dp**다(v1.6.42 ⑥). 칩 높이가 32dp로 못박혀 있어서 글자만
+ * 글자 크기는 **13sp가 아니라 13dp**다(v1.6.42 ⑥). 칩 높이가 못박혀 있어서 글자만
  * 시스템 배율을 따라가면 넘친다 — fontScale 1.3에서 `★즐겨찾기`의 위아래가 잘렸다(에뮬 실측).
  * `dp.toSp()`가 배율을 되나눠 주므로 글꼴 설정이 뭐든 칩 안에 그대로 들어간다.
  * 근무 코드 칩([com.sinjeong.crewcalendar.presentation.roster.MatrixMetrics])이 칸 폭을 dp로
  * 잡고 글자를 거기 맞추는 것과 같은 이유·같은 규칙이다.
+ *
+ * v1.6.49에서 11 → **13dp**(사용자: *"탭의 텍스트 크기를 가독성 있게 키워죠"*). 높이도 32 → 34dp —
+ * 32dp에 13dp 글자는 위아래 여백이 4dp도 안 남아 답답했다.
+ * ⚠ **`lineHeight`를 같이 못 박는다.** 안 주면 M3 기본 스타일(`labelLarge`)의 20**sp**가 따라와
+ * 글자만 dp로 잡은 보람 없이 큰 글자배율에서 줄 높이가 칩을 넘는다(헤더에서 겪은 것과 같은 함정).
  */
 @Composable
 private fun RowScope.MatesChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val sp = with(LocalDensity.current) { 13.dp.toSp() }
     FilterChip(
         selected = selected,
         onClick = onClick,
         label = {
             Text(
                 label,
-                fontSize = with(LocalDensity.current) { 11.dp.toSp() },
+                fontSize = sp, lineHeight = sp * 1.25,
                 maxLines = 1, softWrap = false,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
         },
-        modifier = Modifier.weight(1f).height(32.dp),
+        modifier = Modifier.weight(1f).height(34.dp),
     )
 }
 

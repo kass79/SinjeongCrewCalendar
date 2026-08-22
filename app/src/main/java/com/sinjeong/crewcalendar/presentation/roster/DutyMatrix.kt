@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextGeometricTransform
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
@@ -120,6 +121,7 @@ data class MatrixMetrics(
          * 필요 폭은 `2.24 × codeSp`이고 칸의 가용 폭은 `cellW − 5`다.
          * 36dp면 가용 31sp ≥ 2.24 × 13 = 29.1 → **3글자까지 전부 기준 크기 한 줄**로 들어간다.
          * (14sp면 31.4 > 31로 넘쳐 축소가 걸린다. 13sp가 이 칸 폭의 상한이다.)
+         * v1.6.49부터 이 값은 **표 전체의 글자 크기**다 — 칸마다 따로 줄이지 않는다.
          */
         val Roomy = MatrixMetrics(
             cellW = 36.dp, nameW = 68.dp,
@@ -380,6 +382,15 @@ fun MatrixRow(
 }
 
 /**
+ * 표 전체가 쓰는 **한 줄 기준 라벨 폭** — 3글자 코드(`휴29`·`지14`·`대13`, 한글 1 + 숫자 0.62×2).
+ * 실제로 나올 수 있는 한 줄 라벨을 전수 조사해 정한 값이다([DutyChip] 주석).
+ */
+private const val UNIFORM_UNITS = 2.24f
+
+/** 이 폭을 넘는 라벨만 두 줄(`돌봄휴가`·`대기충당` 같은 4글자 근무변경 코드) */
+private const val TWO_LINE_UNITS = 3.6f
+
+/**
  * 근무 코드 칩 — 표 전체가 **같은 크기의 알약**이고 글자는 그 안에 세로 가운데 정렬된다(v1.6.23).
  *
  * 종전 문제("텍스트가 최적화 안 되어 있다"):
@@ -388,10 +399,11 @@ fun MatrixRow(
  *     게다가 한 번 줄면 되돌아오지 않아(`fit`은 감소만 한다) LazyColumn이 행을 재활용하거나
  *     가로 스크롤 중 폭 0으로 한 번 측정되면 그 칸만 영구히 작아졌다 — 재현이 들쭉날쭉했던 이유.
  *
- * 그래서 **측정 대신 계산**한다. 글자 폭을 한글 1em · 숫자/기호 0.56em으로 근사해 필요한 폭을
- * 구하고 칸에 들어가면 그냥 기준 크기를 쓴다. 실제 근무코드는 길어야 3글자(`휴16`·`대13`)라
- * **표의 거의 모든 칸이 정확히 같은 크기**가 된다. 4글자짜리 근무변경 코드(`돌봄휴가`·`대기충당`)만
- * 한 줄로 찌그러뜨리는 대신 **두 줄**로 접어 훨씬 크게 읽힌다.
+ * 그래서 **측정 대신 계산**한다. 글자 폭을 한글 1em · 숫자/기호 0.62em으로 근사한다.
+ * v1.6.49부터는 "칸에 들어가면 기준 크기"가 아니라 **모든 칸이 무조건 한 크기**([UNIFORM_UNITS])다 —
+ * 종전엔 긴 라벨만 그 칸에서 줄어들어 표에 서너 가지 크기가 섞였다. 기준 크기로 안 들어가는
+ * 소수 라벨은 **가로로만 좁혀**(scaleX) 높이를 표와 맞춘다.
+ * 4글자짜리 근무변경 코드(`돌봄휴가`·`대기충당`)만 **두 줄**로 접어 훨씬 크게 읽힌다.
  */
 @Composable
 private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, changed: Boolean = false) {
@@ -417,28 +429,36 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, chang
     // 아래 chunked에 맡기면 `대기충당지2`가 `대기충`/`당지2`로 갈려 다이아가 두 줄에 걸쳐 깨진다.
     val preSplit = '\n' in text
     val units = widthUnits(text)
-    val (sizePx, lines) = when {
-        preSplit -> minOf(
-            basePx * 0.75f,
-            availPx / text.split('\n').maxOf(::widthUnits),
-            with(d) { m.cellH.toPx() } * 0.42f,
-        ) to 2
-        units * basePx <= availPx -> basePx to 1
-        // 두 줄은 **네 글자짜리 근무변경 코드**(`돌봄휴가`·`대기충당`, units 4.0)에서만 이득이다:
-        // 한 줄 7.8sp vs 두 줄 9.75sp. 반면 `지대11`(units 3.24)은 한 줄 9.6sp ≈ 두 줄 9.75sp로
-        // 크기가 거의 같은데 `지대`/`11`로 접히면 사용자 눈엔 "깨진 것"으로 보인다(v1.6.39 지적).
-        // 그래서 경계를 3.0 → **3.6**으로 올렸다 — 3글자까지는 무조건 한 줄이다.
-        // 세로 상한(칸 높이의 42%)이 없으면 fontScale이 커질 때 두 줄이 칸을 넘는다 —
-        // `돌봄휴가`가 fs 1.3에서 아랫줄이 잘렸다(v1.6.42 ⑥ 실측). 1.0에서는 기존 값(basePx*0.75)이
-        // 그대로 이겨서 종전 크기가 유지된다.
-        units >= 3.6f ->
-            minOf(basePx * 0.75f, availPx / (units / 2f), with(d) { m.cellH.toPx() } * 0.42f) to 2
-        else -> (availPx / units) to 1
-    }
+    // 두 줄은 **네 글자짜리 근무변경 코드**(`돌봄휴가`·`대기충당`, units 4.0)에서만 이득이다.
+    // 반면 `지대11`(units 3.24)이 `지대`/`11`로 접히면 사용자 눈엔 "깨진 것"으로 보인다
+    // (v1.6.39 지적) → 경계는 **3.6**, 3글자까지는 무조건 한 줄이다.
+    val lines = if (preSplit || units >= TWO_LINE_UNITS) 2 else 1
+    // 자동 줄바꿈에 맡기면 `돌봄휴가`가 `돌봄휴 / 가`로 3:1이 된다 → 반씩 직접 끊는다.
+    // 줄바꿈이 이미 들어온 라벨(충당 계열)은 **그 자리에서** 접는다 — chunked에 맡기면
+    // `대기충당지2`가 `대기충`/`당지2`로 갈려 다이아가 두 줄에 걸쳐 깨진다.
+    val shown = if (lines == 2 && !preSplit) text.chunked((text.length + 1) / 2).joinToString("\n") else text
+    // **표 전체가 한 크기다**(v1.6.49). 종전엔 칸마다 `availPx / units`로 따로 줄여서
+    // `휴1`(13sp)·`지대1`(11.2sp)·`지대11`(9.1sp)이 한 화면에 섞였고, 글자배율이 1.0을 넘는
+    // 순간엔 3글자 코드(`지12`·`휴21`) 전부가 2글자 코드보다 작아졌다
+    // (사용자: *"야간이랑 주간이랑 텍스트 크기가 다른데?"*, *"휴1,지대1,지4 텍스트 크기가 다 다른데?"*).
+    //
+    // 기준은 **3글자 코드**([UNIFORM_UNITS] = `휴29`·`지14`·`대13` = 2.24 units)다. 실제 명단·
+    // 근무변경에서 나올 수 있는 한 줄 라벨 125종 중 120종이 여기 이하고(본선 108칸 중 20칸이
+    // `휴10`~`휴29`), 이게 36dp 칸에 들어가는 최대 크기가 곧 13sp다(2.24 × 13 = 29.1 ≤ 29.45).
+    // → 크기는 **하나**로 정해지고, 칸이 좁아지는 큰 글자배율에서도 모든 칸이 같이 줄어든다.
+    val sizePx =
+        if (lines == 1) minOf(basePx, availPx / UNIFORM_UNITS)
+        // 두 줄은 두 줄끼리 한 크기 — 종전엔 `충당⏎9`(9.75sp)와 `대기충당⏎지2`(7.36sp)가 갈렸다.
+        // 세로 상한(칸 높이의 42%)이 없으면 큰 글자배율에서 아랫줄이 칸을 넘는다(v1.6.42 ⑥ 실측).
+        else minOf(basePx * 0.75f, with(d) { m.cellH.toPx() } * 0.42f)
     // px → sp도 **선형 역산**이다. `Float.toSp()`를 쓰면 다시 비선형 표를 타서 어긋난다.
     val size = (sizePx / spToPx).sp
-    // 자동 줄바꿈에 맡기면 `돌봄휴가`가 `돌봄휴 / 가`로 3:1이 된다 → 반씩 직접 끊는다
-    val shown = if (lines == 2 && !preSplit) text.chunked((text.length + 1) / 2).joinToString("\n") else text
+    // 기준 크기로도 안 들어가는 **소수 라벨**(`지대1`·`지대2`·`지대11`·`가연차`, 두 줄의 `대기충당`)은
+    // 크기를 줄이는 대신 **가로로만 좁힌다**. 글자 높이가 표와 같아야 눈에 "같은 크기"로 보이고,
+    // 폭은 어차피 종전 축소분과 같다(`지대11`: 종전 9.1sp 온폭 = 지금 13sp × 0.70). 잘림도 없다.
+    // 폭 계산은 여기까지 전부 px 한 단위다 — 비율이라 sp↔dp 환산이 끼어들 자리가 없다.
+    val maxLineUnits = if (lines == 2) shown.split('\n').maxOf(::widthUnits) else units
+    val scaleX = (availPx / (maxLineUnits * sizePx)).coerceAtMost(1f)
     // ⚠ **글자는 알약 `Surface` 안이 아니라 위에 겹쳐 그린다**(v1.6.42 ⑥).
     // `Surface`는 shape로 내용을 잘라내는데 알약은 위아래 가장자리에서 폭이 급격히 좁아진다 —
     // 두 줄짜리 코드(`돌봄휴가`)는 바깥 줄이 그 곡선에 걸려 잘렸다(fs 1.3 실측: 가장자리에서
@@ -458,6 +478,10 @@ private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, chang
         Text(
             shown,
             modifier = Modifier.padding(horizontal = MatrixMetrics.CHIP_PAD_H),
+            // 가로 압축만 스타일로 준다(위 scaleX). 나머지 값은 아래 인자들이 그대로 이긴다.
+            style = if (scaleX < 1f)
+                LocalTextStyle.current.copy(textGeometricTransform = TextGeometricTransform(scaleX = scaleX))
+            else LocalTextStyle.current,
             fontSize = size, lineHeight = size * 1.05,
             // Material3 기본 스타일(`bodyLarge`)이 딸려 보내는 0.5sp 자간은 폭 계산에 없는
             // 값이고, 글자가 작아질수록 비중이 커진다(3글자면 1.5sp) → 0으로 못 박는다.
