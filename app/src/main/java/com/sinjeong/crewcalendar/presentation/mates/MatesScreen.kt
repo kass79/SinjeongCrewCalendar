@@ -485,18 +485,25 @@ private fun EmptyHint(
 }
 
 /**
- * 셋째 줄 ★그룹 칩. 위 2행 3열 칩과 **같은 치수**(weight 1f · 32dp · 11sp)라
- * 나타났을 때 세 줄이 한 격자로 읽힌다.
+ * 동료 탭 칩 한 벌 — 2행 3열 카테고리와 셋째 줄 ★그룹이 **같은 컴포저블**을 쓴다
+ * (weight 1f · 32dp). 두 벌로 두면 한쪽만 고치는 사고가 난다.
+ *
+ * 글자 크기는 **11sp가 아니라 11dp**다(v1.6.42 ⑥). 칩 높이가 32dp로 못박혀 있어서 글자만
+ * 시스템 배율을 따라가면 넘친다 — fontScale 1.3에서 `★즐겨찾기`의 위아래가 잘렸다(에뮬 실측).
+ * `dp.toSp()`가 배율을 되나눠 주므로 글꼴 설정이 뭐든 칩 안에 그대로 들어간다.
+ * 근무 코드 칩([com.sinjeong.crewcalendar.presentation.roster.MatrixMetrics])이 칸 폭을 dp로
+ * 잡고 글자를 거기 맞추는 것과 같은 이유·같은 규칙이다.
  */
 @Composable
-private fun RowScope.FavChip(label: String, selected: Boolean, onClick: () -> Unit) {
+private fun RowScope.MatesChip(label: String, selected: Boolean, onClick: () -> Unit) {
     FilterChip(
         selected = selected,
         onClick = onClick,
         label = {
             Text(
                 label,
-                fontSize = 11.sp, maxLines = 1, softWrap = false,
+                fontSize = with(LocalDensity.current) { 11.dp.toSp() },
+                maxLines = 1, softWrap = false,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )

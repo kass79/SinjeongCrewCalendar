@@ -358,42 +358,70 @@ fun MatrixRow(
  */
 @Composable
 private fun DutyChip(text: String, bg: Color, fg: Color, m: MatrixMetrics, changed: Boolean = false) {
-    // sp ↔ dp 환산을 Density에 맡겨야 시스템 글자 크기 배율(fontScale)이 반영된다
-    val availSp = with(LocalDensity.current) { m.codeAvailW.toSp().value }
+    // ⚠ **계산은 전부 px 한 단위로 한다. sp ↔ dp를 오가면 안 된다**(v1.6.42 ⑥ — 실기기에서
+    // `휴25`·`대13`이 잘린 진짜 원인). 종전 코드는 가용폭을 `Dp.toSp()`로 sp에 바꿔 비교했는데,
+    // **API 34+의 `Dp.toSp()`는 안드로이드 14 비선형 글자배율 표를 탄다.** 큰 값일수록 배율이
+    // 작아지는 표라 31dp는 "26.3sp"로 환산되는 반면(1.18배), 글자를 실제로 그리는
+    // `TextUnit.toPx()`는 **선형**(value x fontScale x density = 1.3배)이다.
+    // 둘을 섞으면 좁은 칸을 넓다고 믿는다 →
+    //   fontScale 1.3 실측: 가용 81.4px인데 종전 계산은 89.8px짜리 글자를 그려 마지막 숫자가 잘렸다.
+    //   (여유 5%를 줘도 85.3px로 여전히 넘쳤다 — 에뮬 420dpi에서 두 번 다 확인)
+    // px로 통일하면 배율 표가 무엇이든 "그릴 폭 <= 칸 폭"이 그대로 성립한다.
+    //
+    // 0.95는 글자폭 모델(아래 units)의 오차 여유다. 실제 숫자 글리프는 0.568em이라 0.62 모델이
+    // 이미 넉넉하지만, 기기 기본 글꼴이 바뀌면 그만큼이 사라진다.
+    val d = LocalDensity.current
+    val spToPx = d.fontScale * d.density
+    val availPx = with(d) { m.codeAvailW.toPx() } * 0.95f
+    val basePx = m.codeSp.value * spToPx
     // 한글·한자는 정사각(1em), 숫자·`~`·영문은 그 절반 남짓(ExtraBold라 넉넉히 잡는다)
     val units = text.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 }.toFloat()
-    val needed = units * m.codeSp.value
-    val (size, lines) = when {
-        needed <= availSp -> m.codeSp to 1
+    val (sizePx, lines) = when {
+        units * basePx <= availPx -> basePx to 1
         // 두 줄은 **네 글자짜리 근무변경 코드**(`돌봄휴가`·`대기충당`, units 4.0)에서만 이득이다:
         // 한 줄 7.8sp vs 두 줄 9.75sp. 반면 `지대11`(units 3.24)은 한 줄 9.6sp ≈ 두 줄 9.75sp로
         // 크기가 거의 같은데 `지대`/`11`로 접히면 사용자 눈엔 "깨진 것"으로 보인다(v1.6.39 지적).
         // 그래서 경계를 3.0 → **3.6**으로 올렸다 — 3글자까지는 무조건 한 줄이다.
-        units >= 3.6f -> minOf(m.codeSp.value * 0.75f, availSp / (units / 2f)).sp to 2
-        else -> (availSp / units).sp to 1
+        // 세로 상한(칸 높이의 42%)이 없으면 fontScale이 커질 때 두 줄이 칸을 넘는다 —
+        // `돌봄휴가`가 fs 1.3에서 아랫줄이 잘렸다(v1.6.42 ⑥ 실측). 1.0에서는 기존 값(basePx*0.75)이
+        // 그대로 이겨서 종전 크기가 유지된다.
+        units >= 3.6f ->
+            minOf(basePx * 0.75f, availPx / (units / 2f), with(d) { m.cellH.toPx() } * 0.42f) to 2
+        else -> (availPx / units) to 1
     }
+    // px → sp도 **선형 역산**이다. `Float.toSp()`를 쓰면 다시 비선형 표를 타서 어긋난다.
+    val size = (sizePx / spToPx).sp
     // 자동 줄바꿈에 맡기면 `돌봄휴가`가 `돌봄휴 / 가`로 3:1이 된다 → 반씩 직접 끊는다
     val shown = if (lines == 2) text.chunked((text.length + 1) / 2).joinToString("\n") else text
-    Surface(
-        color = bg, contentColor = fg,
-        // 라운드 5dp → 알약(높이의 절반). 칸이 좁아 각진 사각형은 표가 딱딱해 보였다.
-        shape = RoundedCornerShape(percent = 50),
-        // 근무변경된 날 = 강조색 테두리(v1.6.41). 알약에 모서리 접힘은 곡선 밖으로 삐져나온다.
-        // 테두리는 칩 **안쪽**에 그려져 폭 비용 0dp — 옆 칸을 한 픽셀도 안 민다.
-        border = if (changed) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
-        modifier = Modifier.fillMaxSize(),
-    ) {
-        Box(Modifier.padding(horizontal = MatrixMetrics.CHIP_PAD_H), contentAlignment = Alignment.Center) {
-            Text(
-                shown,
-                fontSize = size, lineHeight = size * 1.05,
-                fontWeight = FontWeight.ExtraBold,
-                color = fg,
-                maxLines = lines, softWrap = lines > 1,
-                overflow = TextOverflow.Visible,
-                textAlign = TextAlign.Center,
-            )
-        }
+    // ⚠ **글자는 알약 `Surface` 안이 아니라 위에 겹쳐 그린다**(v1.6.42 ⑥).
+    // `Surface`는 shape로 내용을 잘라내는데 알약은 위아래 가장자리에서 폭이 급격히 좁아진다 —
+    // 두 줄짜리 코드(`돌봄휴가`)는 바깥 줄이 그 곡선에 걸려 잘렸다(fs 1.3 실측: 가장자리에서
+    // 좌우 7.5dp씩 먹혀 쓸 수 있는 폭이 33 → 18dp). 겹쳐 그리면 글자가 곡선을 살짝 넘어도
+    // 칸 사이 여백(1.5dp) 안이라 눈에 띄지 않고, 잘림은 사라진다.
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Surface(
+            color = bg,
+            // 라운드 5dp → 알약(높이의 절반). 칸이 좁아 각진 사각형은 표가 딱딱해 보였다.
+            shape = RoundedCornerShape(percent = 50),
+            // 근무변경된 날 = 강조색 테두리(v1.6.41). 알약에 모서리 접힘은 곡선 밖으로 삐져나온다.
+            // 테두리는 칩 **안쪽**에 그려져 폭 비용 0dp — 옆 칸을 한 픽셀도 안 민다.
+            border = if (changed) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+            modifier = Modifier.fillMaxSize(),
+            content = {},
+        )
+        Text(
+            shown,
+            modifier = Modifier.padding(horizontal = MatrixMetrics.CHIP_PAD_H),
+            fontSize = size, lineHeight = size * 1.05,
+            // Material3 기본 스타일(`bodyLarge`)이 딸려 보내는 0.5sp 자간은 폭 계산에 없는
+            // 값이고, 글자가 작아질수록 비중이 커진다(3글자면 1.5sp) → 0으로 못 박는다.
+            letterSpacing = 0.sp,
+            fontWeight = FontWeight.ExtraBold,
+            color = fg,
+            maxLines = lines, softWrap = lines > 1,
+            overflow = TextOverflow.Visible,
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -416,6 +444,7 @@ fun AutoFitText(
         text,
         modifier = modifier,
         fontSize = fit, lineHeight = fit * 1.1,
+        letterSpacing = 0.sp,
         fontWeight = FontWeight.ExtraBold,
         color = color,
         maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = align,
