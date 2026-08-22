@@ -1186,14 +1186,24 @@ internal fun DutyPickerSheet(
     // 그 카드를 누르면 여기서 둘 중 하나를 고른다 → 첫 화면이 정확히 4장.
     // CrewGroup enum은 그대로 5종 — 동료근무 섹션 구분이 살아 있어야 한다.
     var siteStep by remember { mutableStateOf(false) }
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    // **반쪽 전개 금지**(v1.6.42 ②). 종전엔 기본 `sheetState`라 내용이 화면 절반을 넘는 순간
+    // 시트가 절반 높이로 열려 1단계 마지막 카드(`통상근무 / 4조2교대`)가 접힌 채 시작했다
+    // (사용자: *"근무선택에 한번에 보이지 않아.. 맨밑에 통상근무/4조2교대 ← 까지 보이게"*).
+    // `skipPartiallyExpanded`면 시트 높이가 곧 **내용 높이**(화면 전체가 상한)라 항상 다 보인다.
+    // 상세시트가 v1.6.28부터 쓰는 방식과 같다.
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
             Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp)
                 .then(if (picker.group == null) Modifier.verticalScroll(groupScroll) else Modifier),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (picker.group == null) {
                 // 1단계: 소속 (승무 3종 + 사업소 묶음) / siteStep이면 사업소 근무형태 2종
+                // 안내문(`먼저 소속을 고르세요.`)은 지웠다 — 제목이 이미 `1/2 · 소속`이라
+                // 같은 말을 두 번 하면서 카드 한 장 값(약 18dp)을 먹고 있었다(v1.6.42 ②).
                 Text(
                     if (siteStep) "근무선택 · 근무형태" else "근무선택  1/2 · 소속",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
@@ -1201,11 +1211,6 @@ internal fun DutyPickerSheet(
                 if (siteStep) TextButton(onClick = { siteStep = false }, contentPadding = PaddingValues(0.dp)) {
                     Text("‹ 소속 다시 선택")
                 }
-                Text(
-                    if (siteStep) "근무형태를 고르세요." else "먼저 소속을 고르세요.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
                 val shown = if (siteStep) SITE_GROUPS else CrewGroup.entries.filter { it !in SITE_GROUPS }
                 shown.forEach { g ->
                     val isCurrent = g == currentGroup
@@ -1216,7 +1221,7 @@ internal fun DutyPickerSheet(
                         border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                         else CardDefaults.outlinedCardBorder(),
                     ) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(g.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text(
                                 when (g) {
@@ -1237,7 +1242,7 @@ internal fun DutyPickerSheet(
                         border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                         else CardDefaults.outlinedCardBorder(),
                     ) {
-                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp)) {
+                        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(
                                 SITE_GROUPS.joinToString(" / ") { it.label },
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold,
@@ -1276,7 +1281,7 @@ internal fun DutyPickerSheet(
                         else CardDefaults.outlinedCardBorder(),
                     ) {
                         Row(
-                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 13.dp),
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
