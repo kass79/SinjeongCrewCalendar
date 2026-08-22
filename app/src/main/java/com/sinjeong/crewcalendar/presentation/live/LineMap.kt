@@ -47,6 +47,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -54,6 +55,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -100,8 +102,14 @@ private fun inService(t: LocalTime = LocalTime.now()): Boolean {
  * 즉 배터리·API 한도 소모 범위가 **"시트가 열려 있는 동안"** 으로 확실히 갇힌다.
  * (열림/닫힘은 [DisposableEffect]가 logcat `BranchLive` 태그로 남긴다 — 실기기 확인용)
  */
+/**
+ * @param bleed 상세시트 좌우 여백을 **밖으로 되찾는 폭**(한쪽). 지도만 시트 폭에 가깝게 넓힌다
+ *   (v1.6.50 사용자: *"애뮬레이트 가로 길이는 조금 더 늘려줘"*). 역 간격이 그만큼 벌어져
+ *   열차·라벨이 겹칠 일이 준다. 여백을 얼마나 내줄 수 있는지는 **부르는 쪽만 안다** —
+ *   접힘 시트는 20dp, 펼침 패널은 10dp라 같은 값을 쓰면 패널에서 카드가 벽에 붙는다.
+ */
 @Composable
-internal fun BranchLiveMap(modifier: Modifier = Modifier) {
+internal fun BranchLiveMap(bleed: Dp = 0.dp, modifier: Modifier = Modifier) {
     var snap by remember { mutableStateOf(Snapshot()) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val scope = rememberCoroutineScope()
@@ -127,8 +135,18 @@ internal fun BranchLiveMap(modifier: Modifier = Modifier) {
         nowMillis = now,
         error = snap.error,
         onRefresh = { scope.launch { snap = BranchLive.loadSnapshot(force = true) } },
-        modifier = modifier,
+        modifier = modifier.bleedH(bleed),
     )
+}
+
+/**
+ * 부모의 좌우 여백을 [amount]만큼 **밖으로 넘어가서** 그린다(음수 padding).
+ * 차지하는 자리(부모에게 보고하는 폭)는 그대로라 위아래 형제가 밀리지 않는다.
+ */
+private fun Modifier.bleedH(amount: Dp) = if (amount <= 0.dp) this else this.layout { m, c ->
+    val extra = amount.roundToPx() * 2
+    val p = m.measure(c.copy(minWidth = c.maxWidth + extra, maxWidth = c.maxWidth + extra))
+    layout(c.maxWidth, p.height) { p.place(-extra / 2, 0) }
 }
 
 @Composable
@@ -166,7 +184,7 @@ private fun LineMapCard(
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         Box {
-            Column(Modifier.padding(vertical = 10.dp)) {
+            Column(Modifier.padding(vertical = 8.dp)) {
                 val infinite = rememberInfiniteTransition(label = "did")
                 val shimmer by infinite.animateFloat(
                     1f, 0.90f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "shimmer")
@@ -241,11 +259,12 @@ private fun LineMapCard(
                     LocalDensity provides Density(d.density, d.fontScale.coerceAtMost(1.2f))
                 ) {
                 val tm = rememberTextMeasurer()
-                // 190 → **172dp**(v1.6.49 ③ *"에뮬 크기를 조금더 작게 만들어줘"*). 아이콘이 작아지고
-                // 선로 위로 올라가면서 두 선로 사이에 필요한 여유가 줄어 그만큼 카드를 줄였다.
-                // 대신 선로 자리를 아래로 내렸다(railY 0.30 → 0.40 · bandY 0.62 → 0.68) —
-                // 열차 아이콘이 선로 **위로** 올라가므로 위쪽 여유가 그만큼 더 필요해졌다.
-                Canvas(Modifier.fillMaxWidth().height(172.dp).padding(top = 4.dp)) {
+                // 190 → 172 → **156dp**(v1.6.50). 방면 알약 두 개가 빠지면서 아래쪽 22dp가
+                // 통째로 비었고([drawPill] 제거), 아이콘([ICON_S] 0.72 → 0.60)과 방면 라벨
+                // (9 → 7.5sp)도 같이 줄어 선로 사이에 필요한 여유가 또 줄었다.
+                // 선로 자리는 **절대 위치를 그대로 두려고** 분모에 맞춰 올렸다
+                // (railY 0.40 → 0.43 = 67dp · bandY 0.68 → 0.735 = 115dp, 종전 68.8·117).
+                Canvas(Modifier.fillMaxWidth().height(156.dp).padding(top = 4.dp)) {
                     val pad = 20.dp.toPx()
                     // 역 화면 위치 = 구간 실측시간 비율(상·하행 평균). 표시만 변환(위치 계산은 0~4 유지)
                     val stFrac = floatArrayOf(0f, 0.211f, 0.485f, 0.745f, 1f)
@@ -256,8 +275,8 @@ private fun LineMapCard(
                     }
                     fun xOf(pos: Float) = pad + timeFrac(pos) * (size.width - pad * 2)
 
-                    val railY = size.height * 0.40f
-                    val bandY = size.height * 0.68f
+                    val railY = size.height * 0.43f
+                    val bandY = size.height * 0.735f
                     val railH = 7.dp.toPx()
                     val bandH = 13.dp.toPx()
                     val spacing = 30.dp.toPx()
@@ -274,7 +293,9 @@ private fun LineMapCard(
                         drawChevron(cl, railY, railH * 0.42f, Color.White.copy(alpha = 0.35f), false)
                         cl -= spacing
                     }
-                    drawPill(tm, "← 까치산 방면", 8.dp.toPx(), 11.dp.toPx(), Color(0xFFFFB3AB))
+                    // v1.6.50: 여기 있던 `← 까치산 방면` 알약을 뺐다(사용자: *"까치산 방면,
+                    // 신도림 방면 ← 텍스트 없애줘!"*). 각 열차에 `신도림행`·`까치산행`이 이미
+                    // 붙어 있고 진행 셰브런(`>`·`<`)이 방향을 그린다 — 같은 말이 세 번이었다.
 
                     // 메인 밴드 (신도림 방면 →)
                     drawRect(BandGreen, topLeft = Offset(0f, bandY - bandH / 2),
@@ -284,7 +305,6 @@ private fun LineMapCard(
                         drawChevron(cx, bandY, bandH * 0.36f, Color.White.copy(alpha = 0.5f), true)
                         cx += spacing
                     }
-                    drawPill(tm, "신도림 방면 →", 8.dp.toPx(), size.height - 12.dp.toPx(), Color(0xFF8FD6FF))
 
                     // ── 까치산 건넘선(단선): 윗선로 → 아래선로로 넘어와 까치산 단선 진입 ──
                     drawLine(BandGreen.copy(alpha = 0.5f),
@@ -404,7 +424,9 @@ private fun LineMapCard(
 
                         val dirLbl = tm.measure(
                             if (t.toSindorim) "신도림행" else "까치산행",
-                            TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold,
+                            // 9 → 7.5sp(v1.6.50 사용자: *"신도림행,까치산행 텍스트크기도 쫌 더
+                            // 줄여줘!"*). 열번([NO_SP] 9sp)보다 작아야 하는 하한이기도 하다.
+                            TextStyle(fontSize = 7.5.sp, fontWeight = FontWeight.Bold,
                                 color = (if (t.toSindorim) Color(0xFF8FD6FF) else Color(0xFFFFB3AB))
                                     .copy(alpha = alpha)))
                         // 종전 `y - 26dp`(아이콘 중심 기준 고정값)에서 **아이콘 윗변 기준**으로 바꿨다.
@@ -416,8 +438,10 @@ private fun LineMapCard(
                             lblY))
                         // 회차 배지는 종착역(까치산·신도림)에서만 — 위치 기반 절대 규칙
                         if (t.statusText.contains("회차") && (pos <= 0.2f || pos >= 3.8f)) {
+                            // 10 → 8.5sp(v1.6.50 사용자: *"회차 동그라미 조금더 줄여줘"*).
+                            // `↻` 글리프가 곧 그 동그라미라 글자 크기가 그대로 원 지름이다.
                             val tag = tm.measure("↻ 회차", TextStyle(
-                                fontSize = 10.sp, fontWeight = FontWeight.ExtraBold, color = DidYellow))
+                                fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, color = DidYellow))
                             drawText(tag, topLeft = Offset(
                                 (x - tag.size.width / 2f)
                                     .coerceIn(4.dp.toPx(), size.width - tag.size.width - 4.dp.toPx()),
@@ -487,17 +511,18 @@ private fun LineMapCard(
                     .clickable { refreshTick++; onRefresh() },
             ) {
                 // 직접 그린 새로고침 글리프 (원호 + 화살촉) — 아이콘 라이브러리 의존성 없음.
-                // 36 → 30dp(v1.6.49): 윗선로 종착(신도림)에 선 열차의 방면 라벨이 여기까지
-                // 올라와 단추에 물렸다. 카드가 짧아진 만큼 단추도 같이 줄인다(누르는 면 30dp 유지).
-                Canvas(Modifier.padding(7.dp).size(16.dp).rotate(spin)) {
+                // 36 → 30 → **26dp**(v1.6.50 사용자: *"회차 동그라미 조금더 줄여줘"* — 화면의
+                // 동그라미 둘을 같이 줄인다). **24dp 밑으로는 안 내린다** — 손가락으로 누르는
+                // 단추라 그 아래는 표준 최소 터치 타깃(48dp의 절반)마저 깨진다.
+                Canvas(Modifier.padding(6.dp).size(14.dp).rotate(spin)) {
                     val c = Color(0xFFB9F5C0)
                     drawArc(c, startAngle = -50f, sweepAngle = 290f, useCenter = false,
-                        style = Stroke(width = 2.4.dp.toPx(), cap = StrokeCap.Round))
+                        style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
                     val r = size.minDimension / 2f
                     val ang = Math.toRadians(-50.0)
                     val ax = size.width / 2f + (r * kotlin.math.cos(ang)).toFloat()
                     val ay = size.height / 2f + (r * kotlin.math.sin(ang)).toFloat()
-                    val ah = 5.dp.toPx()
+                    val ah = 4.5.dp.toPx()
                     drawPath(Path().apply {
                         moveTo(ax + ah * 0.9f, ay - ah * 0.5f)
                         lineTo(ax + ah * 0.2f, ay + ah * 0.9f)
@@ -523,16 +548,21 @@ private fun DrawScope.drawChevron(x: Float, y: Float, h: Float, color: Color, po
  *
  * **부품 치수가 전부 dp 상수라 몇 개만 줄이면 실루엣 비율이 깨진다**(굴뚝 높이는 그대로인데
  * 보일러만 작아지는 식). 그래서 [drawTrainIcon] 안의 모든 dp를 이 하나로 곱한다 —
- * 실루엣은 v1.6.44 그대로고 크기만 준다. 0.85 → **0.72**(차체 20.4 → 17.3dp).
+ * 실루엣은 v1.6.44 그대로고 크기만 준다. 0.85 → 0.72 → **0.60**(차체 20.4 → 17.3 → 14.4dp).
  *
  * ⚠ **열번만 이 배율에서 뺐다**([NO_SP]). 4자리 열번은 승무원이 자기 열차를 가려내는 정보라
- * 여기서 더 줄이면(12 × 0.72 = 8.6sp) 방면 라벨(9sp)보다 작아져 못 읽는다.
- * 알약은 열번이 안 잘리게 [drawTrainIcon]에서 열번 크기를 하한으로 잡는다.
+ * 배율에 딸려 가면(12 × 0.60 = 7.2sp) 못 읽는다. 알약은 열번이 안 잘리게 [drawTrainIcon]에서
+ * 열번 크기를 폭·높이의 하한으로 잡는다 — **0.69 아래로는 알약이 열번에 매여** 더 안 준다
+ * (0.60에서 차체폭 = 열번 22.3 + 여백 8.4 = 30.7dp > s(44) = 26.4dp).
  */
-private const val ICON_S = 0.72f
+private const val ICON_S = 0.60f
 
-/** 열번 글자 크기 — 배율과 무관한 **가독성 하한**. 역명 11.5sp > 이것 > 방면 라벨 9sp */
-private const val NO_SP = 10f
+/**
+ * 열번 글자 크기 — 배율과 무관한 **가독성 하한**. 역명 11.5sp > 이것 > 방면 라벨 7.5sp.
+ * 10 → **9sp**(v1.6.50). 방면 라벨을 7.5sp로 내린 만큼만 따라 내렸다 — 순서가 뒤집히면
+ * "내 열차가 어느 것인가"보다 "어느 쪽으로 가는가"가 커진다.
+ */
+private const val NO_SP = 9f
 
 /**
  * 열차 아이콘. [faceRight]=true는 **신도림행**(까치산→양천구청→신도림)이라
@@ -673,13 +703,3 @@ private fun DrawScope.drawTrainIcon(
     return if (faceRight) minOf(haloTop, cy - s(19f)) else haloTop
 }
 
-/** 반투명 필 배경의 방면 라벨 */
-private fun DrawScope.drawPill(tm: TextMeasurer, text: String, x: Float, cy: Float, color: Color) {
-    val l = tm.measure(text, TextStyle(fontSize = 9.sp, fontWeight = FontWeight.Bold, color = color))
-    val padH = 7.dp.toPx(); val padV = 3.dp.toPx()
-    drawRoundRect(Color.White.copy(alpha = 0.10f),
-        topLeft = Offset(x, cy - l.size.height / 2 - padV),
-        size = Size(l.size.width + padH * 2, l.size.height + padV * 2),
-        cornerRadius = CornerRadius(50f))
-    drawText(l, topLeft = Offset(x + padH, cy - l.size.height / 2f))
-}
