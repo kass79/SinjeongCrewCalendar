@@ -148,9 +148,12 @@ class MatesViewModel @Inject constructor(
  *     본선 기관사   본선 차장   신정지선
  *     4조2교대     통상근무    ★즐겨찾기
  *
- * `null` = ★즐겨찾기(저장한 동료 + 본인) = 종전 동료 탭. 나머지는 그 소속 전원 = 종전 동료근무.
- * 종전 `전체` 칩은 없앴다 — 282명을 한 번에 훑는 화면은 소속 칩으로 갈라 보는 것과 정보가 같고,
- * 칸을 2행 3열로 딱 맞추라는 요청과도 맞지 않는다.
+ * `null` = ★즐겨찾기(저장한 동료 + 본인). 나머지는 그 소속 전원.
+ *
+ * **아무 칩도 안 눌린 상태 = 전체 명단**이고 그게 진입 기본값이다(v1.6.42 ⑤ —
+ * *"동료탭에 들어가면 먼저 전체를 보여줘야지..?"*). 칩은 **필터로만** 동작한다:
+ * 누르면 그 갈래만, 눌린 칩을 다시 누르면 해제되어 전체로 돌아온다.
+ * 칸을 하나 더 만들지 않으므로 v1.6.39의 2행 3열 배치가 그대로 유지된다.
  */
 private val CATEGORY_ROWS: List<List<CrewGroup?>> = listOf(
     listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH),
@@ -165,14 +168,19 @@ private val CATEGORY_ROWS: List<List<CrewGroup?>> = listOf(
  * 사용자 눈엔 같은 화면이 둘이었다("헤더에 동료근무를 없애야 할듯").
  * → 카테고리 칩 6개(소속 5 + ★즐겨찾기)로 갈라 한 화면에 넣었다.
  * ★즐겨찾기를 고르면 그 아래에 **★그룹 하위 필터**(전체·동호회·우리 조·기타)가 한 줄 더 펼쳐진다
- * (v1.6.40 복원 — v1.6.39에서 2행 3열로 정리하며 빠졌던 것). 다른 소속 칩을 고르면 도로 접힌다.
+ * (v1.6.40 복원 — v1.6.39에서 2행 3열로 정리하며 빠졌던 것). 다른 칩을 고르면 도로 접힌다.
  *
- * 표시 범위는 **오늘부터 한 달** 고정 — v1.6.38의 "오늘~말일"을 대체한다. 말일이 가까우면
+ * **첫 화면 = 전체 명단**(v1.6.42 ⑤). 칩은 고르는 것이 아니라 **거는 것**이고, 아무것도 안 걸린
+ * 상태가 기본이다. 종전 기본값이던 ★즐겨찾기는 담은 동료가 없으면 빈 화면으로 시작했다
+ * (*"동료탭에 들어가면 먼저 전체를 보여줘야지..?"*).
+ *
+ * 표시 범위는 **구간 시작일부터 한 달** — v1.6.38의 "오늘~말일"을 대체한다. 말일이 가까우면
  * 칸이 두세 개만 남아 화면 대부분이 비던 문제를 없앤다. 대신 **달 경계를 넘으므로**:
  *  · 헤더 날짜는 달이 바뀌는 칸에 `9/1`처럼 월을 적는다([MatrixDateHeader]).
  *  · 근무변경은 두 달치를 합쳐 받는다([MatesViewModel.monthOverrides]).
- *  · **월 이동 화살표는 없앴다** — 다음 달이 이미 이 화면 안에 들어와 있고, 지나간 달은
- *    "남들과 앞으로의 근무를 비교"라는 이 화면 목적에 쓸모가 없다(과거는 달력 탭에서 본다).
+ *  · **‹ › 구간 이동**은 v1.6.39에서 지웠다가 v1.6.42 ⑦에서 되살렸다. 달(月) 이동이 아니라
+ *    구간 이동이다 — › 한 번에 `8/21~9/20` → `9/21~10/20`. 과거 방향은 오늘 구간에서 막는다
+ *    ([MatesViewModel.period]).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -182,8 +190,10 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     val liveUsers by viewModel.liveUsers.collectAsStateWithLifecycle()
     val monthOverrides by viewModel.monthOverrides.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
-    /** 선택된 카테고리. null = ★즐겨찾기 = 첫 화면 (종전 동료 탭과 같은 모습) */
+    /** 선택된 소속 칩. null = 소속 필터 없음 */
     var category by remember { mutableStateOf<CrewGroup?>(null) }
+    /** ★즐겨찾기 칩. `category`와 배타 — **둘 다 꺼져 있으면 전체 명단**(진입 기본값, v1.6.42 ⑤) */
+    var favMode by remember { mutableStateOf(false) }
     /** ★그룹 하위 필터. `null` = 전체. ★즐겨찾기를 고른 동안에만 쓰인다(셋째 줄). */
     var favFilter by remember { mutableStateOf<FavGroup?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -241,7 +251,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
         }
     }
 
-    val rows = if (category == null) {
+    val rows = if (favMode) {
         // ★즐겨찾기 = 저장한 동료 + 본인. ★그룹이 지정된 사람이 위로, 본인은 항상 맨 위
         // (내 근무가 모든 비교의 기준선이다 — ★그룹 필터를 걸어도 빠지지 않는다).
         listOfNotNull(me?.takeIf { q.isEmpty() || it.cleanName.contains(q) }) +
@@ -251,17 +261,21 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
                 .map { MatrixPerson(it.name, it.group, it.patternOffset) }
     } else {
-        roster.filter { it.group == category && (q.isEmpty() || it.name.contains(q)) }
-            .sortedWith(compareBy({ !it.isMe }, { it.key !in favKeys }, { it.name }))
+        // `category == null` = 전체(필터 없음). 한 줄로 두 경우를 다 본다 — 소속 칩은 필터일 뿐이다.
+        // 전체일 땐 소속이 섞이므로 정렬 키에 소속을 끼워 같은 소속끼리 붙여 놓는다.
+        roster.filter { (category == null || it.group == category) && (q.isEmpty() || it.name.contains(q)) }
+            .sortedWith(compareBy({ !it.isMe }, { it.key !in favKeys }, { it.group.ordinal }, { it.name }))
     }
 
     // 칩을 바꾸면 명단이 통째로 달라지는데 세로 위치는 그대로라 중간부터 보였다 — "나" 행이 화면 밖.
     // 가로(날짜) 스크롤은 헤더와 공유하는 상태라 건드리지 않는다.
     val listState = rememberLazyListState()
-    LaunchedEffect(category, favFilter) { listState.scrollToItem(0) }
-    // 소속 칩으로 옮겨 가면 셋째 줄이 사라지므로 필터도 같이 풀어 둔다 —
+    LaunchedEffect(category, favMode, favFilter) { listState.scrollToItem(0) }
+    // 구간을 옮기면 가로 위치도 처음으로 — 안 하면 › 를 눌렀는데 화면은 구간 중간부터 보인다
+    LaunchedEffect(period) { hScroll.scrollTo(0) }
+    // ★에서 나오면 셋째 줄이 사라지므로 필터도 같이 풀어 둔다 —
     // 안 풀면 ★로 돌아왔을 때 보이지 않던 필터가 걸린 채라 "동료가 없어졌다"가 된다.
-    LaunchedEffect(category) { if (category != null) favFilter = null }
+    LaunchedEffect(favMode) { if (!favMode) favFilter = null }
 
     Scaffold(
         topBar = {
@@ -325,19 +339,14 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 CATEGORY_ROWS.forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                         row.forEach { g ->
-                            FilterChip(
-                                selected = category == g,
-                                onClick = { category = g },
-                                label = {
-                                    Text(
-                                        g?.label ?: "★즐겨찾기",
-                                        fontSize = 11.sp, maxLines = 1, softWrap = false,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.fillMaxWidth(),
-                                    )
-                                },
-                                modifier = Modifier.weight(1f).height(32.dp),
-                            )
+                            // 눌린 칩을 다시 누르면 해제 = 전체로 복귀(v1.6.42 ⑤)
+                            if (g == null) MatesChip("★즐겨찾기", favMode) {
+                                favMode = !favMode
+                                if (favMode) category = null
+                            } else MatesChip(g.label, category == g) {
+                                category = if (category == g) null else g
+                                favMode = false
+                            }
                         }
                     }
                 }
@@ -349,7 +358,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             // 위 격자 밖에 두는 이유: 안에 넣으면 `spacedBy(5.dp)`가 숨어 있는 동안에도
             // 5dp를 차지해 화면이 그만큼 빈 채로 남는다.
             AnimatedVisibility(
-                visible = category == null,
+                visible = favMode,
                 enter = expandVertically(tween(180)) + fadeIn(tween(180)),
                 exit = shrinkVertically(tween(180)) + fadeOut(tween(120)),
             ) {
@@ -358,9 +367,9 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     horizontalArrangement = Arrangement.spacedBy(5.dp),
                 ) {
                     // `전체`는 인원수를 안 붙인다 — 상단바가 이미 `N명`으로 같은 말을 하고 있다.
-                    FavChip("전체", favFilter == null) { favFilter = null }
+                    MatesChip("전체", favFilter == null) { favFilter = null }
                     FavGroup.entries.forEach { g ->
-                        FavChip("${g.label} ${favCounts[g] ?: 0}", favFilter == g) { favFilter = g }
+                        MatesChip("${g.label} ${favCounts[g] ?: 0}", favFilter == g) { favFilter = g }
                     }
                 }
             }
@@ -371,7 +380,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             // `onlyMe` = ★즐겨찾기 화면에 내 행 하나만 남은 상태(담은 동료 0명 또는 ★그룹 필터가 0명).
             // **내 행은 필터와 무관하게 늘 들어 있어 `rows`가 절대 비지 않는다** — 따로 안 잡으면
             // 한 줄만 덩그러니 뜨고 아무 설명이 없다. 검색 중일 때는 제외(내가 검색에 걸린 정상 결과다).
-            val onlyMe = category == null && q.isEmpty() && rows.none { !it.isMe }
+            val onlyMe = favMode && q.isEmpty() && rows.none { !it.isMe }
             if (onlyMe || rows.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 when {
                     q.isNotEmpty() -> EmptyHint(
@@ -384,13 +393,13 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                         "이름을 눌러 뜨는 시트에서 ★그룹을 골라 담으면 여기 모입니다.",
                         "전체 보기",
                     ) { favFilter = null }
-                    category == null -> EmptyHint(
+                    favMode -> EmptyHint(
                         "아직 담은 동료가 없습니다",
-                        "위 소속 칩에서 사람을 찾아 이름을 누르면 ★로 담을 수 있습니다.\n" +
+                        "★즐겨찾기를 다시 눌러 전체 명단으로 돌아간 뒤 이름을 누르면 ★로 담을 수 있습니다.\n" +
                             "담으면 내 근무와 날짜별로 나란히 비교됩니다.",
-                        "동료 직접 추가",
-                    ) { showAdd = true }
-                    else -> EmptyHint("이 소속에 표시할 사람이 없습니다", "명단이 갱신되면 자동으로 나타납니다.")
+                        "전체 보기",
+                    ) { favMode = false }
+                    else -> EmptyHint("표시할 사람이 없습니다", "명단이 갱신되면 자동으로 나타납니다.")
                 }
             } else {
                 MatrixDateHeader(dates, m, hScroll, duty)
