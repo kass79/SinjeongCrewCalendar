@@ -922,7 +922,7 @@ private fun DayDetailContent(
             OutlinedTextField(
                 value = memo, onValueChange = { memo = it },
                 label = { Text("메모") }, modifier = Modifier.fillMaxWidth(),
-                minLines = 2,
+                minLines = 2, colors = fieldColors(),
             )
             Row(Modifier.fillMaxWidth()) {
                 // 펼침은 날짜·근무변경 줄 자체가 없으니 **이 버튼이 근무변경의 유일한 진입점**이다.
@@ -1320,7 +1320,62 @@ private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: 
     }
 }
 
-/* ── 근무변경 시트: 직접입력 / 변경없음 / 22종 평면 격자 (v1.6.42 ④) ──────────────────
+/**
+ * 텍스트 필드 공통 색 — **커서만 바꾼다**(v1.6.47, 사용자: 직접입력 커서가 잘 안 보인다).
+ *
+ * M3 기본 `cursorColor`는 `primary`인데 이 앱의 primary는 **포커스 테두리와 똑같은 초록**
+ * (라이트 `#14713F` / 다크 `#85DBA3`)이다. 2dp짜리 캐럿이 같은 색 테두리에 묻혀 "깜빡이는 게
+ * 어디 있는지" 안 보였다. 글자색(`onSurface`)으로 바꾸면 **색이 테두리와 갈리고** 대비도
+ * 배 가까이 오른다(라이트 `#191D19` 대 필드 배경 ≈16:1, 종전 초록은 ≈7:1 / 다크도 같은 방향).
+ *
+ * ⚠ 굵기는 못 바꾼다 — Compose가 캐럿 폭을 2dp로 못박아 놔서 색이 유일한 손잡이다.
+ * 메모 필드도 같은 값을 쓴다(같은 시트 안에서 커서가 두 색이면 그게 더 이상하다).
+ */
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    cursorColor = MaterialTheme.colorScheme.onSurface,
+)
+
+/**
+ * 근무변경 칩 한 칸. 1단계(13칸)와 `기타휴가` 하위(9칸)가 같은 격자를 쓴다 — 4열 고정.
+ *
+ * 항목이 22 → 13칸으로 줄어(v1.6.47 ④⑤) 칩을 조금 키웠다: 세로여백 8 → 11dp, 글자 11.5 → 12.5sp.
+ * 4글자(`대기충당`·`돌봄휴가`)가 한 줄로 들어가야 하는데 411dp 폭 기준 칸이 89dp라
+ * fs 1.3에서도(4 x 12.5 x 1.3 = 65dp) 남는다.
+ */
+@Composable
+private fun ChangeGrid(codes: List<String>, selected: String?, onPick: (String) -> Unit) {
+    val duty = LocalDutyColors.current
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(4),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
+        horizontalArrangement = Arrangement.spacedBy(5.dp),
+        // 상한은 안전장치일 뿐 실제로는 안 걸린다(13칸 4줄) — 걸려도 격자만 따로 스크롤된다
+        modifier = Modifier.heightIn(max = 480.dp),
+    ) {
+        items(codes.size) { i ->
+            val code = codes[i]
+            // 묶음 이름은 근무코드가 아니라 parse가 ETC(투명)로 떨군다 → 화면에서만 휴가색으로 고정
+            val ct = if (code == DutyCode.ETC_GROUP) DutyType.REST else DutyCode.parse(code).colorType
+            val (bg, fg) = dutyCellColors(ct, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+            Surface(
+                onClick = { onPick(code) },
+                color = bg, contentColor = fg,
+                shape = RoundedCornerShape(9.dp),
+                border = if (code == selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
+            ) {
+                Text(
+                    code,
+                    modifier = Modifier.padding(vertical = 11.dp, horizontal = 2.dp).fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                    fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/* ── 근무변경 시트: 직접입력 / 변경없음 / 13종 평면 격자 (v1.6.42 ④ → v1.6.47 ④⑤) ────────
 
    v1.6.40의 휴가 3묶음 아코디언을 **걷어냈다.** 사용자: *"근무변경에 들어가도 한번에 보이지 않네..?
    연차,대휴 누르면 내려가버리네? 불편하네?"* — 접기는 두 가지를 동시에 어겼다.
@@ -1329,10 +1384,14 @@ private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: 
       (기본 `sheetState`는 내용이 화면 절반을 넘으면 PartiallyExpanded에서 시작한다. 실측:
       1080x2400·420dpi에서 시트 상단 y=1200px = 정확히 절반, 마지막 줄과 `닫기`가 잘림).
 
-   → `skipPartiallyExpanded` + **22종 평면 4열**. 4열이면 6줄, 칩 세로여백 10→8dp로 격자가
-   211dp(fs 1.0)·253dp(fs 1.3)라 시트 전체가 465dp(fs 1.0)·530dp(fs 1.3) — 914dp 화면에 다 들어온다.
-   접기가 없으니 **어느 칩을 눌러도 레이아웃이 움직이지 않는다**(충당 계열만 같은 자리에서 화면이
-   통째로 다이아 선택으로 교체된다 — 원래부터 그랬다). 저장값은 종전 그대로 하위 코드다(`촉연`→`촉연`). */
+   → `skipPartiallyExpanded` + **평면 4열**. 접기가 없으니 **어느 칩을 눌러도 레이아웃이 움직이지 않는다.**
+
+   **v1.6.47: 1단계가 13칸으로 줄었다**(`DutyCode.CHANGE_TOP`).
+    · `비번` 제거(⑤ 사용자: *"근무변경에 비번은 없어도 될꺼같은데?"*).
+    · 잘 안 쓰는 휴가 9종을 `기타휴가` 한 칸으로 접음(④).
+   ⚠ **④는 v1.6.40 아코디언의 부활이 아니다.** 아코디언은 펼침이 아래 내용을 밀어내서 거부당했다.
+   여기서 쓰는 건 충당 계열이 v1.6.25부터 쓰던 **같은 자리 화면 통째 교체**다 — 시트 높이도,
+   누른 칩의 자리도 안 움직인다. 저장값은 종전 그대로 하위 코드다(`촉연`→`촉연`). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DutyChangeSheet(
@@ -1341,13 +1400,14 @@ private fun DutyChangeSheet(
     onRevert: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val duty = LocalDutyColors.current
     var manualMode by remember { mutableStateOf(false) }
     var manualText by remember { mutableStateOf("") }
-    // 충당·대기충당·교체는 "그 다이아를 대신 뛰는 근무"라 다이아를 함께 받는다 → 소속 → 다이아 2단계.
+    // 충당·대기충당·교체·지근은 "그 다이아를 뛰는 근무"라 다이아를 함께 받는다 → 소속 → 다이아 2단계.
     // 시트를 닫았다 열면 remember가 초기화돼 다시 목록부터 시작한다.
     var fillFor by remember { mutableStateOf<String?>(null) }
     var fillGroup by remember { mutableStateOf<CrewGroup?>(null) }
+    // 기타휴가 묶음 화면(v1.6.47 ④) — 충당 흐름과 같은 "같은 자리 화면 교체"
+    var etcMode by remember { mutableStateOf(false) }
     val dateLabel = day.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
     val originalLabel = DutyCode.parse(day.originalDutyRaw ?: day.duty.raw).display
 
@@ -1380,7 +1440,7 @@ private fun DutyChangeSheet(
                 contentPadding = PaddingValues(0.dp),
             ) { Text(if (fillGroup != null) "‹ 소속 다시 선택" else "‹ 근무변경 다시 선택") }
             Text(
-                "대신 뛰는 다이아를 고르면 출근시각·행로표·열번이 그 다이아 기준으로 나옵니다.",
+                "뛰는 다이아를 고르면 출근시각·행로표·열번이 그 다이아 기준으로 나옵니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1412,6 +1472,25 @@ private fun DutyChangeSheet(
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }
             return@Column
         }
+        // 기타휴가 묶음(v1.6.47 ④). 충당 흐름과 **같은 모양**으로 화면을 통째로 갈아 끼운다 —
+        // 아코디언처럼 아래 내용을 밀어내지 않으므로 v1.6.42에서 거부당한 문제가 재발하지 않는다.
+        if (etcMode) {
+            Text(
+                "기타휴가 · 선택",
+                style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+            )
+            TextButton(onClick = { etcMode = false }, contentPadding = PaddingValues(0.dp)) {
+                Text("‹ 근무변경 다시 선택")
+            }
+            Text(
+                "자주 쓰지 않는 휴가 9종입니다. 고르면 그대로 저장됩니다.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ChangeGrid(DutyCode.CHANGE_ETC, day.duty.raw, onChange)
+            TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }
+            return@Column
+        }
             Text(
                 "근무변경  $dateLabel 하루만 · 패턴 유지",
                 style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
@@ -1430,6 +1509,7 @@ private fun DutyChangeSheet(
                         value = manualText, onValueChange = { manualText = it },
                         placeholder = { Text("예: 지7, 45, 대2, 회의") },
                         modifier = Modifier.weight(1f), singleLine = true,
+                        colors = fieldColors(),
                     )
                     Button(onClick = { if (manualText.isNotBlank()) onChange(manualText.trim()) }) { Text("적용") }
                 }
@@ -1442,40 +1522,18 @@ private fun DutyChangeSheet(
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            // 22종 평면 4열 6줄. `heightIn` 상한은 안전장치일 뿐 실제로는 안 걸린다
-            // (fs 1.3에서도 약 253dp) — 걸리면 격자만 따로 스크롤되므로 화면이 깨지지는 않는다.
-            val options = DutyCode.CHANGE_OPTIONS
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
-                verticalArrangement = Arrangement.spacedBy(5.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
-                modifier = Modifier.heightIn(max = 480.dp),
-            ) {
-                items(options.size) { i ->
-                    val code = options[i]
-                    val (bg, fg) = dutyCellColors(
-                        DutyCode.parse(code).colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Surface(
-                        // 충당 계열은 바로 확정하지 않고 다이아 선택 단계로 넘어간다
-                        onClick = {
-                            if (code in DutyCode.FILL_OPTIONS) { fillFor = code; fillGroup = null }
-                            else onChange(code)
-                        },
-                        color = bg, contentColor = fg,
-                        shape = RoundedCornerShape(9.dp),
-                        border = if (code == (day.duty.fill ?: day.duty.raw))
-                            BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
-                    ) {
-                        // 4글자(`대기충당`·`돌봄휴가`)까지 한 줄로 들어가야 해서 12.5 → 11.5sp.
-                        // 411dp 폭 기준 칸이 89dp라 fs 1.3에서도(4 x 11.5 x 1.3 = 60dp) 남는다.
-                        Text(
-                            code,
-                            modifier = Modifier.padding(vertical = 8.dp, horizontal = 2.dp).fillMaxWidth(),
-                            textAlign = TextAlign.Center,
-                            fontSize = 11.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
-                        )
-                    }
+            // 1단계 13칸(4열 4줄). 저장된 게 기타휴가 9종 중 하나면 **묶음 칩**에 선택 테두리가 걸린다
+            // — 안 그러면 어디에 들어 있는지 화면에서 알 길이 없다.
+            val cur = day.duty.fill ?: day.duty.raw
+            ChangeGrid(
+                DutyCode.CHANGE_TOP,
+                if (cur in DutyCode.CHANGE_ETC) DutyCode.ETC_GROUP else cur,
+            ) { code ->
+                when {
+                    code == DutyCode.ETC_GROUP -> etcMode = true
+                    // 충당 계열·지근은 바로 확정하지 않고 소속 → 다이아 선택 단계로 넘어간다
+                    code in DutyCode.FILL_OPTIONS -> { fillFor = code; fillGroup = null }
+                    else -> onChange(code)
                 }
             }
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }

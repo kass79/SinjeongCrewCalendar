@@ -974,15 +974,104 @@ class PatternTest {
      */
     @Test fun changeOptions_are_all_real_codes_and_unique() {
         val opts = DutyCode.CHANGE_OPTIONS
-        assertEquals(22, opts.size)                       // 4열 6줄
+        assertEquals(21, opts.size)                       // v1.6.47 ⑤ `비번` 제거로 22 → 21
         assertEquals(opts.size, opts.toSet().size)        // 중복 없음
-        assertTrue("기타휴가" !in opts)                    // 묶음 이름은 코드가 아니다 → 목록에도 없다
+        assertTrue(DutyCode.ETC_GROUP !in opts)           // 묶음 이름은 코드가 아니다 → 목록에도 없다
         // 고르면 그 문자열이 그대로 저장·재파싱된다
         opts.forEach { assertEquals(it, it, DutyCode.parse(it).raw) }
         // 휴가 계열은 전부 옅은 붉은색(REST, v1.6.23) — 야간 보라로 새지 않는다
         listOf("연차", "촉연", "가연차", "대휴", "보상", "장휴", "학습", "만휴",
                "청휴", "돌봄휴가", "동행휴가", "병가", "공가")
             .forEach { assertEquals(it, DutyType.REST, DutyCode.parse(it).colorType) }
+    }
+
+    /**
+     * v1.6.47 ④ — `기타휴가` 묶음. **1단계 목록은 파생이라 항목을 잃을 수 없다**는 것이 요점이다
+     * (v1.6.40에서 목록을 두 벌로 두면 한쪽만 고치는 사고가 난다고 못 박은 그 규칙).
+     * 묶음 이름 자체는 저장될 수 없고, 하위 9종은 전부 진짜 근무코드다.
+     */
+    @Test fun etcLeaveGroup_folds_nine_codes_without_losing_any() {
+        val top = DutyCode.CHANGE_TOP
+        assertEquals(13, top.size)                              // 4열 4줄, 스크롤 없이 한 화면
+        assertEquals(DutyCode.ETC_GROUP, top.last())            // 묶음 칩은 맨 끝 한 칸
+        assertEquals(top.size, top.toSet().size)
+        // 접힌 9종은 1단계에 없고, 1단계 + 하위 = 고를 수 있는 전부 (잃은 항목 0)
+        assertTrue(DutyCode.CHANGE_ETC.none { it in top })
+        assertEquals(
+            DutyCode.CHANGE_OPTIONS.toSet(),
+            (top - DutyCode.ETC_GROUP).toSet() + DutyCode.CHANGE_ETC,
+        )
+        // 하위는 전부 실제 근무코드 = 고르면 그대로 저장된다. 묶음 이름은 코드가 아니다
+        DutyCode.CHANGE_ETC.forEach {
+            assertTrue(it, it in DutyCode.CHANGE_OPTIONS)
+            assertEquals(it, DutyType.REST, DutyCode.parse(it).colorType)
+        }
+        assertTrue(DutyCode.ETC_GROUP !in DutyCode.CHANGE_OPTIONS)
+        // 순서 보존: 1단계는 CHANGE_OPTIONS 순서 그대로다
+        assertEquals(DutyCode.CHANGE_OPTIONS.filter { it in top }, top - DutyCode.ETC_GROUP)
+    }
+
+    /**
+     * v1.6.47 ⑤ — `비번` 제거(사용자: *"근무변경에 비번은 없어도 될꺼같은데?"*).
+     * **고를 수만 없고 파싱·표시는 그대로**여야 한다. 야간 다이아 다음날 자동으로 붙는 값이라
+     * 여기가 깨지면 밤샘 근무 익일 칸이 통째로 사라진다. `작연차`(v1.6.41)와 같은 처리다.
+     */
+    @Test fun retiredCode_bibeon_is_unpickable_but_still_parses() {
+        assertTrue("비번" !in DutyCode.CHANGE_OPTIONS)      // 시트 목록의 유일한 출처
+        assertTrue("비번" !in DutyCode.CHANGE_TOP)
+        assertTrue("비번" !in DutyCode.CHANGE_ETC)
+        assertEquals(DutyType.POST_NIGHT, DutyCode.parse("비번").type)
+        assertEquals(DutyType.POST_NIGHT, DutyCode.parse("비번").colorType)  // 보라 유지(v1.6.21)
+        assertEquals("~", DutyCode.parse("비번").display)
+        // 자동 비번의 진짜 경로(교번 순환의 `44비`)는 애초에 이 목록과 무관하다
+        assertEquals(DutyType.POST_NIGHT, DutyCode.parse("44비").type)
+        assertTrue(DutyCode.parse("44").isOvernight)
+    }
+
+    /**
+     * v1.6.47 ③ — `지근`(**지정근무**)도 다이아를 고를 수 있다.
+     * 사용자: *"근무변경에서 지근은 다이아 선택이 없네?"* / *"지근은 지선이 아니고 지정근무야~
+     * 어떤 근무가 선택될지 몰라!"* → 지선 전용이 아니라 충당 계열과 **같은** 소속 → 다이아 흐름.
+     *
+     * ⚠ 핵심은 **색이 노랑으로 새지 않는 것**이다. `colorType`이 `fill != null`로 갈렸다면
+     * 다이아를 고른 순간 지근이 대기 노랑으로 돌변했다 — 노랑 강제는 충당 3종에만 걸린다.
+     */
+    @Test fun jigeun_takes_a_dia_but_never_turns_standby_yellow() {
+        assertTrue("지근" in DutyCode.FILL_OPTIONS)
+
+        val branch = DutyCode.parse("지근 지2")
+        assertEquals("지근", branch.fill)
+        assertEquals("지2", branch.diaRaw)                  // 행로표·편승알람 조회 키
+        assertEquals(DutyType.BRANCH, branch.type)
+        assertEquals(DutyType.BRANCH, branch.colorType)     // ⚠ 노랑 아님
+        assertEquals("지근\n지2", branch.gridLabel)
+        assertTrue(branch.isBranch)
+
+        // 본선 다이아도 그대로 — 지정근무는 어느 소속이 지정될지 모른다
+        val night = DutyCode.parse("지근 34")
+        assertEquals("34", night.diaRaw)
+        assertEquals(DutyType.MAIN_NIGHT, night.type)
+        assertEquals(DutyType.MAIN_NIGHT, night.colorType)  // 고른 다이아의 제 색
+        assertTrue(night.isOvernight)                       // 익일 자동 비번이 따라온다
+        assertEquals("지근\n34", night.gridLabel)
+        val weekday = LocalDate.of(2026, 8, 18)
+        assertEquals(
+            Bundled.signOn(DutyCode.parse("34"), weekday),
+            Bundled.signOn(night, weekday),
+        )
+
+        // 옛 데이터 호환: 단독 `지근`은 한 글자도 안 바뀐다
+        val bare = DutyCode.parse("지근")
+        assertEquals(null, bare.fill)
+        assertEquals(DutyType.BRANCH, bare.type)
+        assertEquals(DutyType.BRANCH, bare.colorType)
+        assertEquals(bare.display, bare.gridLabel)          // 한 줄 그대로
+        // 깨진 다이아가 붙어도 지근의 타입으로 떨어진다(대기 노랑으로 새지 않는다)
+        assertEquals(DutyType.BRANCH, DutyCode.parse("지근 없는다이아").colorType)
+
+        // 충당 3종은 종전대로 노랑
+        listOf("충당 9", "대기충당 지3", "교체 45")
+            .forEach { assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).colorType) }
     }
 
     /**
