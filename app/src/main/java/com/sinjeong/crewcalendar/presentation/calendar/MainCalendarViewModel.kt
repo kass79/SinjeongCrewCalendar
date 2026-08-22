@@ -75,15 +75,8 @@ class MainCalendarViewModel @Inject constructor(
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /**
-     * 달력 위 **오늘 카드** 전용 근무 목록. 보고 있는 달([days])과 따로 두는 이유는 두 가지다:
-     *  · 다른 달을 넘겨봐도 카드는 계속 오늘을 보여야 한다(카드가 사라지면 달력 칸 높이가 튄다).
-     *  · 오늘 출근시각을 지나면 카드가 **내일**로 넘어가는데, 31일이면 내일이 다음 달이다
-     *    → 두 달치를 합쳐 둔다(동료 탭 `monthOverrides`와 같은 이유·같은 방식).
-     */
-    val cardDays: StateFlow<List<DaySchedule>> = YearMonth.now().let { m ->
-        combine(getMonthSchedule(m), getMonthSchedule(m.plusMonths(1))) { a, b -> a + b }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    // 달력 위 오늘 카드 전용 `cardDays`(오늘·다음달 두 달치 합본)는 카드와 함께 v1.6.45에서 제거.
+    // 되살리려면 `git show da7cacf`.
 
     val uiState: StateFlow<CalendarUiState> = combine(
         month, days, userRepo.observeMe(), selectedDate, picker, changeDate, error,

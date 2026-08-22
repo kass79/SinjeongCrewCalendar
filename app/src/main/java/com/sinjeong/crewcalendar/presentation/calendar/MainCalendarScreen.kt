@@ -55,7 +55,6 @@ import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
-import com.sinjeong.crewcalendar.presentation.roster.AutoFitText
 import com.sinjeong.crewcalendar.presentation.roster.changedCorner
 import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
@@ -65,7 +64,6 @@ import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WeatherCell
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.widget.DeadheadAlarm
-import com.sinjeong.crewcalendar.widget.focusDate
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -88,7 +86,6 @@ fun MainCalendarScreen(
     viewModel: MainCalendarViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val cardDays by viewModel.cardDays.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
@@ -186,16 +183,6 @@ fun MainCalendarScreen(
         Row(Modifier.padding(padding).fillMaxSize()) {
             // 펼침 비율 50:50 — "폴더 펼쳤을 때 화면 반반"(v1.6.11 사용자 선택). v1.6.10은 38:62
             Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
-                TodayCard(
-                    days = cardDays,
-                    onOpenDay = { d ->
-                        // 다른 달을 보고 있어도 카드를 누르면 그 날로 데려간다.
-                        // (31일 밤이면 카드가 가리키는 "내일"이 다음 달이라 goToday로는 못 간다)
-                        val gap = ChronoUnit.MONTHS.between(state.month, YearMonth.from(d))
-                        if (gap != 0L) viewModel.moveMonth(gap)
-                        if (wide) panelEpochDay = d.toEpochDay() else viewModel.selectDate(d)
-                    },
-                )
                 WeekdayHeader()
 
                 if (state.isLoading) {
@@ -236,7 +223,6 @@ fun MainCalendarScreen(
                     DayDetailContent(
                         day = day,
                         onSaveMemo = { viewModel.saveMemo(day.date, it) },
-                        onPickDuty = { viewModel.openDutyPicker(day.date) },
                         onChangeDuty = { viewModel.openDutyChange(day.date) },
                         onRevert = { viewModel.changeDuty(day.date, null) },
                         onClose = { panelEpochDay = null },
@@ -285,7 +271,6 @@ fun MainCalendarScreen(
                 DayDetailContent(
                     day = day,
                     onSaveMemo = { viewModel.saveMemo(date, it) },
-                    onPickDuty = { viewModel.openDutyPicker(date) },
                     onChangeDuty = { viewModel.openDutyChange(date) },
                     onRevert = { viewModel.changeDuty(date, null) },
                     onClose = { viewModel.selectDate(null) },
@@ -325,95 +310,12 @@ fun MainCalendarScreen(
     }
 }
 
-/* ── 달력 위 오늘 카드 ───────────────────────────────── */
-
-/**
- * 달력 맨 위 한 줄 카드 — **`오늘 · 9 다이아 · 출근 7:02` + 편승/출고 알람 칩**.
- *
- * ### 왜 다시 넣었나 (v1.6.33에서 지운 것을 v1.6.41에서 되살림)
- * 앱을 여는 이유의 대부분이 "오늘/내일 뭐지?"인데 31칸에서 오늘을 눈으로 찾아야 했다.
- * 종전에 지운 이유는 **공간**이었고, 그 뒤 상단바 64→44dp·탭바 80→56dp로 40dp를 벌었다.
- * 그래도 달력을 최대로 두는 원칙은 그대로라 **높이 44dp 한 줄**로 못박는다(실측은 project-notes).
- *
- * ### 중복 구현 금지
- *  · 오늘/내일 판단은 위젯과 **같은 함수**([focusDate])다. 두 벌로 두면 위젯은 내일인데
- *    카드는 오늘인 상태가 난다.
- *  · 편승 시각·알람 예약은 상세시트와 **같은 컴포저블**([DeadheadAlarmChip])이다. 시각 계산은
- *    [BundledTimetable.advise] 한 곳뿐이고, 예약·권한·되돌리기 로직도 그대로 따라온다.
- *  · 그래서 알람이 없는 근무(대기·야간 후반 등)는 칩이 스스로 `알람없음`으로 뜨고 사유는 칩을
- *    눌렀을 때 나온다 — 여기서 다시 판단하지 않는다.
- *
- * 오늘 칸이 이미 화면에 보여도 중복이 아니다: 칸은 다이아·출근시각까지고, **편승 시각과
- * 알람 예약 버튼은 여기에만** 있다(칸에서는 날짜를 눌러 시트를 열어야 나온다).
- *
- * 첫 실행 유도(v1.6.41 ⑤ — 시트 자동 오픈 + 안내 배너)는 **v1.6.42에서 걷어냈다**.
- * 사용자: *"소속과 근무를 골라주세요 ← 이거 한번 없어도 될듯! 헤더에 근무선택하니까.."*
- * 헤더의 `근무선택` 버튼이 그 자리를 대신한다.
- */
-@Composable
-private fun TodayCard(
-    days: List<DaySchedule>,
-    onOpenDay: (LocalDate) -> Unit,
-) {
-    val today = LocalDate.now()
-    val byDate = remember(days) { days.associateBy { it.date } }
-    val date = focusDate(today, byDate[today]?.signOn)
-    val day = byDate[date]
-
-    Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        shape = RoundedCornerShape(10.dp),
-        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 4.dp),
-    ) {
-        Row(
-            Modifier.height(40.dp).padding(start = 12.dp, end = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (day == null) {
-                Text(
-                    "근무를 불러오는 중…",
-                    modifier = Modifier.weight(1f),
-                    fontSize = 12.5.sp, fontWeight = FontWeight.Bold,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-                return@Row
-            }
-            // 긴 문구("내일 · 대기충당 지3 다이아 대행 · 출근 9:00")도 칩을 밀지 않게 자동 축소
-            AutoFitText(
-                todayLine(if (date == today) "오늘" else "내일", day),
-                base = 13.sp, min = 9.sp,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.weight(1f).clickable { onOpenDay(date) },
-            )
-            // 시각이 있는 근무에만 붙는다 — 상세시트와 같은 조건(비번·휴무는 줄 자체가 없다)
-            if (Bundled.timeRowFor(day.duty, date) != null) {
-                DeadheadAlarmChip(date, day.duty, second = false)
-            }
-        }
-    }
-}
-
-/** 카드 한 줄 문구. `~`(비번)처럼 달력 칸에서만 통하는 한 글자는 여기서 풀어 쓴다 */
-private fun todayLine(head: String, day: DaySchedule): String {
-    val d = day.duty
-    val isDia = d.type in setOf(
-        DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT,
-    )
-    val label = when {
-        d.type == DutyType.POST_NIGHT -> "비번"
-        d.raw.isBlank() -> "근무 없음"
-        else -> d.displayLong
-    } + if (isDia) (if (d.fill != null) " 다이아 대행" else " 다이아") else ""
-    val tail = when {
-        day.signOn != null -> "출근 ${day.signOn}"
-        d.type == DutyType.POST_NIGHT || d.isRest -> "쉬는 날"
-        // 휴일 운휴 다이아(본선 주간 26~29) — 달력 칸이 쓰는 판단과 같다
-        d.isWorkDay && d.number != null && Bundled.isHolidayTimetable(day.date) -> "운휴"
-        else -> null
-    }
-    return listOfNotNull(head, label, tail).joinToString(" · ")
-}
+/* ── 달력 위 오늘 카드 = **v1.6.45에서 제거**(사용자: "내일 다이아 출근 헤드 위쪽에 있는거 없어도
+      될듯 중복이야..") ─────────────────────────────────
+   요일 헤더 바로 위에 있던 한 줄 카드(`오늘 · 9 다이아 · 출근 7:02` + 편승 알람 칩)다. 달력 칸이
+   이미 다이아·출근시각을 보여줘서 같은 정보가 두 번 나왔다. 편승 알람 칩은 상세시트에 그대로 있다.
+   되살리려면 `git show da7cacf` — `TodayCard`/`todayLine` 컴포저블과 `MainCalendarViewModel.cardDays`,
+   그리고 여기서 호출 한 줄이면 된다(달력이 44dp 다시 좁아진다). `focusDate`는 위젯이 계속 쓴다. */
 
 /* ── 앱바 휴일갯수 칩 (작고 옅게) ─────────────────────── */
 @Composable
@@ -762,7 +664,6 @@ private fun DayCell(
 private fun DayDetailContent(
     day: DaySchedule,
     onSaveMemo: (String) -> Unit,
-    onPickDuty: () -> Unit,
     onChangeDuty: () -> Unit,
     onRevert: () -> Unit,
     onClose: () -> Unit,
@@ -773,51 +674,44 @@ private fun DayDetailContent(
     var memo by remember(day.date) { mutableStateOf(day.memo) }
     val row = Bundled.timeRowFor(day.duty, day.date)
     val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
-    val (chipBg, chipFg) = dutyCellColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
-    val isDia = day.duty.type in setOf(DutyType.MAIN_DAY, DutyType.MAIN_NIGHT, DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
     Column(
         modifier.padding(horizontal = if (compact) 20.dp else 10.dp).padding(bottom = 28.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-            // 펼침 패널은 날짜·근무칩 줄 생략 — 행로표에 폭/높이를 몰아준다
+            // 펼침 패널은 이 줄 자체를 생략 — 행로표에 폭/높이를 몰아준다
+            //
+            // v1.6.45: 근무칩("1 Dia")·지선칩을 뺐다(사용자: *"근무선택해서 들어가면 헤드 정보는
+            // 없어도 될듯? 1  dia 지선 <- 이런거.."*). 달력 칸에서 그 칸을 눌러 들어온 것이라
+            // 어느 다이아인지는 이미 알고 온다. 칩 둘이 빠지면서 남은 `근무변경`을 여기 날짜 줄
+            // 오른쪽으로 합쳐 한 줄을 통째로 아꼈다.
             if (compact) {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
-                        style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
-                    )
-                    (day.holidayName ?: day.memorialName)?.let {
-                        Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold, color = duty.sunday)
-                    }
-                    day.seasonalTerm?.let {
-                        Text(it, style = MaterialTheme.typography.labelSmall, color = duty.onStandby)
-                    }
-                }
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(10.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         Text(
-                            buildString {
-                                append(day.duty.displayLong.ifBlank { "근무 없음" })
-                                // "충당 9 다이아 대행" — 대신 뛰는 다이아라는 걸 시트에서 못 놓치게
-                                if (isDia) append(if (day.duty.fill != null) " 다이아 대행" else " Dia")
-                                combo?.let { append(" (${it.label})") }
-                            },
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                            fontWeight = FontWeight.ExtraBold, fontSize = 15.sp,
+                            day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
+                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1,
                         )
+                        (day.holidayName ?: day.memorialName)?.let {
+                            Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold,
+                                color = duty.sunday, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        day.seasonalTerm?.let {
+                            Text(it, style = MaterialTheme.typography.labelSmall, color = duty.onStandby,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
                     }
-                    if (day.duty.isBranch) Surface(color = duty.branch, contentColor = duty.onBranch, shape = RoundedCornerShape(6.dp)) {
-                        Text("지선", fontSize = 10.sp, fontWeight = FontWeight.ExtraBold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
-                    }
-                    Spacer(Modifier.weight(1f))
                     Surface(
                         onClick = onChangeDuty,
                         color = duty.standby, contentColor = duty.onStandby,
                         shape = RoundedCornerShape(999.dp),
                     ) {
-                        Text("근무변경", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                        Text("근무변경", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp))
                     }
                 }
@@ -1004,9 +898,10 @@ private fun DayDetailContent(
                 minLines = 2,
             )
             Row(Modifier.fillMaxWidth()) {
-                // 펼침은 상단 근무변경 칩이 없으니 왼쪽 버튼이 그 자리를 대신한다
-                if (compact) OutlinedButton(onClick = onPickDuty) { Text("근무선택") }
-                else OutlinedButton(onClick = onChangeDuty) { Text("근무변경") }
+                // 펼침은 날짜·근무변경 줄 자체가 없으니 **이 버튼이 근무변경의 유일한 진입점**이다.
+                // 접힘의 `근무선택` 버튼은 v1.6.45에서 뺐다(사용자: *"근무변경과 근무선택 중복 아니야?"*) —
+                // 날짜 줄 오른쪽 `근무변경` 칩과 앱바 `근무선택` 버튼이 각각 그 자리를 대신한다.
+                if (!compact) OutlinedButton(onClick = onChangeDuty) { Text("근무변경") }
                 Spacer(Modifier.weight(1f))
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     TextButton(onClick = { onSaveMemo(""); onClose() }) { Text("삭제") }
