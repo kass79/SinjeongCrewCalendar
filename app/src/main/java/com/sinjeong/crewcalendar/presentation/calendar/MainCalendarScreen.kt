@@ -963,9 +963,12 @@ private fun DayDetailContent(
             // 대기 근무에 "알람 없음" 칩이 두 개 겹쳐 뜨는 걸 막는다.
             if (row != null) {
                 val hasSecond = mainLegs != null || branchLegs != null
+                // v1.6.42 ③ — 오른쪽 정렬(Alignment.End)에서 왼쪽으로. 사용자: *"전반알람 아이콘을
+                // 왼쪽으로 위치를 변경해"*. 칩 안에서 아이콘은 이미 글자 왼쪽이었고, 오른쪽에 붙어
+                // 있던 건 칩 줄 자체였다.
                 FlowRow(
                     Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.End),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     DeadheadAlarmChip(day.date, day.duty, second = false)
@@ -1080,15 +1083,20 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
         },
         border = if (!disabled && !on) BorderStroke(1.5.dp, accent) else null,
     ) {
+        // v1.6.42 ③ — 두 단계 축소. 글자 12→9 / 아이콘 18→13 / 패딩 10·6→7·4 / 간격 5→3.5dp.
+        // 눌리는 영역은 안 줄어든다: 클릭 가능한 M3 `Surface`가 minimumInteractiveComponentSize(48dp)를
+        // 스스로 얹기 때문에 칩 그림만 작아지고 손가락이 닿는 넓이는 그대로다.
+        // **아이콘은 원래부터 글자 왼쪽**이다(이 Row의 첫 자식) — 사용자가 말한 "왼쪽으로"는
+        // 상세시트에서 칩 줄이 오른쪽 끝에 붙어 있던 것이라 [DayDetailContent]의 정렬을 바꿨다.
         Row(
-            Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            horizontalArrangement = Arrangement.spacedBy(3.5.dp),
         ) {
             Image(
                 painterResource(if (second) R.drawable.ic_deadhead_second else R.drawable.ic_deadhead_first),
                 if (advice.depot) "$half 기지 출고 알람" else "$half 편승 알람",
-                Modifier.size(18.dp),
+                Modifier.size(13.dp),
                 alpha = if (disabled) 0.5f else 1f,
             )
             Text(
@@ -1098,7 +1106,7 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
                     on -> "$tag ${hm(at)} 예약"
                     else -> "$tag ${hm(at)}"
                 },
-                fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
             )
         }
     }
