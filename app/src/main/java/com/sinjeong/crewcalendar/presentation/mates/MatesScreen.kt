@@ -16,10 +16,13 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,10 +39,15 @@ import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.presentation.roster.*
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
@@ -50,8 +58,19 @@ import javax.inject.Inject
 class MatesViewModel @Inject constructor(
     private val mateRepo: MateRepository,
     userRepo: UserRepository,
-    rosterRepo: RosterRepository,
+    private val rosterRepo: RosterRepository,
 ) : ViewModel() {
+    /**
+     * 보고 있는 구간 = **오늘부터 한 달**을 0으로 두고 한 달씩 민 값(v1.6.42 ⑦).
+     * v1.6.39에서 월 이동 화살표를 없앴는데 사용자가 다시 요청했다:
+     * *"한달보여주는건 좋은데 다음달 넘어가는 기능이 없네?"*
+     * 달(月) 단위가 아니라 **구간** 단위다 — 1이면 9/21~10/20처럼 오늘 날짜를 유지한 채 밀린다.
+     * 0 아래로는 안 간다(*"과거는 필요 없다"* — 지난 근무는 달력 탭에서 본다).
+     */
+    private val _period = MutableStateFlow(0)
+    val period: StateFlow<Int> = _period.asStateFlow()
+
+    fun movePeriod(delta: Int) { _period.update { (it + delta).coerceAtLeast(0) } }
     val mates: StateFlow<List<Mate>> = mateRepo.observeMates()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -72,12 +91,17 @@ class MatesViewModel @Inject constructor(
      * 달이 바뀌는 순간은 신경 쓰지 않는다. 화면의 `today`도 진입 시점에 고정되므로
      * 자정을 넘겨 앱을 계속 켜 두면 둘이 같이 하루 낡을 뿐 서로 어긋나지는 않는다.
      */
-    val monthOverrides: StateFlow<Map<String, Map<LocalDate, String>>> = combine(
-        rosterRepo.observeMonthOverrides(YearMonth.now()),
-        rosterRepo.observeMonthOverrides(YearMonth.now().plusMonths(1)),
-    ) { thisMonth, nextMonth ->
-        (thisMonth.keys + nextMonth.keys).associateWith {
-            (thisMonth[it] ?: emptyMap()) + (nextMonth[it] ?: emptyMap())
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val monthOverrides: StateFlow<Map<String, Map<LocalDate, String>>> = _period.flatMapLatest { p ->
+        // 구간은 길이가 정확히 한 달이라 걸치는 달은 언제나 두 개다(시작 달 + 그 다음 달)
+        val ym = YearMonth.now().plusMonths(p.toLong())
+        combine(
+            rosterRepo.observeMonthOverrides(ym),
+            rosterRepo.observeMonthOverrides(ym.plusMonths(1)),
+        ) { thisMonth, nextMonth ->
+            (thisMonth.keys + nextMonth.keys).associateWith {
+                (thisMonth[it] ?: emptyMap()) + (nextMonth[it] ?: emptyMap())
+            }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
@@ -168,13 +192,15 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
 
     val duty = LocalDutyColors.current
     val m = MatrixMetrics.Roomy
-    // 오늘부터 한 달. `plusMonths(1)`이라 2월이면 28일, 8월이면 31칸 — "한 달"의 뜻 그대로다.
-    val dates = remember {
-        val today = LocalDate.now()
-        val end = today.plusMonths(1)
-        generateSequence(today) { it.plusDays(1) }.takeWhile { it < end }.toList()
+    val period by viewModel.period.collectAsStateWithLifecycle()
+    // 한 구간 = 시작일부터 한 달. `plusMonths(1)`이라 2월이면 28일, 8월이면 31칸.
+    // period 0이면 시작일이 오늘, 1이면 한 달 뒤(9/21~10/20) — 헤더 표기와 같은 값이다.
+    val dates = remember(period) {
+        val start = LocalDate.now().plusMonths(period.toLong())
+        val end = start.plusMonths(1)
+        generateSequence(start) { it.plusDays(1) }.takeWhile { it < end }.toList()
     }
-    // 오늘이 항상 첫 칸이라 시작 위치는 언제나 0 — 헤더와 전 행이 이 하나를 공유해 같이 움직인다.
+    // 첫 칸이 언제나 구간 시작일이라 가로 시작 위치는 0 — 헤더와 전 행이 이 하나를 공유해 같이 움직인다.
     val hScroll = rememberScrollState()
 
     val q = query.trim()
@@ -248,14 +274,24 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Text("동료", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(4.dp))
+                    // ⑦ 구간 이동. `‹`는 오늘 구간에서 꺼진다 — 과거로는 안 간다(v1.6.42).
+                    IconButton(
+                        onClick = { viewModel.movePeriod(-1) },
+                        enabled = period > 0,
+                        modifier = Modifier.size(30.dp),
+                    ) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "이전 구간", Modifier.size(22.dp)) }
                     Text(
                         "${dates.first().monthValue}/${dates.first().dayOfMonth}" +
                             " ~ ${dates.last().monthValue}/${dates.last().dayOfMonth}",
                         fontSize = 12.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.width(8.dp))
+                    IconButton(
+                        onClick = { viewModel.movePeriod(1) },
+                        modifier = Modifier.size(30.dp),
+                    ) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 구간", Modifier.size(22.dp)) }
+                    Spacer(Modifier.width(4.dp))
                     // v1.6.21의 섹션 인원수를 여기로 옮겼다 — 한 번에 한 소속만 보이므로
                     // 목록 안 섹션 머리글은 칩과 같은 말을 두 번 하는 셈이 된다.
                     Text(
