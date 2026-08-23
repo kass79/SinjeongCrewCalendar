@@ -23,6 +23,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 import androidx.compose.ui.unit.dp
@@ -112,10 +113,20 @@ private fun AppRoot() {
 
     Scaffold(
         bottomBar = {
-            // M3 기본 80dp → 56dp. 달력에 세로 공간을 그만큼 돌려준다(사용자 요청 "3단계 줄여줘").
-            // 제스처 바 높이는 따로 더해 준다 — 56dp 안에서 깎으면 탭이 제스처 바에 먹힌다.
+            // M3 기본 80dp → 60dp. 달력에 세로 공간을 그만큼 돌려준다(사용자 요청 "3단계 줄여줘").
+            // 제스처 바 높이는 따로 더해 준다 — 60dp 안에서 깎으면 탭이 제스처 바에 먹힌다.
             val gestureBar = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
-            NavigationBar(modifier = Modifier.height(56.dp + gestureBar)) {
+            // ⚠ 높이를 56dp로 못 박아 두면 **선택 알약이 위로 잘린다**(v1.6.59 사용자 신고 "쪼금 짤리네").
+            // M3 항목은 [알약 28dp] + [4dp] + [라벨]을 세로로 쌓는데 라벨만 글자배율을 따라 커진다.
+            // 56dp에는 배율 1.0에서도 알약 위 여유가 1.9dp뿐이라 라벨이 조금만 커져도 알약이 바 밖으로 밀린다.
+            // 에뮬 실측(420dpi·세 탭 동일, 알약 잘린 양): 1.15 0px(여유 1px만 남음) / 1.3 −1px /
+            // 1.5 −5px / 2.0 −16px(아이콘 윗부분까지 날아감).
+            // → 기본 60dp + 배율이 커진 만큼 선형 보정. 계수 16은 실측으로 맞췄다 —
+            //   M3가 남는 높이를 위아래로 **반씩** 나눠 갖기 때문에 부족분의 2배를 넣어야 그만큼 내려온다
+            //   (10으로는 배율 2.0에서 여유가 0px까지 떨어졌다). 이 값이면 배율 1.0~2.0 내내 여유 4dp대 유지.
+            //   raw fontScale로 계산한다 — sp↔dp 변환은 비선형 룩업이라 레이아웃 산수에 쓰지 않는다(v1.6.42 ⑥).
+            val labelGrow = ((LocalDensity.current.fontScale - 1f) * 16f).coerceAtLeast(0f).dp
+            NavigationBar(modifier = Modifier.height(60.dp + labelGrow + gestureBar)) {
                 Tab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = currentDest?.hierarchy?.any { it.route == tab.route } == true,

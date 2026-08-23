@@ -62,7 +62,7 @@ import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
 import com.sinjeong.crewcalendar.presentation.theme.DutyColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
-import com.sinjeong.crewcalendar.presentation.weather.WeatherCell
+import com.sinjeong.crewcalendar.presentation.weather.WeatherChip
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.widget.DeadheadAlarm
 import java.time.DayOfWeek
@@ -135,6 +135,10 @@ fun MainCalendarScreen(
                     // 휴무 칩은 "8월" 바로 옆 — 월과 같이 읽는 정보라 오른쪽 버튼 무리에서 떼어냈다(v1.6.17)
                     Spacer(Modifier.width(6.dp))
                     RestCountChip(state.restDayCount)
+                    // 날씨는 달력 빈 칸 카드에서 헤더로 올렸다(v1.6.59 사용자 요청) — 휴N개 바로 옆.
+                    // 날씨가 없으면 스스로 아무것도 안 그린다(자리도 안 먹는다).
+                    Spacer(Modifier.width(4.dp))
+                    WeatherChip()
                     Spacer(Modifier.weight(1f))
                     FilledTonalButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
@@ -375,13 +379,13 @@ private fun CalendarGrid(
     val cells0: List<DaySchedule?> = List(leading) { null } + days
     val trailing = (7 - (cells0.size % 7)) % 7
     val cells: List<DaySchedule?> = cells0 + List(trailing) { null }
-    // 빈 칸(null) 처음 2개 = 근무시각표 / 편승시각표 카드, 세 번째 = 현재 날씨(v1.6.36).
-    // 빈 칸이 두 칸뿐인 달(1일이 화요일 등)엔 날씨가 자리를 못 얻어 안 뜬다 — 시각표 카드도
-    // 원래 그런 규칙이라 새로 생긴 제약이 아니고, 못 그릴 땐 조용히 사라지는 게 이 기능의 원칙이다.
+    // 빈 칸(null) 처음 2개 = 근무시각표 / 편승시각표 카드.
+    // 세 번째 빈 칸의 날씨는 v1.6.59에서 헤더 칩(`WeatherChip`)으로 옮겼다 — 여기선 두 칸만 쓴다.
+    // ⚠ 카드는 **이미 비어 있는 칸을 채울 뿐** 자리를 예약하지 않는다(leading은 1일의 요일에서만 나온다).
+    //   그래서 세 번째를 뺐다고 1일 위치가 밀리지 않는다.
     val nullIdx = cells.indices.filter { cells[it] == null }
     val card1 = nullIdx.getOrNull(0)
     val card2 = nullIdx.getOrNull(1)
-    val card3 = nullIdx.getOrNull(2)
     val duty = LocalDutyColors.current
     var dragX by remember { mutableFloatStateOf(0f) }
     val rows = (cells.size + 6) / 7
@@ -421,9 +425,11 @@ private fun CalendarGrid(
             items(cells.size, key = { it }) { i ->
                 val day = cells[i]
                 when (i) {
+                    // 두 카드는 **같은 바탕색**(v1.6.59 사용자 요청 "같은 바탕화면으로 해줘야지").
+                    // 나란히 붙어 있는 한 쌍이라 색이 갈리면 서로 다른 종류의 것처럼 읽힌다.
+                    // 구분은 아이콘(시계 vs 열차)과 글자가 맡는다.
                     card1 -> TimetableCard("근무시각표", R.drawable.ic_tt_work, onOpenTimetable, cellHeight, duty.main, duty.onMain)
-                    card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.branch, duty.onBranch)
-                    card3 -> WeatherCell(cellHeight)
+                    card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.main, duty.onMain)
                     else -> if (day == null) Spacer(Modifier.height(cellHeight))
                     else DayCell(
                         day, isSelected = day.date == selected, height = cellHeight,

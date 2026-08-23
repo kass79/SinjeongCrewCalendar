@@ -8,15 +8,14 @@ import android.location.LocationManager
 import android.os.CancellationSignal
 import android.util.Log
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -26,12 +25,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -58,7 +56,8 @@ import kotlin.math.sin
 import kotlin.math.tan
 
 /*
- * 달력 빈 칸 날씨 (v1.6.36 / v1.6.37 부터 현재 위치 기준).
+ * 현재 날씨 (v1.6.36 / v1.6.37 부터 현재 위치 기준).
+ * v1.6.59 부터 달력 빈 칸 카드가 아니라 **헤더 칩**([WeatherChip])으로 그린다 — 조회 로직은 그대로다.
  *
  * v1.6.37: 격자를 상수로 박지 않고 **기기의 대략적 위치(COARSE)를 격자로 변환**해 조회한다.
  * 권한이 없거나 위치를 못 얻으면 신정차량기지 격자로 조용히 폴백한다 — 날씨는 늘 보인다.
@@ -171,7 +170,7 @@ private fun gridOf(ctx: Context): Pair<Int, Int> = runCatching {
  * ⚠ 여기에 `R.drawable.…` 을 들고 있으면 안 된다. AGP 8 부터 R 필드가 상수가 아니라
  * 진짜 필드라 인라인되지 않고, 유닛테스트 클래스패스엔 `R$drawable` 이 없어
  * enum 초기화 자체가 `NoClassDefFoundError` 로 죽는다(실제로 겪음).
- * drawable 매핑은 그릴 때([WeatherCell])만 한다.
+ * drawable 매핑은 그릴 때([WeatherChip])만 한다.
  */
 internal enum class Wx { SUNNY, PARTLY, CLOUDY, RAIN, SNOW }
 
@@ -302,22 +301,42 @@ private fun fetch(nx: Int, ny: Int): Weather? = runCatching {
     }
 
 /**
- * 달력 빈 칸에 들어가는 현재 날씨 칸. 데이터가 없으면 아무것도 그리지 않는다.
- * (그래도 [Spacer] 로 자리는 지킨다 — 안 그러면 7열 그리드가 한 칸씩 밀린다.)
+ * 날씨 상태별 칩 배경/글자색. **`Wx` 5종을 그대로 쓴다** — 새 조건 체계를 만들지 않는다.
+ *
+ * 사용자 주문은 "태양·비·구름·번개 느낌으로 알아서 배경색"이었다. 초단기예보 PTY 에는
+ * 낙뢰 항목이 따로 없어(1비·2비눈·3눈·4소나기·5빗방울·6빗방울눈날림·7눈날림) **번개는 별도 상태가
+ * 아니다** — 비 계열을 짙은 남색으로 잡아 그 느낌을 대신한다.
+ *
+ * 라이트/다크 각각 명암비를 계산해 고른 값이다(전부 6:1 이상, WCAG AA 4.5:1 여유 있게 통과).
+ * 다크모드에서 글자가 안 보인 사고(v1.6.40 오늘칸)를 반복하지 않으려고 배경·글자를 **짝으로** 정한다.
+ */
+private fun wxColors(wx: Wx, dark: Boolean): Pair<Color, Color> = when (wx) {
+    //                                  라이트 (배경, 글자)                        다크 (배경, 글자)
+    Wx.SUNNY -> if (dark) Color(0xFF4A3800) to Color(0xFFFFD54F) else Color(0xFFFFECB3) to Color(0xFF6D4C00)
+    Wx.PARTLY -> if (dark) Color(0xFF2E3B4A) to Color(0xFFB9CFE6) else Color(0xFFDDE7F2) to Color(0xFF33506B)
+    Wx.CLOUDY -> if (dark) Color(0xFF35393E) to Color(0xFFCBD1D8) else Color(0xFFE3E5E8) to Color(0xFF45494E)
+    Wx.RAIN -> if (dark) Color(0xFF12395E) to Color(0xFFA8CFF5) else Color(0xFFCFE4FB) to Color(0xFF10457E)
+    Wx.SNOW -> if (dark) Color(0xFF23414D) to Color(0xFFB5D8E8) else Color(0xFFE6F1F8) to Color(0xFF2A5566)
+}
+
+/**
+ * 헤더 `휴N개` 옆에 붙는 현재 날씨 칩(v1.6.59). 달력 빈 칸에 있던 `WeatherCell` 을 대신한다 —
+ * **조회·권한·격자 로직은 그대로**이고 표시 위치와 겉모습만 바뀌었다.
+ *
+ * 날씨가 없으면 **아무것도 그리지 않는다**(자리도 안 먹는다). 달력 칸일 땐 빈 칸이 7열 격자를
+ * 밀기 때문에 "연결되면 표시" 안내를 넣었지만(v1.6.41 ③), 헤더에선 칩이 없어도 줄이 자연스럽게
+ * 좁아질 뿐이라 안내할 대상이 없다.
  *
  * **위치 권한은 여기서, 날씨가 화면에 뜬 뒤에 딱 한 번 묻는다**(v1.6.37).
  * 앱을 켜자마자 묻지 않는 이유 — 팝업만 먼저 뜨면 무엇 때문에 위치를 달라는지 알 수가 없다.
- * 날씨 칸(신정 폴백)이 이미 그려진 상태에서 물어야 "아 저것 때문이구나"가 된다.
+ * 날씨(신정 폴백)가 이미 그려진 상태에서 물어야 "아 저것 때문이구나"가 된다.
  * 거부하면 `wx_loc_asked` 가 남아 **다시는 묻지 않는다** — 폴백으로 계속 잘 보이니 조를 이유가 없다.
  */
 @Composable
-fun WeatherCell(height: Dp, modifier: Modifier = Modifier) {
+fun WeatherChip(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     // 초기값을 캐시에서 읽는다 → 회전·월 이동 시 깜빡임 없이 바로 그려진다.
     var weather by remember { mutableStateOf(WxCache.value) }
-    // 조회를 한 번이라도 끝냈나. 안내 문구를 **시도한 뒤에만** 띄우려는 것 —
-    // 첫 프레임부터 "날씨 없음"을 그리면 성공하는 경우에도 한 번 깜빡인다(v1.6.41 ③).
-    var tried by remember { mutableStateOf(false) }
     var granted by remember { mutableStateOf(hasCoarse(ctx)) }
     // 허용되면 granted 가 바뀌어 아래 LaunchedEffect 가 한 번 더 돈다 → 현재 위치 격자로 재조회.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -327,8 +346,7 @@ fun WeatherCell(height: Dp, modifier: Modifier = Modifier) {
     // v1.6.36 에뮬 확인에서 정규식 하나(ICU 문법)로 실제 FATAL 이 났다.
     LaunchedEffect(granted) {
         weather = withContext(Dispatchers.IO) { runCatching { currentWeather(ctx) }.getOrNull() }
-        tried = true
-        // 날씨가 실제로 떴을 때만 묻는다. 오프라인이라 칸이 비어 있으면 물을 맥락 자체가 없다.
+        // 날씨가 실제로 떴을 때만 묻는다. 오프라인이라 칩이 없으면 물을 맥락 자체가 없다.
         val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
         if (weather != null && !granted && !prefs.getBoolean("wx_loc_asked", false)) {
             prefs.edit().putBoolean("wx_loc_asked", true).apply()
@@ -336,55 +354,32 @@ fun WeatherCell(height: Dp, modifier: Modifier = Modifier) {
         }
     }
 
-    val w = weather
-    // 시각 언어는 TimetableCard 와 맞춘다 — 둥근 사각 배경 + 아이콘 + 자동 축소 글자.
-    val fg = MaterialTheme.colorScheme.onSurfaceVariant
-    if (w == null) {
-        // 아직 시도 전이면 자리만 지킨다(안 그러면 7열 그리드가 한 칸 밀린다).
-        // 시도해 보고도 없으면 **왜 비었는지**를 적는다 — 종전엔 아무 말 없이 빈 칸이었다(v1.6.41 ③).
-        if (!tried) { Spacer(modifier.height(height)); return }
-        Column(
-            modifier.height(height).clip(RoundedCornerShape(10.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                .padding(4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+    val w = weather ?: return
+    val (icon, label) = when (w.wx) {
+        Wx.SUNNY -> R.drawable.ic_wx_sunny to "맑음"
+        Wx.PARTLY -> R.drawable.ic_wx_partly to "구름많음"
+        Wx.CLOUDY -> R.drawable.ic_wx_cloudy to "흐림"
+        Wx.RAIN -> R.drawable.ic_wx_rain to "비"
+        Wx.SNOW -> R.drawable.ic_wx_snow to "눈"
+    }
+    // 앱 안 다크 토글이 시스템과 다를 수 있어 isSystemInDarkTheme 대신 실제 배경 밝기로 판단한다.
+    val (bg, fg) = wxColors(w.wx, MaterialTheme.colorScheme.surface.luminance() < 0.5f)
+    // 모양은 옆의 RestCountChip 과 같은 알약 + 같은 글자 크기 — 헤더에서 한 쌍으로 읽히게.
+    // 높이를 고정하지 않는다(글자배율이 커지면 같이 큰다 — 하단 탭에서 겪은 잘림의 원인이 고정 높이였다).
+    Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(999.dp), modifier = modifier) {
+        Row(
+            Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text("날씨", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = fg.copy(alpha = 0.7f))
+            // ⚠ Icon 이 아니라 Image — tint 가 먹으면 파스텔 아이콘 색이 통째로 날아간다(ic_deadhead_* 와 같은 함정).
+            // 날씨 상태는 아이콘 모양에만 담기므로 contentDescription 이 있어야 화면낭독기에서 읽힌다.
+            Image(painterResource(icon), label, Modifier.size(14.dp))
+            Spacer(Modifier.width(3.dp))
             Text(
-                "연결되면\n표시", fontSize = 8.sp, lineHeight = 10.sp,
-                textAlign = TextAlign.Center, color = fg.copy(alpha = 0.55f),
+                "${w.tempC}°",
+                fontSize = 9.5.sp, fontWeight = FontWeight.Bold,
+                maxLines = 1, softWrap = false,
             )
         }
-        return
-    }
-    Column(
-        modifier
-            .height(height)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f))
-            .padding(4.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center,
-    ) {
-        val (icon, label) = when (w.wx) {
-            Wx.SUNNY -> R.drawable.ic_wx_sunny to "맑음"
-            Wx.PARTLY -> R.drawable.ic_wx_partly to "구름많음"
-            Wx.CLOUDY -> R.drawable.ic_wx_cloudy to "흐림"
-            Wx.RAIN -> R.drawable.ic_wx_rain to "비"
-            Wx.SNOW -> R.drawable.ic_wx_snow to "눈"
-        }
-        // ⚠ Icon 이 아니라 Image — tint 가 먹으면 파스텔 아이콘 색이 통째로 날아간다(ic_deadhead_* 와 같은 함정).
-        // 날씨는 아이콘 모양에만 담기므로 contentDescription 이 있어야 화면낭독기에서 읽힌다.
-        Image(painterResource(icon), label, Modifier.size(22.dp))
-        Spacer(Modifier.height(4.dp))
-        var fitSize by remember(w.tempC, height) { mutableStateOf(12.5.sp) }
-        Text(
-            "${w.tempC}°",
-            fontSize = fitSize, lineHeight = fitSize * 1.28,
-            fontWeight = FontWeight.ExtraBold, color = fg, textAlign = TextAlign.Center,
-            softWrap = false,
-            onTextLayout = { if (it.hasVisualOverflow && fitSize > 7.sp) fitSize *= 0.92f },
-        )
     }
 }
