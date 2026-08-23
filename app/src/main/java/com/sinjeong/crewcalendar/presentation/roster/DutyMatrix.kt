@@ -297,7 +297,7 @@ fun MatrixDateHeader(
 }
 
 /**
- * **동료 탭 전용** 칩 라벨 — 지선 주간·야간 다이아만 `지`를 되살린다(v1.6.48).
+ * **동료 탭 전용** 칩 라벨 — 지선 주간·야간 다이아(v1.6.48)와 휴일(v1.6.53)에 `지`를 되살린다.
  *
  * [DutyCode.display]는 지선 다이아의 `지`를 뗀다(칸이 좁아 정한 기존 앱 방식). 달력은 **내 근무
  * 하나**만 보여 주니 그래도 됐지만, 이 화면은 여러 사람이 세로로 나란히 오는데 지선 `지1`과 본선
@@ -309,11 +309,21 @@ fun MatrixDateHeader(
  * 이 파일에 private으로 두는 것이 곧 그 보증이다 — 매트릭스를 그리는 곳은 동료 탭 하나뿐이다
  * (파일 첫 주석). [DutyCode]에 프로퍼티로 뒀다면 다음 사람이 달력에서도 부를 수 있다.
  *
- * 걸리는 건 지선 **주간(지1~지8)·야간(지10~지14)** 뿐이다. 지선 대기는 [DutyCode.display]가
- * 이미 `지대1`로 살려 두고(v1.6.36), 충당 계열 아랫줄은 [DutyCode.diaRaw]라 이미 `지2`로 온다.
+ * 걸리는 건 지선 **주간(지1~지8)·야간(지10~지14)·휴일(지휴1~지휴7·지휴)** 이다. 지선 대기는
+ * [DutyCode.display]가 이미 `지대1`로 살려 두고(v1.6.36), 충당 계열 아랫줄은 [DutyCode.diaRaw]라
+ * 이미 `지2`로 온다.
  *
- * 폭: 가장 긴 `지14`가 [DutyChip] 글자폭 모델로 2.24 units — 표 전체 기준인
- * [UNIFORM_UNITS](3.24)보다 좁아 36dp 칸에 한 줄로 넉넉히 들어간다.
+ * 폭: 가장 긴 `지휴5`가 [DutyChip] 글자폭 모델로 2.62 units — 표 전체 기준인
+ * [UNIFORM_UNITS](3.24)보다 좁아 36dp 칸에 한 줄로 넉넉히 들어간다(`지14`는 2.24).
+ *
+ * ### v1.6.53 — 지선 휴일도 `지`를 되살린다
+ *
+ * v1.6.48이 되살린 대상이 주간·야간뿐이라 `지휴5`가 [DutyCode.display]의 `raw.removePrefix("지")`로
+ * 떨어져 본선 `휴5`와 **글자가 같았다**(`지휴`↔`휴무`도 둘 다 `휴`). 색도 같은 회색이라
+ * (`dutyCellColors`의 REST·BRANCH_REST) 지선 휴일인지 본선 휴일인지 구분할 길이 없었다 —
+ * v1.6.52 전수 조사에서 "미수정 충돌 2종"으로 남겨 뒀던 건이다.
+ *
+ * 상한이 여전히 `지대11`(3.24)이라 **표 전체 글자 크기 9.09sp는 그대로다** — 크기 손해 0.
  *
  * ### v1.6.52 — 네 글자 라벨을 두 글자로 줄여 **표 전체 글자를 키웠다**
  *
@@ -327,7 +337,8 @@ private val DutyCode.mateLabel: String
     get() = when {
         // 충당 계열 두 줄 중 **윗줄만** 줄인다. 아랫줄(다이아)이 실질 정보라 그대로 둔다.
         fill != null -> "${MATE_SHORT[fill] ?: fill}\n$diaRaw"
-        type == DutyType.BRANCH || type == DutyType.BRANCH_NIGHT -> raw
+        type == DutyType.BRANCH || type == DutyType.BRANCH_NIGHT ||
+            type == DutyType.BRANCH_REST -> raw
         // [DutyCode.gridLabel]은 fill이 없으면 곧 display다 — 그 자리에 축약만 끼운다
         else -> MATE_SHORT[display] ?: display
     }

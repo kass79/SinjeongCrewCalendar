@@ -1110,7 +1110,8 @@ class PatternTest {
             val c = DutyCode.parse(raw)
             raw to when {
                 c.fill != null -> "${short[c.fill] ?: c.fill}\n${c.diaRaw}"
-                c.type == DutyType.BRANCH || c.type == DutyType.BRANCH_NIGHT -> c.raw
+                c.type == DutyType.BRANCH || c.type == DutyType.BRANCH_NIGHT ||
+                    c.type == DutyType.BRANCH_REST -> c.raw
                 else -> short[c.display] ?: c.display
             }
         }
@@ -1142,13 +1143,13 @@ class PatternTest {
      *
      * 뜻이 같아 겹쳐도 되는 것만 예외로 둔다:
      *  · `~` — 비번은 어느 다이아 다음이든 같은 비번 하나다(`44비`·`지13비`·`비번` …).
-     *  · `휴`·`휴1`~`휴28` — 본선 휴일과 지선 휴일(`지휴5`)이 같은 글자로 온다. **v1.6.52 이전부터**
-     *    그랬고 색도 같은 회색이다(`dutyCellColors`의 REST·BRANCH_REST). v1.6.48이 `지`를 되살린
-     *    대상은 주간·야간 다이아뿐이었다. 고치려면 `mateLabel`에 BRANCH_REST를 더하면 되지만
-     *    (`지휴5` = 2.62 units < 3.24라 글자 크기 손해 0) **이번 지시 범위 밖이라 두었다.**
+     *
+     * ⚠ `휴`·`휴1`~`휴28` 예외는 **v1.6.53에서 없앴다.** 지선 휴일이 `지휴5`로 오게 `mateLabel`에
+     * BRANCH_REST를 더해 충돌 자체가 사라졌으므로, 예외를 남겨 두면 같은 실수가 다시 숨는다.
+     * **여기에 예외를 늘리지 말 것** — 겹치면 라벨을 고치는 것이 답이다.
      */
     @Test fun mateGrid_labels_do_not_collide() {
-        val benign = Regex("^~$|^휴\\d*$")
+        val benign = Regex("^~$")
         val collisions = mateGridLabels()
             .groupBy({ it.second }, { it.first })
             .filterValues { it.distinct().size > 1 }
