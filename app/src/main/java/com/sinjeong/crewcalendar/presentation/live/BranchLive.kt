@@ -308,7 +308,13 @@ internal object BranchLive {
     /** 회차 열번 규칙(승무 실무): 신도림 회차 = 열번 +5, 까치산 회차 = 열번 +1 */
     private fun turnNo(no: String, add: Int) = no.toIntOrNull()?.let { (it + add).toString() } ?: no
 
-    /** 종착 도착 = 즉시 머리 전환. 종착 승강장은 1선이라 같은 열번은 하나만 남긴다. */
+    /**
+     * 종착 도착 = 즉시 머리 전환. 종착 승강장은 1선이라 같은 열번은 하나만 남긴다.
+     *
+     * [ensureFleet] **뒤에** 돌기 때문에 실측 열차와 회차 홀드 아이콘에 같은 규칙이 걸린다.
+     * 둘이 같은 열번으로 만나면(홀드가 미처 안 풀렸는데 실차가 돌아온 경우) `distinctBy`가
+     * **앞에 오는 실측 열차**를 남긴다 — `trains + holdIcons` 순서가 그 보험이다.
+     */
     internal fun applyTurnaround(trains: List<TrainMark>): List<TrainMark> = trains.map { t ->
         when {
             !t.toSindorim && t.position <= 0.15f ->
@@ -323,44 +329,51 @@ internal object BranchLive {
 
     /**
      * 회차 공백 메꾸기: 서울 API는 종착에서 회차하는 동안(운전실 교대 3~8분) 그 열차를 안 준다.
-     * 직전까지 종착 근처에 있던 **실측** 열차가 사라지면 그 자리에 회차 대기 아이콘을 유지한다
+     * 직전까지 종착에 있던 **실측** 열차가 사라지면 그 자리에 회차 대기 아이콘을 유지한다
      * (추정 생성이 아니라 방금까지 있던 실제 열차 추적이라 유령이 아니다).
+     *
+     * ⚠ **[applyTurnaround] 앞에서** 돌아야 한다(v1.6.56). 여기 기억하는 열번은 API가 준
+     * **회차 전** 번호고, +5/+1 로 바꾸는 일은 뒤따르는 [applyTurnaround]가 실차와 똑같은
+     * 규칙으로 홀드 아이콘에도 해 준다. 순서가 뒤집히면 기억이 회차 **후** 번호로 쌓여
+     * "회차 완료" 판정이 지선의 다른 실차 번호와 겹친다 — v1.6.55까지 아이콘이 사라지던 원인.
      */
     internal fun ensureFleet(trains: List<TrainMark>, nowMs: Long): List<TrainMark> {
-        val turnHoldMs = 8 * 60_000L
+        // 안전망 상한이지 정상 경로가 아니다 — 회차가 끝나면 **복귀 열차(+5/+1)가** 홀드를 걷어낸다.
+        // 2026-08-23 20:45~21:20 실측 6회차의 API 실종 구간: 신도림 2:42 / 4:13 / 4:59,
+        // 까치산 5:14 / 6:20 / **7:36**(최대). 종전 8분은 최대치와 24초밖에 안 떨어져 있었다.
+        // 12분 = 실무 회차 상한 8분 + 관측된 API 보고 지연(양끝 1~3분). 더 늘리면 API가 통째로
+        // 조용할 때 이미 떠난 열차가 종착에 눌어붙는다.
+        val turnHoldMs = 12 * 60_000L
 
+        // 종착에 **들어온** 열차만 회차 대상이다(떠나는 열차는 아니다 — 신도림 출발도 pos 3.85라
+        // 방향을 안 보면 같이 걸린다). 볼 때마다 시각을 갱신해 홀드 시계가 "눈에서 놓친 뒤"부터
+        // 흐르게 한다 — 종전 putIfAbsent 는 종착에 보이던 시간까지 홀드 예산에서 깎아먹었다.
         trains.forEach { t ->
-            if (t.position <= 0.3f) turningTrains.putIfAbsent(t.trainNo, nowMs to false)
-            if (t.position >= 3.7f) turningTrains.putIfAbsent(t.trainNo, nowMs to true)
-        }
-        // 시트를 새로 연 직후 기억이 비었을 때: 3분 이내 직전 스냅샷으로 복원
-        if (turningTrains.isEmpty()) {
-            val prev = lastSnapshot
-            if (prev != null && nowMs - prev.fetchedAtMillis < 3 * 60_000L) prev.trains.forEach { t ->
-                if (t.position <= 0.3f) turningTrains.putIfAbsent(t.trainNo, nowMs to false)
-                if (t.position >= 3.7f) turningTrains.putIfAbsent(t.trainNo, nowMs to true)
-            }
+            if (!t.toSindorim && t.position <= 0.3f) turningTrains[t.trainNo] = nowMs to false
+            if (t.toSindorim && t.position >= 3.7f) turningTrains[t.trainNo] = nowMs to true
         }
 
-        val curNos = trains.mapNotNull { it.trainNo.toIntOrNull() }.toSet()
         val curNoStr = trains.map { it.trainNo }.toSet()
         turningTrains.entries.removeIf { (no, v) ->
             val (since, atSindorim) = v
             if (nowMs - since > turnHoldMs) return@removeIf true
-            val n = no.toIntOrNull() ?: return@removeIf false
-            // 회차 완료 판정: 신도림은 +5 또는 +3(편성 수에 따라), 까치산은 +1
-            val turned = if (atSindorim) setOf(n + 5, n + 3) else setOf(n + 1)
-            if (turned.any { it in curNos }) return@removeIf true
-            val stillAtTerminus = trains.any {
+            // 회차 완료 = **열번을 바꾼 그 열차**가 API에 다시 나타났다. [applyTurnaround]와 같은
+            // 규칙 하나만 쓴다(2026-08-23 실측: 신도림 5677 → 5682(+5), 까치산 5680 → 5681(+1)).
+            // 종전의 `+5 또는 +3` 추가 추측은 지선에 동시에 떠 있는 **다른 실차 번호**와 겹쳐
+            // 회차 중인 열차의 기억을 지워 버렸다(실측 충돌: 까치산 홀드 5681 ↔ 실차 5682).
+            if (turnNo(no, if (atSindorim) 5 else 1) in curNoStr) return@removeIf true
+            // 같은 열번이 종착 아닌 곳에 보이면 애초에 회차가 아니었다
+            no in curNoStr && trains.none {
                 it.trainNo == no && (it.position <= 0.3f || it.position >= 3.7f)
             }
-            no in curNoStr && !stillAtTerminus
         }
 
+        // 홀드 아이콘 = **들어온 방향 그대로 종착에 세운 실측 열차**. 열번 +5/+1 과
+        // `회차 · … 대기` 문구는 뒤따르는 [applyTurnaround]가 실차와 한 규칙으로 붙인다.
         val holdIcons = turningTrains.entries.mapNotNull { (no, v) ->
             if (no in curNoStr) null
-            else if (v.second) TrainMark(no, false, 4f, "회차 · 신도림 대기")
-            else TrainMark(no, true, 0f, "회차 · 까치산 대기")
+            else if (v.second) TrainMark(no, true, 4f, "신도림 도착")
+            else TrainMark(no, false, 0f, "까치산 도착")
         }
         return trains + holdIcons
     }
@@ -435,7 +448,9 @@ internal object BranchLive {
         if (!force) lastSnapshot?.let { if (nowMs - lastFetchAt < MIN_INTERVAL_MS) return it }
         lastFetchAt = nowMs
         var snap = retainLastGood(loadFromSeoulApi())
-        snap = snap.copy(trains = squashOverlaps(ensureFleet(snap.trains, nowMs)))
+        // ⚠ 순서 고정: 회차 공백 메꾸기(실측 열번) → 머리 전환(+5/+1) → 겹침 정리.
+        //   [ensureFleet] KDoc 참고 — 뒤집으면 회차 중 아이콘이 사라진다.
+        snap = snap.copy(trains = squashOverlaps(applyTurnaround(ensureFleet(snap.trains, nowMs))))
         lastSnapshot = snap
         Log.i(TAG, "스냅샷: 열차 ${snap.trains.size}대 · 입고 ${snap.inbound.size}건" +
             (snap.error?.let { " · $it" } ?: ""))
@@ -464,11 +479,13 @@ internal object BranchLive {
             val yangRows = yang.getOrDefault(emptyList())
 
             Snapshot(
-                trains = applyTurnaround(run {
+                // 머리 전환은 여기서 하지 않는다 — [ensureFleet]가 **회차 전 열번**을 봐야 한다.
+                // [loadSnapshot]이 ensureFleet → applyTurnaround 순으로 이어 붙인다.
+                trains = run {
                     val strict = refineWithArrivals(branchTrains(posRows), yangRows)
                     val merged = (strict + branchTrainsLoose(posRows, strict)).distinctBy { it.trainNo }
                     merged.ifEmpty { trainsFromArrivals(yangRows) }
-                }),
+                },
                 inbound = inboundFromPositions(posRows),
                 fetchedAtMillis = System.currentTimeMillis(),
                 // 두 호출이 같은 이유로 죽으면 문구도 하나만 (`인터넷 연결 안 됨 · 인터넷 연결 안 됨` 방지).

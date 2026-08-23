@@ -3,8 +3,10 @@ package com.sinjeong.crewcalendar
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 /**
@@ -150,5 +152,129 @@ class BranchLiveTest {
         assertEquals("5557", turned[0].trainNo)
         assertTrue(turned[0].toSindorim)
         assertEquals(0f, turned[0].position, 0.001f)
+    }
+
+    /* ── 회차 중 아이콘 유지 (v1.6.56) ──────────────────────────────────────
+     *
+     * 사용자 신고: *"신도림역에 도착하면 운전실을 바꾸어서 … 그때 멈춰 있을땐 왜 열차 아이콘이
+     * 사라져? 까치산역에도 마찬가지고"*.
+     *
+     * 아래 두 테스트는 **2026-08-23 20:45~20:57 실호출 응답을 15초 간격으로 받아 적은 것을
+     * 시간순 그대로 재생**한다(값은 관측 그대로, 형식만 줄임). 관측 사실:
+     *
+     * | 종착 | 진입 | API 실종 구간 | 복귀 열번 |
+     * |---|---|---|---|
+     * | 신도림 | 20:46:44 `5677` | 20:48:09~20:50:31 (**2분 42초**) | 20:50:41 `5682` (**+5**) |
+     * | 까치산 | 20:50:41 `5680` | 20:51:42~20:56:36 (**4분 54초**) | 20:56:46 `5681` (**+1**) |
+     *
+     * 즉 API는 회차 내내 그 열차를 안 준다 — 그동안 화면을 채우는 것이 회차 홀드 아이콘이다.
+     */
+
+    /** `realtimePosition` 행 하나(쓰는 필드만) */
+    private fun row(no: String, stn: String, dest: String, sttus: String, updn: String) =
+        """{"subwayId":"1002","subwayNm":"2호선","statnNm":"$stn","trainNo":"$no",""" +
+            """"updnLine":"$updn","statnTid":"1002000234","statnTnm":"$dest","trainSttus":"$sttus"}"""
+
+    /** 실제 화면이 받는 것과 같은 순서: 회차 공백 메꾸기 → 머리 전환 → 겹침 정리 */
+    private fun pipeline(rows: List<String>, nowMs: Long) =
+        BranchLive.squashOverlaps(
+            BranchLive.applyTurnaround(
+                BranchLive.ensureFleet(
+                    BranchLive.branchTrains(
+                        BranchLive.parsePositions("""{"list":[${rows.joinToString(",")}]}""")),
+                    nowMs)))
+
+    /** 회차 기억은 `object`에 남아 테스트끼리 샌다 — 만료 시각을 한 번 던져 비운다. */
+    @Before
+    fun clearTurnMemory() {
+        BranchLive.ensureFleet(emptyList(), Long.MAX_VALUE / 2)
+    }
+
+    /**
+     * **까치산 회차** — v1.6.55가 실패하던 자리.
+     *
+     * 5680이 까치산에 닿는 바로 그 순간(20:50:41) 신도림에서 회차를 마친 `5682`가 나타난다.
+     * v1.6.55는 회차 **후** 열번(`5681`)을 기억해 두고 "회차 완료 = +1(`5682`)이 보이면"으로
+     * 판정했기 때문에, **남남인 실차 5682**가 그 기억을 즉시 지웠다. 그 뒤 API가 5680을 끊자
+     * 홀드가 없어 아이콘이 4분 54초 동안 통째로 사라졌다.
+     */
+    @Test
+    fun `까치산 회차 4분 54초 동안 아이콘이 안 사라진다`() {
+        val t0 = 1_800_000_000_000L      // 20:50:41 = 5680 까치산 진입
+
+        val arrive = pipeline(listOf(
+            row("5680", "까치산", "까치산", "0", "0"),              // 진입 — 회차 시작
+            row("5679", "신정네거리", "신도림지선", "2", "1"),
+            row("5682", "신도림지선", "까치산", "2", "0")), t0)     // ← 기억을 지우던 장본인
+        assertEquals("5681", arrive.single { it.position <= 0.15f }.trainNo)
+        assertEquals(3, arrive.size)
+
+        // 20:51:42 ~ 20:56:36 — API가 5680을 하나도 안 준다. 마지막 실측은 20:51:32(t0+51초).
+        listOf(10, 60, 180, 294).forEach { sec ->
+            val blind = pipeline(listOf(
+                row("5679", "양천구청", "신도림지선", "1", "1"),
+                row("5682", "도림천", "까치산", "1", "0")), t0 + 51_000L + sec * 1000L)
+            val icon = blind.firstOrNull { it.trainNo == "5681" }
+            assertNotNull("실종 +${sec}초: 까치산 회차 아이콘이 사라졌다", icon)
+            assertEquals(0f, icon!!.position, 0.001f)          // 까치산에 세워 둔다
+            assertTrue(icon.toSindorim)                        // 머리를 신도림 쪽으로 돌렸다
+            assertEquals("회차 · 까치산 대기", icon.statusText)  // 정차 빨간 점 + `↻ 회차` 배지
+        }
+
+        // 20:56:46 — 5681로 실제 출발. 홀드는 **즉시** 빠지고 실측 열차 하나만 남는다.
+        val back = pipeline(listOf(
+            row("5681", "까치산", "신도림지선", "2", "1"),
+            row("5679", "신도림지선", "신도림지선", "1", "1"),
+            row("5682", "신정네거리", "까치산", "0", "0")), t0 + 365_000L)
+        assertEquals(1, back.count { it.trainNo == "5681" })    // 홀드와 실차가 겹쳐 보이면 안 된다
+        assertEquals(0.15f, back.first { it.trainNo == "5681" }.position, 0.001f)  // 까치산 출발
+    }
+
+    /** **신도림 회차** — 같은 구조. 열번은 +5(`5677` → `5682`)로 관측됐다. */
+    @Test
+    fun `신도림 회차 2분 42초 동안 아이콘이 안 사라진다`() {
+        val t0 = 1_800_000_000_000L      // 20:47:14 = 5677 신도림 도착(마지막 실측은 20:47:59)
+
+        val arrive = pipeline(listOf(
+            row("5677", "신도림지선", "신도림지선", "1", "1"),      // ⚠ statnNm 이 "신도림지선"으로 온다
+            row("5680", "양천구청", "까치산", "2", "0"),
+            row("5679", "까치산", "신도림지선", "2", "1")), t0)
+        assertEquals("5682", arrive.single { it.position >= 3.85f }.trainNo)
+
+        // 20:48:09 ~ 20:50:31 — API가 5677을 안 준다(마지막 실측 20:47:59 = t0+45초).
+        listOf(10, 60, 152).forEach { sec ->
+            val blind = pipeline(listOf(
+                row("5680", "신정네거리", "까치산", "0", "0"),
+                row("5679", "까치산", "신도림지선", "2", "1")), t0 + 45_000L + sec * 1000L)
+            val icon = blind.firstOrNull { it.trainNo == "5682" }
+            assertNotNull("실종 +${sec}초: 신도림 회차 아이콘이 사라졌다", icon)
+            assertEquals(4f, icon!!.position, 0.001f)
+            assertFalse(icon.toSindorim)                       // 머리를 까치산 쪽으로 돌렸다
+            assertEquals("회차 · 신도림 대기", icon.statusText)
+        }
+
+        // 20:50:41 — 5682로 실제 출발.
+        val back = pipeline(listOf(
+            row("5682", "신도림지선", "까치산", "2", "0"),
+            row("5680", "까치산", "까치산", "0", "0"),
+            row("5679", "신정네거리", "신도림지선", "2", "1")), t0 + 207_000L)
+        assertEquals(1, back.count { it.trainNo == "5682" })
+        assertEquals(3.85f, back.first { it.trainNo == "5682" }.position, 0.001f)
+    }
+
+    /**
+     * 홀드는 **무한정이 아니다.** 12분이 지나면 접는다 — 실측 최대 실종 구간(까치산 7분 36초)에
+     * 4분 남짓 여유를 둔 값이다. 더 늘리면 이미 떠난 열차가 종착에 눌어붙는다.
+     */
+    @Test
+    fun `홀드는 12분을 넘기면 접는다`() {
+        val t0 = 1_800_000_000_000L
+        pipeline(listOf(row("5680", "까치산", "까치산", "1", "0")), t0)
+        // 실측 최대(7분 36초)에는 아직 붙어 있어야 한다
+        val live = pipeline(listOf(row("5679", "양천구청", "신도림지선", "1", "1")), t0 + 456_000L)
+        assertTrue("실측 최대 실종 구간에서 아이콘이 사라졌다", live.any { it.trainNo == "5681" })
+
+        val stale = pipeline(listOf(row("5679", "양천구청", "신도림지선", "1", "1")), t0 + 12 * 60_000L + 1)
+        assertTrue("12분이 지나도 회차 아이콘이 남아 있다", stale.none { it.trainNo == "5681" })
     }
 }
