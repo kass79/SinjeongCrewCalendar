@@ -188,8 +188,11 @@ private fun LineMapCard(
                 val infinite = rememberInfiniteTransition(label = "did")
                 val shimmer by infinite.animateFloat(
                     1f, 0.90f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "shimmer")
+                // **아래로만** 흔들린다(v1.6.55). 종전 ±1.2dp는 절반의 시간 동안 아이콘을
+                // 레일에서 들어 올려 "바퀴가 안 닿는다"는 인상을 보탰다. 0~1.2면 접지 상태에서
+                // 눌렸다 돌아오는 서스펜션이 되고 **떠오르는 순간이 없다**.
                 val bob by infinite.animateFloat(
-                    -1.2f, 1.2f, infiniteRepeatable(tween(620), RepeatMode.Reverse), label = "bob")
+                    0f, 1.2f, infiniteRepeatable(tween(620), RepeatMode.Reverse), label = "bob")
                 val phase by infinite.animateFloat(
                     0f, 1f, infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
                     label = "phase")
@@ -259,12 +262,12 @@ private fun LineMapCard(
                     LocalDensity provides Density(d.density, d.fontScale.coerceAtMost(1.2f))
                 ) {
                 val tm = rememberTextMeasurer()
-                // 190 → 172 → **156dp**(v1.6.50). 방면 알약 두 개가 빠지면서 아래쪽 22dp가
-                // 통째로 비었고([drawPill] 제거), 아이콘([ICON_S] 0.72 → 0.60)과 방면 라벨
-                // (9 → 7.5sp)도 같이 줄어 선로 사이에 필요한 여유가 또 줄었다.
-                // 선로 자리는 **절대 위치를 그대로 두려고** 분모에 맞춰 올렸다
-                // (railY 0.40 → 0.43 = 67dp · bandY 0.68 → 0.735 = 115dp, 종전 68.8·117).
-                Canvas(Modifier.fillMaxWidth().height(156.dp).padding(top = 4.dp)) {
+                // 190 → 172 → 156 → **146dp**(v1.6.55). 이번엔 열차마다 붙던 `신도림행`·
+                // `까치산행` 라벨(7.5sp ≈ 8.8dp + 여백 1dp)이 통째로 빠져 **아이콘 위 10dp가
+                // 비었다** — 그만큼 캔버스를 줄인다(사용자가 계속 요구해 온 "지도 더 작게").
+                // 선로 자리 비율(railY 0.43 · bandY 0.735)은 그대로 두어 위·아래가 고르게 준다
+                // (railY 67 → 62.8dp · bandY 114.7 → 107.3dp).
+                Canvas(Modifier.fillMaxWidth().height(146.dp).padding(top = 4.dp)) {
                     val pad = 20.dp.toPx()
                     // 역 화면 위치 = 구간 실측시간 비율(상·하행 평균). 표시만 변환(위치 계산은 0~4 유지)
                     val stFrac = floatArrayOf(0f, 0.211f, 0.485f, 0.745f, 1f)
@@ -277,8 +280,17 @@ private fun LineMapCard(
 
                     val railY = size.height * 0.43f
                     val bandY = size.height * 0.735f
-                    val railH = 7.dp.toPx()
-                    val bandH = 13.dp.toPx()
+                    // 외선·내선 **같은 두께**(v1.6.55 사용자: *"외선,내선 선로 두께 차이가 많이
+                    // 나네?"*). 종전 윗선로 7dp / 아래 띠 13dp로 거의 두 배였다.
+                    //
+                    // 두께 하나만 두면 나머지가 따라온다 — 역 흰 동그라미는 예나 지금이나
+                    // **띠를 꽉 채우는 크기**(지름 = 두께: 종전 3.5×2 = 7 · 6.5×2 = 13)였고,
+                    // 정차 빨간 속점도 반지름의 0.68배(2.4/3.5 · 4.4/6.5)로 같은 비율이었다.
+                    // 따로 적힌 dp 상수 넷을 여기 유도값 둘로 접었다.
+                    // 두 선로를 가르는 건 이제 **초록 농도**뿐이다(윗선로 alpha 0.5 · 아래 1.0).
+                    val trackH = 10.dp.toPx()
+                    val stR = trackH / 2f          // 역 흰 동그라미 반지름 (5dp)
+                    val stopR = trackH * 0.34f     // 정차 빨간 속점 반지름 (3.4dp)
                     val spacing = 30.dp.toPx()
 
                     // 상단 선로(까치산 방면 ←): 까치산은 단선이라 크로스오버 지점부터 오른쪽만 존재
@@ -286,31 +298,36 @@ private fun LineMapCard(
                     val nsX0 = xOf(1f)
                     val railStart = nsX0 - 0.22f * (nsX0 - kkX0)   // 크로스오버 지점
                     drawRect(BandGreen.copy(alpha = 0.5f),
-                        topLeft = Offset(railStart, railY - railH / 2),
-                        size = Size(size.width - railStart, railH))
+                        topLeft = Offset(railStart, railY - trackH / 2),
+                        size = Size(size.width - railStart, trackH))
                     var cl = size.width + spacing - phase * spacing
                     while (cl > railStart) {
-                        drawChevron(cl, railY, railH * 0.42f, Color.White.copy(alpha = 0.35f), false)
+                        drawChevron(cl, railY, trackH * 0.36f, Color.White.copy(alpha = 0.35f), false)
                         cl -= spacing
                     }
                     // v1.6.50: 여기 있던 `← 까치산 방면` 알약을 뺐다(사용자: *"까치산 방면,
-                    // 신도림 방면 ← 텍스트 없애줘!"*). 각 열차에 `신도림행`·`까치산행`이 이미
-                    // 붙어 있고 진행 셰브런(`>`·`<`)이 방향을 그린다 — 같은 말이 세 번이었다.
+                    // 신도림 방면 ← 텍스트 없애줘!"*). v1.6.55에선 열차마다 붙던 행선 라벨까지
+                    // 뺐다 — 방향을 말하는 건 이제 진행 셰브런(`>`·`<`)과 선로 자리뿐이다.
 
                     // 메인 밴드 (신도림 방면 →)
-                    drawRect(BandGreen, topLeft = Offset(0f, bandY - bandH / 2),
-                        size = Size(size.width, bandH))
+                    // 화살표 반높이 계수는 위·아래 **하나로 통일**(종전 0.42 / 0.36).
+                    // 0.36이면 2×3.6 + 선 굵기 2.6 = 9.8dp라 10dp 띠 안에 딱 든다.
+                    drawRect(BandGreen, topLeft = Offset(0f, bandY - trackH / 2),
+                        size = Size(size.width, trackH))
                     var cx = -spacing + phase * spacing
                     while (cx < size.width + spacing) {
-                        drawChevron(cx, bandY, bandH * 0.36f, Color.White.copy(alpha = 0.5f), true)
+                        drawChevron(cx, bandY, trackH * 0.36f, Color.White.copy(alpha = 0.5f), true)
                         cx += spacing
                     }
 
                     // ── 까치산 건넘선(단선): 윗선로 → 아래선로로 넘어와 까치산 단선 진입 ──
+                    // 건넘선 셋도 **같은 굵기**(선로의 절반, 5dp)로 맞췄다 — 종전엔 여기만
+                    // `railH`(7dp)고 아래 도림천 X는 3dp라, 같은 성격의 선이 둘로 갈려 있었다.
+                    val xoverW = trackH * 0.5f
                     drawLine(BandGreen.copy(alpha = 0.5f),
                         start = Offset(railStart + 11.dp.toPx(), railY),
                         end = Offset(railStart - 11.dp.toPx(), bandY),
-                        strokeWidth = railH, cap = StrokeCap.Round)
+                        strokeWidth = xoverW, cap = StrokeCap.Round)
 
                     // ── 도림천 건넘선(X 복선): 도림천 직후 양방향 크로스오버 ──
                     val drX = xOf(3f)
@@ -319,11 +336,11 @@ private fun LineMapCard(
                     drawLine(BandGreen.copy(alpha = 0.5f),
                         start = Offset(xoR - 11.dp.toPx(), bandY),   // 상행: 아래→위
                         end = Offset(xoR + 11.dp.toPx(), railY),
-                        strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+                        strokeWidth = xoverW, cap = StrokeCap.Round)
                     drawLine(BandGreen.copy(alpha = 0.5f),
                         start = Offset(xoR - 11.dp.toPx(), railY),   // 하행: 위→아래
                         end = Offset(xoR + 11.dp.toPx(), bandY),
-                        strokeWidth = 3.dp.toPx(), cap = StrokeCap.Round)
+                        strokeWidth = xoverW, cap = StrokeCap.Round)
 
                     // 크로스오버 구간에서 열차가 사선으로 선로를 갈아타는 y좌표.
                     // **역 그리기보다 먼저** 정의한다 — 아래 [holdingStops]가 "어느 선로의 역인지"를
@@ -368,13 +385,16 @@ private fun LineMapCard(
                     BranchLine.stations.forEachIndexed { i, name ->
                         val x = xOf(i.toFloat())
                         val depot = name == "양천구청"
-                        drawCircle(Color.White.copy(alpha = 0.55f), 3.5.dp.toPx(), Offset(x, railY))
-                        drawCircle(Color.White, 6.5.dp.toPx(), Offset(x, bandY))
+                        // 윗선로는 [railStart] 오른쪽에만 있다(까치산 단선) — 없는 선로 위에
+                        // 역 동그라미만 뜨면 허공에 점이 뜬다. 두께를 키우니(7 → 10dp) 그 점이
+                        // 눈에 띄어 드러났다.
+                        if (x >= railStart) drawCircle(Color.White.copy(alpha = 0.55f), stR, Offset(x, railY))
+                        drawCircle(Color.White, stR, Offset(x, bandY))
                         // 흰 동그라미를 통째로 빨갛게 칠하지 않고 **속점**을 얹는다 — 역이라는 표시
                         // (흰 테)는 남기면서 빨강이 뜬다. 양천구청은 노란 링(반지름 10.5dp) 안쪽이라
                         // 빨강·노랑이 같은 원을 다투지 않는다(확대 실측).
-                        if (i to true in holdingStops) drawCircle(StopRed, 2.4.dp.toPx(), Offset(x, railY))
-                        if (i to false in holdingStops) drawCircle(StopRed, 4.4.dp.toPx(), Offset(x, bandY))
+                        if (i to true in holdingStops) drawCircle(StopRed, stopR, Offset(x, railY))
+                        if (i to false in holdingStops) drawCircle(StopRed, stopR, Offset(x, bandY))
                         if (depot) {
                             drawCircle(DidYellow.copy(alpha = 0.16f), 17.dp.toPx(), Offset(x, bandY))
                             drawCircle(DidYellow, 10.5.dp.toPx(), Offset(x, bandY),
@@ -414,44 +434,34 @@ private fun LineMapCard(
                         // 주행 중엔 레일 진동 같은 미세한 상하 바브
                         val ty = trainY(t.toSindorim, pos)
                         val y = ty + (if (!holding) bob.dp.toPx() else 0f)
-                        // 아이콘은 이제 선로 **위에 얹혀** 그려진다 — 넘기는 y는 선로 중심,
-                        // 돌려받는 값은 그려진 아이콘의 윗변이다(라벨을 그 위에 붙이려고).
+                        // 아이콘은 선로 **위에 얹혀** 그려진다 — 넘기는 y는 선로 중심,
+                        // 돌려받는 값은 그려진 아이콘의 윗변이다(`↻ 회차`를 그 위에 붙이려고).
                         val iconTop = drawTrainIcon(
-                            tm, t.trainNo, x, y,
-                            if (ty == railY) railH else bandH,
-                            t.toSindorim, alpha, BandGreen,
-                        )
+                            tm, t.trainNo, x, y, trackH, t.toSindorim, alpha, BandGreen)
 
-                        val dirLbl = tm.measure(
-                            if (t.toSindorim) "신도림행" else "까치산행",
-                            // 9 → 7.5sp(v1.6.50 사용자: *"신도림행,까치산행 텍스트크기도 쫌 더
-                            // 줄여줘!"*). 열번([NO_SP] 9sp)보다 작아야 하는 하한이기도 하다.
-                            TextStyle(fontSize = 7.5.sp, fontWeight = FontWeight.Bold,
-                                color = (if (t.toSindorim) Color(0xFF8FD6FF) else Color(0xFFFFB3AB))
-                                    .copy(alpha = alpha)))
-                        // 종전 `y - 26dp`(아이콘 중심 기준 고정값)에서 **아이콘 윗변 기준**으로 바꿨다.
-                        // 아이콘이 작아지고 위로 올라간 만큼 라벨도 같이 따라와야 사이가 안 벌어진다.
-                        val lblY = iconTop - dirLbl.size.height - 1.dp.toPx()
-                        drawText(dirLbl, topLeft = Offset(
-                            (x - dirLbl.size.width / 2f)
-                                .coerceIn(2.dp.toPx(), size.width - dirLbl.size.width - 2.dp.toPx()),
-                            lblY))
-                        // 회차 배지는 종착역(까치산·신도림)에서만 — 위치 기반 절대 규칙
+                        // v1.6.55: 여기 있던 `신도림행`·`까치산행` 라벨을 뺐다(사용자: *"신도림행
+                        // 텍스트는 없는게 깔끔한거같애"*). 방향은 **진행 화살표(`>`·`<`)와 위/아래
+                        // 선로 자리**가 이미 그리고 있었다 — 같은 말이 두 번이었다.
+                        // (v1.6.50이 카드 구석의 `← 까치산 방면` 알약을 뺀 것과 같은 정리다.)
+
+                        // 회차 배지는 종착역(까치산·신도림)에서만 — 위치 기반 절대 규칙.
+                        // **정보가 다르므로 남긴다** — 방향이 아니라 "지금 되돌아서는 중"이다.
                         if (t.statusText.contains("회차") && (pos <= 0.2f || pos >= 3.8f)) {
                             // 10 → 8.5sp(v1.6.50 사용자: *"회차 동그라미 조금더 줄여줘"*).
                             // `↻` 글리프가 곧 그 동그라미라 글자 크기가 그대로 원 지름이다.
                             val tag = tm.measure("↻ 회차", TextStyle(
                                 fontSize = 8.5.sp, fontWeight = FontWeight.ExtraBold, color = DidYellow))
+                            // 라벨이 빠지면서 기준이 `lblY`(라벨 윗변)에서 **아이콘 윗변**으로 옮겨졌다.
                             drawText(tag, topLeft = Offset(
                                 (x - tag.size.width / 2f)
                                     .coerceIn(4.dp.toPx(), size.width - tag.size.width - 4.dp.toPx()),
-                                lblY - tag.size.height))
+                                iconTop - tag.size.height - 1.dp.toPx()))
                         }
                     }
 
                     // 입고 회송: 신도림 도착 → 윗선로로 도림천 거쳐 기지 진입 (주황)
                     runnerAnimated.forEach { (no, pos) ->
-                        drawTrainIcon(tm, no, xOf(pos), railY, railH, false, 1f, InbOrange)
+                        drawTrainIcon(tm, no, xOf(pos), railY, trackH, false, 1f, InbOrange)
                     }
 
                     // 입고 접근(10분 전~도착 전): 윗선로 위 오른쪽에 텍스트로 안내
@@ -463,8 +473,8 @@ private fun LineMapCard(
                                 TextStyle(fontSize = 10.5.sp, fontWeight = FontWeight.ExtraBold,
                                     color = InbOrange))
                             val tx = size.width - l.size.width - 58.dp.toPx()
-                            // 6 → 3dp(v1.6.49). 아이콘이 선로 위로 올라가면서 윗선로 열차의 방면
-                            // 라벨이 여기까지 올라온다 — 배지를 그만큼 위로 붙여 자리를 비운다.
+                            // 6 → 3dp(v1.6.49) 그대로. 방면 라벨이 빠진 v1.6.55에선 아래에서
+                            // 올라오는 것이 `↻ 회차` 배지뿐이라 여유가 오히려 늘었다.
                             drawRoundRect(Color.White.copy(alpha = 0.10f),
                                 topLeft = Offset(tx - 7.dp.toPx(), 3.dp.toPx()),
                                 size = Size(l.size.width + 14.dp.toPx(), l.size.height + 8.dp.toPx()),
@@ -558,9 +568,9 @@ private fun DrawScope.drawChevron(x: Float, y: Float, h: Float, color: Color, po
 private const val ICON_S = 0.60f
 
 /**
- * 열번 글자 크기 — 배율과 무관한 **가독성 하한**. 역명 11.5sp > 이것 > 방면 라벨 7.5sp.
- * 10 → **9sp**(v1.6.50). 방면 라벨을 7.5sp로 내린 만큼만 따라 내렸다 — 순서가 뒤집히면
- * "내 열차가 어느 것인가"보다 "어느 쪽으로 가는가"가 커진다.
+ * 열번 글자 크기 — 배율과 무관한 **가독성 하한**. 역명 11.5sp > 이것 > `↻ 회차` 8.5sp.
+ * 10 → **9sp**(v1.6.50). 방면 라벨(7.5sp)이 v1.6.55에서 없어졌지만 **여기는 안 건드린다** —
+ * 승무원이 자기 열차를 가려내는 정보라 4자리 판독이 걸린 값이다.
  */
 private const val NO_SP = 9f
 
@@ -575,7 +585,14 @@ private const val NO_SP = 9f
  * 띠·진행 화살표·역 동그라미가 통째로 가렸다(사용자 지적).
  * 정차 빨간 점은 여기서 빠졌다 — **역 동그라미**가 대신 물든다(`holdingStops`).
  *
- * @return 그려진 아이콘의 **윗변** y. 방면 라벨을 그 위에 붙이는 데 쓴다.
+ * ⚠ v1.6.55: 동륜은 v1.6.49부터 이미 레일 윗면에 **수학적으로 닿아** 있었지만
+ * 눈에는 떠 보였다 — 1)의 어두운 후광이 차체 밑으로 `s(3)`까지 내려와 있고 동륜은
+ * `s(4)`까지밖에 안 나와, **후광 밖으로 나온 바퀴가 0.6dp(≈1.6px)** 뿐이었다.
+ * 사용자가 본 건 "레일 위에 뜬 검은 상자"다. 그래서 ⓐ 후광을 차체 밑변에서 끊고
+ * ⓑ 동륜을 반지름만큼 내밀어(차체 밑변 = 동륜 중심) **바퀴 아래 절반이 통째로 보이게**,
+ * ⓒ 접지면을 레일에 `s(1)`만큼 물렸다. 차체는 여전히 선로 띠 위로 완전히 떠 있다.
+ *
+ * @return 그려진 아이콘의 **윗변** y. `↻ 회차` 배지를 그 위에 붙이는 데 쓴다.
  */
 private fun DrawScope.drawTrainIcon(
     tm: TextMeasurer, no: String, cxRaw: Float, trackY: Float, trackH: Float,
@@ -589,8 +606,11 @@ private fun DrawScope.drawTrainIcon(
     // 열번이 배율에서 빠졌으므로 **높이도 열번을 하한으로** 잡는다 — 안 그러면 글자배율을 키운
     // 사용자(지도 안 상한 1.2배)에서 열번 위아래가 알약을 넘는다.
     val bodyH = maxOf(s(24f), label.size.height + s(6f))
-    // 선로 위에 얹기: 동륜 아랫점(cy + bodyH/2 + s(4)) 이 선로 윗면과 만나는 자리
-    val cy = trackY - trackH / 2 - bodyH / 2 - s(4f)
+    // 동륜: 중심을 **차체 밑변에** 두어 아래 절반이 통째로 드러난다(종전엔 s(4)만 내밀어
+    // 후광에 거의 다 먹혔다). 그래서 차체 밑변 = 레일 윗면 − 동륜 반지름이 접지 조건이고,
+    // 여기에 s(1)만 물려 "닿았다"가 확실히 읽히게 한다.
+    val wr = s(4.5f)
+    val cy = trackY - trackH / 2 - bodyH / 2 - wr + s(1f)
     // 증기기관차 쪽은 보일러·배장기가 들어갈 앞머리가 조금 더 길다. totalW에 그대로 반영되므로
     // 아래 clamp가 늘어난 폭까지 알아서 막아 준다(종착역 잘림 회귀 방지).
     val noseW = s(if (faceRight) 19f else 11f)
@@ -608,12 +628,15 @@ private fun DrawScope.drawTrainIcon(
     val top = cy - bodyH / 2
 
     // 1) 어두운 후광 (노즈 포함 전체 영역 덮음)
+    // 아래로는 **차체 밑변에서 끊는다**(종전 `bodyH + s(6)` → `bodyH + s(3)`, v1.6.55).
+    // 후광이 차체보다 아래로 내려오면 그 밑에서 굴러야 할 동륜을 도로 삼켜, 아이콘이
+    // 레일 위에 뜬 검은 상자로 보였다. 위쪽 s(3)은 그대로 — 굴뚝·연기 뒤를 받쳐 준다.
     drawRoundRect(Color(0xFF0E0E0E).copy(alpha = 0.9f * alpha),
         topLeft = Offset((if (faceRight) left else left - noseW) - s(3f), top - s(3f)),
-        size = Size(totalW + s(6f), bodyH + s(6f)),
+        size = Size(totalW + s(6f), bodyH + s(3f)),
         cornerRadius = CornerRadius(s(13f)))
 
-    // 2) 앞머리 — 신도림행만 증기기관차 느낌(보일러·굴뚝·연기·배장기·동륜),
+    // 2) 앞머리 — 신도림행만 증기기관차 느낌(보일러·굴뚝·연기·배장기),
     //    나머지는 종전 삼각 노즈. 어느 쪽이든 3)의 알약이 나중에 덮으므로 뒷부분은 매끈하게 이어진다.
     val outline = Stroke(width = s(2.2f), cap = StrokeCap.Round)
     if (faceRight) {
@@ -664,18 +687,6 @@ private fun DrawScope.drawTrainIcon(
             cornerRadius = CornerRadius(boilerH / 2), style = outline)
         drawCircle(Color.White.copy(alpha = 0.85f * alpha), boilerH * 0.24f,
             Offset(boilerFront - boilerH * 0.46f, cy), style = Stroke(width = s(1.4f)))
-        // 동륜 + 연결봉: 알약 밑으로 아랫부분만 내민다(윗부분은 3)이 덮는다)
-        val wy = cy + bodyH / 2 - s(0.5f)
-        val wr = s(4.5f)
-        val wxs = listOf(0.24f, 0.55f, 0.86f).map { left + bodyW * it }
-        wxs.forEach { wx ->
-            drawCircle(Color(0xFF13170F).copy(alpha = alpha), wr, Offset(wx, wy))
-            drawCircle(Color.White.copy(alpha = 0.9f * alpha), wr, Offset(wx, wy),
-                style = Stroke(width = s(1.8f)))
-        }
-        drawLine(Color.White.copy(alpha = 0.75f * alpha),
-            Offset(wxs.first(), wy + wr * 0.55f), Offset(wxs.last(), wy + wr * 0.55f),
-            strokeWidth = s(1.6f), cap = StrokeCap.Round)
     } else {
         val nose = Path().apply {
             moveTo(left + s(1f), cy - bodyH * 0.36f)
@@ -686,6 +697,21 @@ private fun DrawScope.drawTrainIcon(
         drawPath(nose, body.copy(alpha = alpha))
         drawPath(nose, Color.White.copy(alpha = alpha), style = outline)
     }
+
+    // 2-b) 동륜: 중심이 차체 밑변이라 **아래 절반이 레일에 얹혀** 보인다(윗절반은 3)이 덮는다).
+    // **양방향 아이콘 모두** 굴린다 — 까치산행(삼각 노즈)만 바퀴가 없으면 그쪽 열차는
+    // 계속 떠 보인다. 증기기관차 쪽에만 있던 블록을 조건 밖으로 끌어냈다(v1.6.55).
+    val wy = cy + bodyH / 2
+    val wxs = listOf(0.24f, 0.55f, 0.86f).map { left + bodyW * it }
+    wxs.forEach { wx ->
+        drawCircle(Color(0xFF13170F).copy(alpha = alpha), wr, Offset(wx, wy))
+        drawCircle(Color.White.copy(alpha = 0.9f * alpha), wr, Offset(wx, wy),
+            style = Stroke(width = s(1.8f)))
+    }
+    // 연결봉은 증기기관차 쪽만 — 현대 전동차 밑에 로드가 달리면 오히려 어색하다
+    if (faceRight) drawLine(Color.White.copy(alpha = 0.75f * alpha),
+        Offset(wxs.first(), wy + wr * 0.55f), Offset(wxs.last(), wy + wr * 0.55f),
+        strokeWidth = s(1.6f), cap = StrokeCap.Round)
 
     // 3) 차체: 둥근 사각 (노즈 밑변을 덮어 매끈하게 연결)
     drawRoundRect(body.copy(alpha = alpha), Offset(left, top), Size(bodyW, bodyH),
