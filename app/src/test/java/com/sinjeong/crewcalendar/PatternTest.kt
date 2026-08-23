@@ -1088,19 +1088,13 @@ class PatternTest {
     }
 
     /**
-     * **동료 탭 격자가 한 크기로 유지되는 근거**(v1.6.51). `DutyMatrix.UNIFORM_UNITS = 4.00`은
-     * 격자에 나올 수 있는 **모든** 라벨의 줄별 최대 폭을 전수 조사해 박은 값이고,
-     * 표 전체 글자 크기가 그 하나로만 정해진다. 여기보다 넓은 라벨이 새로 생기면 그 칸만
-     * 잘리거나 눌려서 **"크기가 다르다"는 지적이 다시 나온다**(v1.6.49·v1.6.50이 그렇게 거부됐다).
+     * 동료 탭 격자에 나올 수 있는 **모든 라벨** 전수 조사 — `저장값 → 표시 라벨` 쌍.
      *
-     * 조사 범위: 내장 패턴 4종 시퀀스 + 근무변경으로 고를 수 있는 전부 + 퇴역값 + 충당 계열 4종 ×
+     * 범위: 내장 패턴 4종 시퀀스 + 근무변경으로 고를 수 있는 전부 + 퇴역값 + 충당 계열 4종 ×
      * 고를 수 있는 다이아 전부. 표시값은 동료 탭 전용 `mateLabel`(DutyMatrix.kt, private이라
-     * 여기 한 줄로 옮겨 적는다 — 규칙이 바뀌면 양쪽을 같이 고칠 것)로 뽑는다.
+     * 여기 옮겨 적는다 — **규칙이 바뀌면 양쪽을 같이 고칠 것**).
      */
-    @Test fun mateGrid_every_label_line_fits_uniform_units() {
-        fun units(s: String) = s.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 }
-        fun maxLine(s: String) = s.split('\n').maxOf(::units)
-
+    private fun mateGridLabels(): List<Pair<String, String>> {
         val raws = linkedSetOf<String>()
         Bundled.ALL_PATTERNS.forEach { raws += it.sequence }
         raws += DutyCode.CHANGE_OPTIONS
@@ -1110,12 +1104,65 @@ class PatternTest {
         }
         DutyCode.FILL_OPTIONS.forEach { f -> dias.forEach { d -> raws += "$f $d" } }
 
-        val widest = raws.map { DutyCode.parse(it) }.map { c ->
-            if (c.fill == null && (c.type == DutyType.BRANCH || c.type == DutyType.BRANCH_NIGHT)) c.raw
-            else c.gridLabel
-        }.maxByOrNull(::maxLine)!!
-        // 4.00 = `돌봄휴가`·`동행휴가`·`대기충당`(충당 계열 윗줄). 넘으면 DutyMatrix도 같이 고쳐야 한다
-        assertEquals(widest.replace("\n", "/"), 4.00, maxLine(widest), 0.001)
+        // DutyMatrix.MATE_SHORT 사본 — 네 글자 라벨을 두 글자로 줄여 표 전체 글자를 키운다(v1.6.52)
+        val short = mapOf("돌봄휴가" to "돌봄", "동행휴가" to "동행", "대기충당" to "대기")
+        return raws.map { raw ->
+            val c = DutyCode.parse(raw)
+            raw to when {
+                c.fill != null -> "${short[c.fill] ?: c.fill}\n${c.diaRaw}"
+                c.type == DutyType.BRANCH || c.type == DutyType.BRANCH_NIGHT -> c.raw
+                else -> short[c.display] ?: c.display
+            }
+        }
+    }
+
+    private fun labelUnits(s: String) =
+        s.split('\n').maxOf { line -> line.sumOf { if (it.code >= 0x1100) 1.0 else 0.62 } }
+
+    /**
+     * **동료 탭 격자가 한 크기로 유지되는 근거**(v1.6.51~52). `DutyMatrix.UNIFORM_UNITS = 3.24`는
+     * 격자에 나올 수 있는 **모든** 라벨의 줄별 최대 폭을 전수 조사해 박은 값이고,
+     * 표 전체 글자 크기가 그 하나로만 정해진다. 여기보다 넓은 라벨이 새로 생기면 그 칸만
+     * 잘리거나 눌려서 **"크기가 다르다"는 지적이 다시 나온다**(v1.6.49·v1.6.50이 그렇게 거부됐다).
+     *
+     * 반대로 여기가 **더 작아지면** 표 전체 글자를 그만큼 키울 수 있다 — v1.6.52가 4.00 → 3.24로
+     * 내려 7.36 → 9.09sp를 얻은 길이다. 값이 바뀌면 `UNIFORM_UNITS`도 같이 고칠 것.
+     */
+    @Test fun mateGrid_every_label_line_fits_uniform_units() {
+        val widest = mateGridLabels().map { it.second }.maxByOrNull(::labelUnits)!!
+        // 3.24 = `지대11`. 넘으면 DutyMatrix.UNIFORM_UNITS도 같이 고쳐야 한다
+        assertEquals(widest.replace("\n", "/"), 3.24, labelUnits(widest), 0.001)
+    }
+
+    /**
+     * **서로 다른 근무가 격자에서 같은 글자로 보이면 안 된다**(v1.6.52 축약의 안전장치).
+     *
+     * `돌봄휴가`→`돌봄`처럼 라벨을 줄이면 다른 근무와 겹칠 수 있다. 줄일 때마다 눈으로 확인하지
+     * 말고 여기서 잡는다 — 근무코드가 새로 추가돼도 마찬가지다.
+     *
+     * 뜻이 같아 겹쳐도 되는 것만 예외로 둔다:
+     *  · `~` — 비번은 어느 다이아 다음이든 같은 비번 하나다(`44비`·`지13비`·`비번` …).
+     *  · `휴`·`휴1`~`휴28` — 본선 휴일과 지선 휴일(`지휴5`)이 같은 글자로 온다. **v1.6.52 이전부터**
+     *    그랬고 색도 같은 회색이다(`dutyCellColors`의 REST·BRANCH_REST). v1.6.48이 `지`를 되살린
+     *    대상은 주간·야간 다이아뿐이었다. 고치려면 `mateLabel`에 BRANCH_REST를 더하면 되지만
+     *    (`지휴5` = 2.62 units < 3.24라 글자 크기 손해 0) **이번 지시 범위 밖이라 두었다.**
+     */
+    @Test fun mateGrid_labels_do_not_collide() {
+        val benign = Regex("^~$|^휴\\d*$")
+        val collisions = mateGridLabels()
+            .groupBy({ it.second }, { it.first })
+            .filterValues { it.distinct().size > 1 }
+            .filterKeys { !benign.matches(it) }
+            .mapValues { it.value.distinct() }
+        assertEquals(emptyMap<String, List<String>>(), collisions)
+
+        // 줄인 세 라벨이 실제로 한 근무씩만 가리키는지 (예외 목록에 숨지 않게 따로 못 박는다)
+        val byLabel = mateGridLabels().groupBy({ it.second }, { it.first })
+        listOf("돌봄" to "돌봄휴가", "동행" to "동행휴가", "대기" to "대기충당").forEach { (s, raw) ->
+            assertEquals(s, listOf(raw), byLabel.getValue(s).distinct())
+        }
+        // 충당 계열 윗줄 축약이 대기 근무(`대1`·`대2`·`대11`)와 같은 글자가 아닌 것도 확인
+        assertEquals("대기\n지2", mateGridLabels().first { it.first == "대기충당 지2" }.second)
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
