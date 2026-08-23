@@ -6,39 +6,48 @@ import java.time.LocalDate
 /**
  * 근무선택 1단계 소속 (본선 기관사·차장은 같은 108칸 순환, 시작점만 다름).
  *
- * ## 부서와 조는 따로 둔다 (v1.6.54)
- * 4조2교대는 **운용**과 **관제** 두 부서로 나뉘고 사용자가 *"운용이랑 관제랑 완전 다른 근무"*라고
- * 확정했다. 그래서 소속(= 부서)은 여기서 갈라 두되, **조(A~D)는 여기에 섞지 않는다** —
- * 조는 지금까지 그랬듯 `patternOffset`(= [ShiftTeam.offset])에 그대로 남는다.
- *  · 근무를 정하는 건 **조 글자뿐**이다. 두 부서가 [Bundled.SHIFT_PATTERN]과 완전히 같은
- *    4일 순환(주→야→비→휴)을 쓰므로 부서를 바꿔도 근무 계산은 흔들리지 않는다.
- *  · 부서는 **표시·분류용**이다. 화면에 `운A`·`관D`로 합쳐 보이는 건 [teamBadge] 한 곳뿐이고,
- *    저장은 부서(`patternId`)와 조(`patternOffset`)를 끝까지 따로 한다.
- * 나중에 부서 이동이 생기면 `patternId`만 갈아 끼우면 되고 조·근무는 손댈 것이 없다.
+ * ## 부서(운용/관제)는 소속이 아니라 **사람의 표시 속성**이다 (v1.6.60)
  *
- * ⚠ **[SHIFT_4_2]는 enum 이름을 안 바꿨다.** 동료 저장 키가 `"이름|${'$'}{group.name}"`(`mateKey`)라
- * 이름을 갈면 기존에 저장된 4조2교대 동료가 통째로 유령이 된다. 종전 `4조2교대` 인원은
- * **전원 운용**이었으므로 이 상수가 그대로 운용을 가리키는 것이 곧 하위호환이다.
+ * v1.6.54는 *"운용이랑 관제랑 완전 다른근무야"*를 받아 부서를 [CrewGroup] 두 값으로 갈랐다.
+ * 그런데 소속을 가르면 **동료 탭 필터 칩까지 갈린다**(7 → 8개). 사용자가 실제로 써 보고
+ * 되돌리기로 확정했다: *"운용/관제 탭을 그냥 4조2교대 탭으로 하나로 만들어 주고"*.
  *
- * @param teamPrefix 4조2교대 계열만 갖는 한 글자 부서 표기(`운`·`관`). null이면 조 개념이 없는 소속.
+ * | 개념 | 어디에 사는가 | 하는 일 |
+ * |---|---|---|
+ * | **소속** | [SHIFT_4_2] 하나 | 근무 계산·저장(`patternId`)·동료 탭 필터. 운용 13 + 관제 16 = **29명이 한 칩** |
+ * | **부서** | 이름 ∈ [BundledRoster.SHIFT_CONTROL] | **표시 전용.** 배지 글자(`운`/`관`)를 고를 때만 본다 |
+ * | **조** (A~D) | `patternOffset` (= [ShiftTeam.offset]) | **근무를 정하는 유일한 값** |
+ *
+ * 부서를 저장하지 않으므로 `patternId`가 하나로 돌아왔고([Bundled.groupFor]), 부서를 바꿔도
+ * 근무는 한 칸도 안 움직인다 — 애초에 근무 계산이 부서를 안 본다.
+ * 합치는 자리는 [teamBadge] 한 곳뿐이다(v1.6.54 표기 `운A`·`관D` 그대로 유지 — 사용자 확정).
+ *
+ * ⚠ **[SHIFT_4_2]는 enum 이름을 한 번도 안 바꿨다.** 동료 저장 키가 `"이름|${'$'}{group.name}"`
+ * (`mateKey`)라 이름을 갈면 저장된 동료가 통째로 유령이 된다.
  */
-enum class CrewGroup(val label: String, val role: CrewRole, val teamPrefix: String? = null) {
+enum class CrewGroup(val label: String, val role: CrewRole) {
     BRANCH("신정지선", CrewRole.DRIVER_BRANCH),
     MAIN_DRIVER("본선 기관사", CrewRole.DRIVER_MAIN),
     MAIN_CONDUCTOR("본선 차장", CrewRole.CONDUCTOR),
-    /** 운용조. 옛 `4조2교대` 그대로다 — enum 이름을 바꾸면 저장된 동료 키가 깨진다(위 주석). */
-    SHIFT_4_2("운용", CrewRole.OPERATION, "운"),
-    /** 기지관제. v1.6.54에서 새로 갈라 나왔다. 근무계획표 표기는 `관제A조`이므로 `기지`가 아니라 `관제`. */
-    SHIFT_CONTROL("관제", CrewRole.OPERATION, "관"),
+    /** 운용 + 기지관제 29명. 부서는 [teamBadge]가 이름으로 갈라 배지에만 붙인다(v1.6.60). */
+    SHIFT_4_2("4조2교대", CrewRole.OPERATION),
     OFFICE_DAY("통상근무", CrewRole.OFFICE_STAFF),
 }
 
 /**
  * 화면 표기 `운A`·`관D` — **부서와 조를 합치는 유일한 자리**(v1.6.54 사용자 확정 표기, 괄호 없이 두 글자).
- * 4조2교대 계열이 아니면 null. 정렬 키로도 쓴다(같은 부서 안에서 조 글자순 = A→D).
+ *
+ * 부서는 [BundledRoster.isControl] 한 곳에서만 판별한다: 기지관제 명단에 이름이 있으면 `관`,
+ * 아니면 `운`. 한 사람이 두 부서에 동시에 속할 수 없으므로 **이름이 곧 부서의 근거**다
+ * (v1.6.54는 `CrewGroup`으로 갈라 두었는데, 그러면 필터 칩까지 갈라진다 — [CrewGroup] 주석).
+ *
+ * 4조2교대가 아니면 null. 정렬 키로도 쓴다 — `관A`…`관D` < `운A`…`운D`라 **부서 → 조** 순으로
+ * 묶인다(29명이 이름순으로만 섞이면 같은 조를 눈으로 찾아야 한다).
  */
-fun teamBadge(group: CrewGroup, offset: Int): String? =
-    group.teamPrefix?.let { p -> ShiftTeam.ofOffset(offset)?.let { "$p${it.name}" } }
+fun teamBadge(group: CrewGroup, offset: Int, name: String): String? =
+    if (group != CrewGroup.SHIFT_4_2) null
+    else ShiftTeam.ofOffset(offset)
+        ?.let { "${if (BundledRoster.isControl(name)) "관" else "운"}${it.name}" }
 
 /**
  * 4조2교대 근무조.
@@ -131,14 +140,13 @@ object Bundled {
     )
 
     /**
-     * 기지관제 (v1.6.54) — **순환·기준일이 [SHIFT_PATTERN]과 완전히 같다.** 그래서 복사본이다.
-     * 근무를 정하는 건 조 글자뿐이므로 관제A조는 운용A조와 언제나 같은 근무다
-     * (8월 근무계획표 검증: 8/1 토요일에 운용A·관제A 모두 야간).
+     * **퇴역 id — 지우면 안 된다**(v1.6.60). v1.6.54~59가 관제를 별도 소속으로 두던 동안
+     * 근무선택을 한 관제 직원의 Firestore `users.patternId`에 `bundled-control42`가 남아 있다.
+     * `GetMonthScheduleUseCase`가 **저장된 id로 패턴을 되찾으므로**([ALL_PATTERNS] 조회),
+     * 여기서 빼면 그 사람 달력이 통째로 빈다. 본인이 근무선택을 다시 하면 `bundled-shift42`가 덮인다.
      *
-     * 그런데도 [Pattern]을 따로 두는 이유는 **저장 때문**이다. Firestore `users` 문서는 소속을
-     * `patternId` 하나로만 적는다(`FirestoreRosterRepository.observeUsers`가 `groupFor`로 되읽는다).
-     * 두 부서가 id를 공유하면 관제 직원이 로그인해도 운용으로 되읽혀 부서가 사라진다.
-     * `copy()`라 순환값이 두 벌로 갈릴 일은 없다 — 한쪽만 고치는 사고가 구조적으로 불가능하다.
+     * 내용은 [SHIFT_PATTERN]의 `copy()`라 순환값이 두 벌로 갈릴 일이 구조적으로 없다.
+     * 부서 판별에는 더 이상 안 쓴다 — 이름으로 안다([teamBadge]).
      */
     val CONTROL_PATTERN = SHIFT_PATTERN.copy(id = "bundled-control42", name = "관제")
 
@@ -165,31 +173,23 @@ object Bundled {
     fun patternFor(group: CrewGroup): Pattern = when (group) {
         CrewGroup.BRANCH -> BRANCH_PATTERN
         CrewGroup.SHIFT_4_2 -> SHIFT_PATTERN
-        CrewGroup.SHIFT_CONTROL -> CONTROL_PATTERN
         CrewGroup.OFFICE_DAY -> OFFICE_PATTERN
         else -> MAIN_PATTERN
     }
 
     /**
-     * `patternId` → 소속. **하위호환 지점**(v1.6.54).
+     * `patternId` → 소속. **하위호환 지점**.
      *
-     * 옛 `"bundled-shift42"`는 부서가 갈리기 전 값이라 운용인지 관제인지 id만으로는 알 수 없다.
-     * 관제 직원도 그때는 고를 수 있는 것이 `4조2교대` 하나뿐이라 **이미 그 값으로 등록돼 있다**
-     * (Firestore `users` 실데이터에서 확인 — 그대로 두면 그 사람이 동료 탭에 운용·관제 두 줄로 뜬다).
-     *  · [name]을 주면 **기지관제 명단에 있는 이름은 관제로 되돌린다.** 한 사람은 두 부서에
-     *    동시에 속할 수 없으므로 이름이 곧 부서의 근거다.
-     *  · [name] 없이 부르면 종전대로 운용 — 부서가 갈리기 전 인원은 전원 운용이었다.
-     * 본인이 근무선택을 다시 하면 새 `patternId`가 저장돼 이 보정이 필요 없어진다.
+     * v1.6.54~59가 잠깐 쓰던 관제 전용 id([CONTROL_PATTERN])도 **4조2교대로 되읽는다** —
+     * 부서는 이제 소속이 아니라 이름으로 판별하는 표시 속성이라([teamBadge]) id로 가를 것이 없다.
+     * 그 사이에 근무선택을 한 관제 직원의 저장값이 그대로 살아 있으므로 이 한 줄이 곧 마이그레이션이고,
+     * 두 id가 같은 소속·같은 순환을 가리키므로 근무는 한 칸도 안 바뀐다.
      * 되읽지 못하는 id는 종전대로 null이다.
      */
-    fun groupFor(patternId: String?, name: String? = null): CrewGroup? = when (patternId) {
+    fun groupFor(patternId: String?): CrewGroup? = when (patternId) {
         BRANCH_PATTERN.id -> CrewGroup.BRANCH
         MAIN_PATTERN.id -> CrewGroup.MAIN_DRIVER
-        SHIFT_PATTERN.id ->
-            if (name != null && BundledRoster.SHIFT_CONTROL.any { it.first == name.trim() })
-                CrewGroup.SHIFT_CONTROL
-            else CrewGroup.SHIFT_4_2
-        CONTROL_PATTERN.id -> CrewGroup.SHIFT_CONTROL
+        SHIFT_PATTERN.id, CONTROL_PATTERN.id -> CrewGroup.SHIFT_4_2
         OFFICE_PATTERN.id -> CrewGroup.OFFICE_DAY
         else -> null
     }

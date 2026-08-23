@@ -186,16 +186,35 @@ class LocalMateRepository @Inject constructor(
      */
     private fun key(mate: Mate) = "${mate.name}|${mate.group.name}"
 
-    /** 이름-only 옛 키를 이름|소속으로 1회 이관 — 기존 즐겨찾기·수동등록이 날아가지 않게 */
+    /**
+     * 없어진 소속 이름 → 지금 소속. `SHIFT_CONTROL`은 v1.6.54~59에만 있던 값이다(v1.6.60에서
+     * 부서를 소속에서 빼고 4조2교대로 다시 합쳤다 — `CrewGroup` 주석).
+     *
+     * 안 두면 `CrewGroup.valueOf`가 던져서 관제 동료가 통째로 **신정지선**으로 되읽히고(근무가 딴판),
+     * 키까지 옛것으로 남아 ★을 토글하거나 지우면 같은 사람이 **두 줄**로 늘어난다
+     * (`LazyColumn`의 key 중복 → 크래시).
+     */
+    private val RENAMED_GROUPS = mapOf("SHIFT_CONTROL" to CrewGroup.SHIFT_4_2.name)
+
+    /**
+     * 옛 저장분을 "이름|지금소속" 한 벌로 1회 이관 — 기존 즐겨찾기·수동등록이 날아가지 않게.
+     *  ① 이름-only 키 (v1.6.15 이전)
+     *  ② 없어진 소속 이름이 박힌 키 (`이름|SHIFT_CONTROL`, v1.6.60)
+     * 키와 본문(`group`)을 **같이** 고친다 — 본문만 두면 `loadAll`이 옛 소속으로 되읽는다.
+     */
     private fun migrateLegacyKeys() {
-        val legacy = prefs.all.filterKeys { !it.contains('|') }
-        if (legacy.isEmpty()) return
+        val stale = prefs.all.filterKeys { !it.contains('|') || it.substringAfter('|') in RENAMED_GROUPS }
+        if (stale.isEmpty()) return
         val e = prefs.edit()
-        legacy.forEach { (name, value) ->
-            val group = runCatching {
-                CrewGroup.valueOf(JSONObject(value as String).optString("group"))
-            }.getOrDefault(CrewGroup.BRANCH)
-            e.putString("$name|${group.name}", value as String).remove(name)
+        stale.forEach { (k, value) ->
+            runCatching {
+                val o = JSONObject(value as String)
+                val old = if ('|' in k) k.substringAfter('|') else o.optString("group")
+                val group = RENAMED_GROUPS[old]
+                    ?: runCatching { CrewGroup.valueOf(old).name }.getOrDefault(CrewGroup.BRANCH.name)
+                e.putString("${k.substringBefore('|')}|$group", o.put("group", group).toString())
+                    .remove(k)
+            }
         }
         e.apply()
     }

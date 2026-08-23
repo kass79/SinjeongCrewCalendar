@@ -1119,10 +1119,11 @@ private fun KvRow(key: String, value: String, sub: Boolean = false) {
 
 /**
  * 1단계에서 카드 한 장으로 묶어 보여주는 사업소 근무형태 (enum은 분리 유지 — 동료근무 섹션 구분용).
- * v1.6.54에서 4조2교대가 운용·관제로 갈리며 셋이 됐다 — 1단계 카드 수는 **여전히 4장**이다
- * (승무 3종 + 이 묶음 카드 1장). v1.6.42 ②의 "한 화면에 다 보이게"가 그대로 유지된다.
+ * v1.6.54에서 4조2교대가 운용·관제로 갈려 셋이었다가 **v1.6.60에서 둘로 돌아왔다**
+ * (부서는 소속이 아니라 이름으로 판별하는 표시 속성 — `CrewGroup` 주석).
+ * 1단계 카드 수는 내내 **4장**이다(승무 3종 + 이 묶음 카드 1장) — v1.6.42 ②의 "한 화면에 다 보이게".
  */
-private val SITE_GROUPS = listOf(CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_4_2, CrewGroup.SHIFT_CONTROL)
+private val SITE_GROUPS = listOf(CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_4_2)
 
 /* ── 근무선택 시트: ① 소속 → (사업소면 근무형태) → ② 근무 그리드 ───────────────
    관리자 화면(동료 대리등록)도 이 시트를 그대로 재사용한다 — patternOffset 계산 경로를 하나로 유지. */
@@ -1186,8 +1187,7 @@ internal fun DutyPickerSheet(
                             Text(g.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text(
                                 when (g) {
-                                    CrewGroup.SHIFT_4_2 -> "운용조 4조2교대 · 주간→야간→비번→휴무 · A~D조"
-                                    CrewGroup.SHIFT_CONTROL -> "기지관제 4조2교대 · 주간→야간→비번→휴무 · A~D조"
+                                    CrewGroup.SHIFT_4_2 -> "운용조·기지관제 · 주간→야간→비번→휴무 · A~D조"
                                     CrewGroup.OFFICE_DAY -> "사무실·소장·지도과·관리과 · 월~금 주간, 토·일·공휴일 휴무"
                                     else -> "${pattern.length}칸 교번 순환"
                                 } + if (isCurrent) " · 현재 선택" else "",
@@ -1218,13 +1218,13 @@ internal fun DutyPickerSheet(
                         }
                     }
                 }
-            } else if (picker.group.teamPrefix != null) {
+            } else if (picker.group == CrewGroup.SHIFT_4_2) {
                 // 2단계(4조2교대 — 운용·관제 공통): 29칸 다이아 대신 A·B·C·D 4개 조.
-                // 부서가 갈려도 고르는 것은 **조 하나뿐**이다 — 두 부서의 순환이 완전히 같기 때문(v1.6.54).
+                // 고르는 것은 **조 하나뿐**이다 — 부서는 근무를 안 정하고 배지에만 쓴다(v1.6.60).
                 val pattern = Bundled.patternFor(picker.group)
                 val days = ChronoUnit.DAYS.between(pattern.anchorDate, picker.date).toInt()
                 Text(
-                    "근무선택  2/2 · ${picker.group.label} 4조2교대",
+                    "근무선택  2/2 · ${picker.group.label}",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 근무형태 다시 선택") }

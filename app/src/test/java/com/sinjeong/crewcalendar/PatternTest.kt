@@ -5,6 +5,7 @@ import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.BundledTimetable
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
+import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.MainLegs
@@ -115,73 +116,79 @@ class PatternTest {
             row.forEachIndexed { i, ch ->
                 val expected = plan[ch] ?: return@forEachIndexed
                 val date = start.plusDays(i.toLong())
-                // 운용·관제 **두 부서 모두** 같은 값이어야 한다 — 조 글자만이 근무를 정한다
-                listOf(CrewGroup.SHIFT_4_2, CrewGroup.SHIFT_CONTROL).forEach { g ->
-                    assertEquals(
-                        "${g.label}${team.label} $date",
-                        expected, Bundled.patternFor(g).dutyOn(date, team.offset).raw,
-                    )
-                    checked++
-                }
+                // 운용·관제가 **한 순환**이라는 것이 v1.6.60 병합의 전제다 — 조 글자만이 근무를 정한다.
+                // (v1.6.54는 부서별 Pattern 두 벌을 각각 재서 72칸이었다. 지금은 한 벌뿐이라 36칸.)
+                assertEquals(
+                    "4조2교대 ${team.label} $date",
+                    expected, Bundled.patternFor(CrewGroup.SHIFT_4_2).dutyOn(date, team.offset).raw,
+                )
+                checked++
             }
         }
-        assertEquals("대조한 칸 수", 72, checked) // (10+8+9+9)일 × 2부서
+        assertEquals("대조한 칸 수", 36, checked) // 10+8+9+9일
+        // 퇴역 id로 저장된 관제 직원도 같은 근무를 받아야 한다(v1.6.54~59 저장분, `CONTROL_PATTERN`)
+        assertEquals(
+            Bundled.SHIFT_PATTERN.sequence,
+            Bundled.ALL_PATTERNS.first { it.id == "bundled-control42" }.sequence,
+        )
     }
 
     /**
-     * **부서(CrewGroup)와 조(patternOffset)는 끝까지 따로 둔다** (v1.6.54 사용자 확정 설계).
+     * **부서(운용/관제)는 소속이 아니라 사람의 표시 속성이다** (v1.6.60 사용자 확정).
      *
-     * 합쳐지는 곳은 화면 표기 [teamBadge] 하나뿐이고, 근무를 정하는 것은 조 글자뿐이다.
-     * 이 테스트가 깨지면 부서 이동이 근무를 흔드는 구조로 되돌아간 것이다.
+     * v1.6.54는 부서를 `CrewGroup` 두 값으로 갈랐고 그 탓에 동료 탭 필터 칩까지 갈렸다.
+     * 사용자가 되돌리라고 했다(*"운용/관제 탭을 그냥 4조2교대 탭으로 하나로"*) — 단
+     * **배지 `운A`·`관D`는 그대로 둔다**. 이 테스트가 지키는 것이 정확히 그 경계다:
+     * 소속·근무·필터는 하나, 부서는 이름으로만 갈린다.
      */
-    @Test fun department_and_team_stay_separate() {
-        // ① 두 부서의 순환 데이터가 완전히 같다 (id·이름만 다름)
-        val op = Bundled.patternFor(CrewGroup.SHIFT_4_2)
-        val ctrl = Bundled.patternFor(CrewGroup.SHIFT_CONTROL)
-        assertEquals(op.sequence, ctrl.sequence)
-        assertEquals(op.anchorDate, ctrl.anchorDate)
-        assertTrue("두 부서가 patternId를 공유하면 저장 때 부서가 사라진다", op.id != ctrl.id)
+    @Test fun department_is_display_only() {
+        // ① 소속은 하나뿐이다 — 4조2교대 계열 CrewGroup이 둘이면 필터 칩이 다시 갈린다
+        assertEquals(
+            listOf(CrewGroup.SHIFT_4_2),
+            CrewGroup.entries.filter { it.role == CrewRole.OPERATION },
+        )
+        assertEquals("4조2교대", CrewGroup.SHIFT_4_2.label)
+        // 동료 저장 키(`이름|enum이름`)는 한 번도 안 바뀌었다 — 바뀌면 저장된 동료가 유령이 된다
+        assertEquals("SHIFT_4_2", CrewGroup.SHIFT_4_2.name)
 
-        // ② 부서를 바꿔도 근무는 한 칸도 안 바뀐다
-        (0..40).forEach { d ->
-            val date = LocalDate.of(2026, 8, 1).plusDays(d.toLong())
-            ShiftTeam.entries.forEach { t ->
-                assertEquals("$date ${t.label}", op.dutyOn(date, t.offset).raw, ctrl.dutyOn(date, t.offset).raw)
-            }
+        // ② 한 칩에 29명이 다 온다 (운용 13 + 관제 16). 갈라져 있으면 여기서 잡힌다
+        val all = BundledRoster.forGroup(CrewGroup.SHIFT_4_2)
+        assertEquals("4조2교대 전원", 29, all.size)
+        assertEquals("이름 중복", 29, all.map { it.first }.toSet().size)
+        assertTrue("관제 16명이 4조2교대 명단에 없다", all.containsAll(BundledRoster.SHIFT_CONTROL))
+        assertTrue("운용 13명이 4조2교대 명단에 없다", all.containsAll(BundledRoster.SHIFT_4_2))
+
+        // ③ 배지는 괄호 없이 두 글자, 부서 글자 + 조 글자. 부서는 **이름**이 정한다
+        assertEquals("운A", teamBadge(CrewGroup.SHIFT_4_2, ShiftTeam.A.offset, "황태상"))
+        assertEquals("관D", teamBadge(CrewGroup.SHIFT_4_2, ShiftTeam.D.offset, "박영무"))
+        assertEquals("관B", teamBadge(CrewGroup.SHIFT_4_2, ShiftTeam.B.offset, " 남궁용권 "))
+        assertEquals("운B", teamBadge(CrewGroup.SHIFT_4_2, ShiftTeam.B.offset, "박태호"))  // 명단 밖 = 운용
+        // 명단 전원이 제 부서 글자를 받는지 (한 명이라도 어긋나면 배지가 통째로 의심스럽다)
+        BundledRoster.SHIFT_CONTROL.forEach { (n, off) ->
+            assertEquals(n, "관", teamBadge(CrewGroup.SHIFT_4_2, off, n)?.take(1))
         }
-
-        // ③ 표기는 괄호 없이 두 글자, 부서 글자 + 조 글자
-        assertEquals("운A", teamBadge(CrewGroup.SHIFT_4_2, ShiftTeam.A.offset))
-        assertEquals("관D", teamBadge(CrewGroup.SHIFT_CONTROL, ShiftTeam.D.offset))
-        assertEquals("관B", teamBadge(CrewGroup.SHIFT_CONTROL, ShiftTeam.B.offset))
-        // 4조2교대가 아닌 소속엔 조 개념이 없다 → 배지도 없다(정렬 키도 여기에 기댄다)
+        BundledRoster.SHIFT_4_2.forEach { (n, off) ->
+            assertEquals(n, "운", teamBadge(CrewGroup.SHIFT_4_2, off, n)?.take(1))
+        }
+        // 정렬 키로도 쓴다 — 관 < 운 이라 부서 → 조 순으로 묶인다
+        assertTrue("관A" < "운A")
+        // 4조2교대가 아닌 소속엔 조 개념이 없다 → 배지도 없다(정렬이 여기에 기댄다)
         listOf(CrewGroup.BRANCH, CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.OFFICE_DAY)
-            .forEach { assertNull(it.name, teamBadge(it, 0)) }
+            .forEach { assertNull(it.name, teamBadge(it, 0, "박영무")) }
         // 공식 문서 표기: `반`이 아니라 `조`
         assertEquals("A조", ShiftTeam.A.label)
 
-        // ④ 하위호환 — 옛 `4조2교대` 저장값(patternId)은 기본적으로 운용으로 되읽힌다.
-        //    부서가 갈리기 전 4조2교대 인원은 전원 운용이었다.
+        // ④ 하위호환 — v1.6.54~59가 저장한 관제 전용 id도 4조2교대로 되읽힌다.
+        //    `GetMonthScheduleUseCase`가 저장된 id로 패턴을 되찾으므로 ALL_PATTERNS에서도 빼면 안 된다.
         assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-shift42"))
-        assertEquals(CrewGroup.SHIFT_CONTROL, Bundled.groupFor("bundled-control42"))
-
-        // ⑤ 이름을 주면 **관제 인원은 관제로 되돌린다**. 관제 직원도 부서가 갈리기 전엔
-        //    고를 수 있는 게 `4조2교대` 하나뿐이라 이미 그 값으로 등록돼 있다(Firestore 실데이터).
-        //    안 하면 동료 탭에 운용·관제 두 줄로 뜬다 — v1.6.54 에뮬레이터에서 박영무로 실제로 잡혔다.
-        assertEquals(CrewGroup.SHIFT_CONTROL, Bundled.groupFor("bundled-shift42", "박영무"))
-        assertEquals(CrewGroup.SHIFT_CONTROL, Bundled.groupFor("bundled-shift42", " 남궁용권 "))
-        assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-shift42", "황태상"))  // 운용은 그대로
-        assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-shift42", "박태호"))  // 명단 밖도 운용
-        // 이름 보정은 옛 id에만 건다 — 다른 소속은 이름으로 흔들리면 안 된다
-        assertEquals(CrewGroup.BRANCH, Bundled.groupFor("bundled-branch", "박영무"))
-        assertEquals(CrewGroup.MAIN_DRIVER, Bundled.groupFor("bundled-main", "박영무"))
-        // 동료 저장 키(`이름|enum이름`)도 그대로여야 저장된 동료가 유령이 되지 않는다
-        assertEquals("SHIFT_4_2", CrewGroup.SHIFT_4_2.name)
+        assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-control42"))
+        assertNotNull(Bundled.ALL_PATTERNS.firstOrNull { it.id == "bundled-control42" })
+        assertNull(Bundled.groupFor("bundled-none"))
     }
 
-    /** 관제 16명이 4개 조에 4명씩 들어갔는지 — 한 명이라도 빠지면 그 사람 근무가 안 뜬다 */
+    /** 관제 16명이 4개 조에 4명씩 들어갔는지 — 한 명이라도 빠지면 그 사람 배지가 `운`이 된다 */
     @Test fun controlRoster_has_sixteen_across_four_teams() {
-        val list = BundledRoster.forGroup(CrewGroup.SHIFT_CONTROL)
+        val list = BundledRoster.SHIFT_CONTROL
         assertEquals("기지관제 인원", 16, list.size)
         assertEquals("이름 중복", 16, list.map { it.first }.toSet().size)
         val byTeam = list.groupBy({ it.second }, { it.first })
@@ -190,9 +197,11 @@ class PatternTest {
             assertEquals("관제${team.label} 인원", 4, byTeam[team.offset]?.size)
             assertTrue("$name 관제${team.label}", byTeam[team.offset]?.contains(name) == true)
         }
-        // 운용과 이름이 겹치면 한쪽이 잘못 들어간 것이다
-        val op = BundledRoster.forGroup(CrewGroup.SHIFT_4_2).map { it.first }.toSet()
+        // 운용과 이름이 겹치면 한쪽이 잘못 들어간 것이다 (겹치면 `isControl`이 배지를 뒤집는다)
+        val op = BundledRoster.SHIFT_4_2.map { it.first }.toSet()
         assertEquals("운용·관제 겹치는 이름", emptySet<String>(), op intersect list.map { it.first }.toSet())
+        assertTrue("박영무", BundledRoster.isControl(" 박영무 "))
+        assertTrue("황태상", !BundledRoster.isControl("황태상"))
     }
 
     /** 좁은 칸 표기(v1.6.24): 낱말 코드는 한 글자. 색을 정하는 `type`·원본 `raw`는 그대로다 */
@@ -278,7 +287,7 @@ class PatternTest {
     @Test fun new_group_names_resolve_to_phone_numbers() {
         val knownMissingPhone = setOf("김대호", "이영란")
         val missing = mutableListOf<String>()
-        listOf(CrewGroup.SHIFT_4_2, CrewGroup.SHIFT_CONTROL, CrewGroup.OFFICE_DAY).forEach { g ->
+        listOf(CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY).forEach { g ->
             BundledRoster.forGroup(g).forEach { (name, _) ->
                 // 이름이 어긋나면(오타 등) phoneFor 가 null 을 주므로 여기서 같이 걸린다
                 if (BundledStaff.phoneFor(name, false) == null) missing += name

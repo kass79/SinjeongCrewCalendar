@@ -152,8 +152,8 @@ class FirestoreRosterRepository @Inject constructor() : RosterRepository {
                     val name = d.getString("name") ?: return@mapNotNull null
                     val group =
                         if (d.getString("role") == CrewRole.CONDUCTOR.name) CrewGroup.MAIN_CONDUCTOR
-                        // 이름을 같이 넘겨 옛 `4조2교대` 등록분 중 관제 인원을 관제로 되돌린다(v1.6.54)
-                        else Bundled.groupFor(d.getString("patternId"), name) ?: CrewGroup.BRANCH
+                        // 옛 관제 전용 id(bundled-control42)도 4조2교대로 되읽힌다(v1.6.60, `Bundled.groupFor`)
+                        else Bundled.groupFor(d.getString("patternId")) ?: CrewGroup.BRANCH
                     RosterEntry(
                         d.id, name, group, (d.getLong("patternOffset") ?: 0L).toInt(),
                         addedBy = d.getString("addedBy"),

@@ -149,7 +149,7 @@ fun SettingsScreen(
             SettingRow(
                 title = "근무 패턴",
                 sub = buildString {
-                    val g = Bundled.groupFor(user?.patternId, user?.name)
+                    val g = Bundled.groupFor(user?.patternId)
                     append(g?.label ?: "미선택")
                     append(" · 변경은 달력 상단 [근무선택]")
                 },

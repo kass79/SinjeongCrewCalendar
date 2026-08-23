@@ -46,7 +46,7 @@ data class CalendarUiState(
         get() = when {
             user?.patternId == Bundled.MAIN_PATTERN.id ->
                 if (user.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else CrewGroup.MAIN_DRIVER
-            else -> Bundled.groupFor(user?.patternId, user?.name)
+            else -> Bundled.groupFor(user?.patternId)
         }
 }
 

@@ -76,8 +76,9 @@ object BundledRoster {
 
     /**
      * 4조2교대 **운용** 13명. offset = `ShiftTeam.offset` (A0 · B3 · C2 · D1) — 조 순번이 아니다.
-     * v1.6.54에서 관제가 [SHIFT_CONTROL]로 갈라져 나가면서 이 목록은 운용 전용이 됐다
-     * (enum 상수 이름은 `SHIFT_4_2` 그대로 — 저장 키 호환, `CrewGroup` 주석 참조).
+     * v1.6.54에서 관제 명단([SHIFT_CONTROL])이 갈라져 나가면서 이 목록은 운용 전용이 됐다.
+     * ⚠ **소속(`CrewGroup.SHIFT_4_2`)은 둘을 합친 29명이다**(v1.6.60, [SHIFT_ALL]) —
+     * 여기서 갈린 것은 **배지 글자(`운`/`관`)를 고르기 위한 명단**일 뿐이다.
      *
      * 배정 근거(v1.6.24): **사용자가 직접 확인해 준 2026-08-16 실근무**
      *   A조=주간(황태상·한종한·신승국) / B조=휴무(윤종대·김대호·박희수)
@@ -108,6 +109,10 @@ object BundledRoster {
      * 종전엔 `BundledStaff`(로그인 명단)에만 있고 여기엔 없어서 **로그인은 되는데 자기 근무가
      * 안 떴다.** 이번에 등록하면서 운용과 부서를 갈랐다(사용자: *"운용이랑 관제랑 완전 다른근무야"*).
      *
+     * ⚠ **이 목록은 v1.6.60부터 "부서 판별 명단"이다** — 소속·근무 계산·동료 탭 필터는
+     * [SHIFT_ALL] 29명 한 덩어리로 돌아갔고, 여기 이름이 있으면 배지가 `관A`, 없으면 `운A`가 된다
+     * ([isControl] → `teamBadge`). 즉 **여기서 이름이 빠지면 그 사람 배지가 `운`으로 바뀐다.**
+     *
      * 명단·조 배정 근거: `2026년 8월 지도 및 교대근무자(당직 포함) 근무계획.xlsx`의 `전체` 시트
      * (문서 표기 `관제A조`~`관제D조`). offset은 운용과 **같은 `ShiftTeam.offset`** 을 쓴다 —
      * 같은 조 글자면 부서와 무관하게 같은 근무이기 때문이다(8/1 토요일 운용A·관제A 모두 야간으로 검증).
@@ -126,6 +131,18 @@ object BundledRoster {
     )
 
     /**
+     * 4조2교대 **전원** 29명 = 운용 13 + 관제 16 (v1.6.60).
+     * 소속 칩 `4조2교대` 하나가 이 목록을 그대로 보여 준다 — 부서로 갈리지 않는다.
+     * 정렬(부서 → 조 → 이름)은 화면 쪽 `teamBadge` 정렬 키가 맡는다(`MatesScreen`).
+     */
+    val SHIFT_ALL: List<Pair<String, Int>> = SHIFT_4_2 + SHIFT_CONTROL
+
+    /** 4조2교대 안에서 **부서를 가르는 유일한 근거** — 관제 명단에 이름이 있으면 배지가 `관A` */
+    fun isControl(name: String): Boolean = name.trim() in CONTROL_NAMES
+
+    private val CONTROL_NAMES: Set<String> = SHIFT_CONTROL.mapTo(mutableSetOf()) { it.first }
+
+    /**
      * 통상근무 9명 (사무실·소장/부사업소장·지도과·관리과). 조 구분 없음 → offset 0 고정.
      * 명단 근거: 사용자 확정(2026-08-16). 박형렬·이영란이 새로 들어오고
      * 김수간·신성균·최재훈은 4조2교대로 옮겨 갔다.
@@ -139,8 +156,7 @@ object BundledRoster {
         CrewGroup.MAIN_DRIVER -> MAIN_DRIVER
         CrewGroup.MAIN_CONDUCTOR -> MAIN_CONDUCTOR
         CrewGroup.BRANCH -> BRANCH
-        CrewGroup.SHIFT_4_2 -> SHIFT_4_2
-        CrewGroup.SHIFT_CONTROL -> SHIFT_CONTROL
+        CrewGroup.SHIFT_4_2 -> SHIFT_ALL
         CrewGroup.OFFICE_DAY -> OFFICE_DAY
     }
 }
