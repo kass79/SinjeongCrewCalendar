@@ -3,14 +3,42 @@ package com.sinjeong.crewcalendar.domain.model
 import java.time.DayOfWeek
 import java.time.LocalDate
 
-/** 근무선택 1단계 소속 (본선 기관사·차장은 같은 108칸 순환, 시작점만 다름) */
-enum class CrewGroup(val label: String, val role: CrewRole) {
+/**
+ * 근무선택 1단계 소속 (본선 기관사·차장은 같은 108칸 순환, 시작점만 다름).
+ *
+ * ## 부서와 조는 따로 둔다 (v1.6.54)
+ * 4조2교대는 **운용**과 **관제** 두 부서로 나뉘고 사용자가 *"운용이랑 관제랑 완전 다른 근무"*라고
+ * 확정했다. 그래서 소속(= 부서)은 여기서 갈라 두되, **조(A~D)는 여기에 섞지 않는다** —
+ * 조는 지금까지 그랬듯 `patternOffset`(= [ShiftTeam.offset])에 그대로 남는다.
+ *  · 근무를 정하는 건 **조 글자뿐**이다. 두 부서가 [Bundled.SHIFT_PATTERN]과 완전히 같은
+ *    4일 순환(주→야→비→휴)을 쓰므로 부서를 바꿔도 근무 계산은 흔들리지 않는다.
+ *  · 부서는 **표시·분류용**이다. 화면에 `운A`·`관D`로 합쳐 보이는 건 [teamBadge] 한 곳뿐이고,
+ *    저장은 부서(`patternId`)와 조(`patternOffset`)를 끝까지 따로 한다.
+ * 나중에 부서 이동이 생기면 `patternId`만 갈아 끼우면 되고 조·근무는 손댈 것이 없다.
+ *
+ * ⚠ **[SHIFT_4_2]는 enum 이름을 안 바꿨다.** 동료 저장 키가 `"이름|${'$'}{group.name}"`(`mateKey`)라
+ * 이름을 갈면 기존에 저장된 4조2교대 동료가 통째로 유령이 된다. 종전 `4조2교대` 인원은
+ * **전원 운용**이었으므로 이 상수가 그대로 운용을 가리키는 것이 곧 하위호환이다.
+ *
+ * @param teamPrefix 4조2교대 계열만 갖는 한 글자 부서 표기(`운`·`관`). null이면 조 개념이 없는 소속.
+ */
+enum class CrewGroup(val label: String, val role: CrewRole, val teamPrefix: String? = null) {
     BRANCH("신정지선", CrewRole.DRIVER_BRANCH),
     MAIN_DRIVER("본선 기관사", CrewRole.DRIVER_MAIN),
     MAIN_CONDUCTOR("본선 차장", CrewRole.CONDUCTOR),
-    SHIFT_4_2("4조2교대", CrewRole.OPERATION),
+    /** 운용조. 옛 `4조2교대` 그대로다 — enum 이름을 바꾸면 저장된 동료 키가 깨진다(위 주석). */
+    SHIFT_4_2("운용", CrewRole.OPERATION, "운"),
+    /** 기지관제. v1.6.54에서 새로 갈라 나왔다. 근무계획표 표기는 `관제A조`이므로 `기지`가 아니라 `관제`. */
+    SHIFT_CONTROL("관제", CrewRole.OPERATION, "관"),
     OFFICE_DAY("통상근무", CrewRole.OFFICE_STAFF),
 }
+
+/**
+ * 화면 표기 `운A`·`관D` — **부서와 조를 합치는 유일한 자리**(v1.6.54 사용자 확정 표기, 괄호 없이 두 글자).
+ * 4조2교대 계열이 아니면 null. 정렬 키로도 쓴다(같은 부서 안에서 조 글자순 = A→D).
+ */
+fun teamBadge(group: CrewGroup, offset: Int): String? =
+    group.teamPrefix?.let { p -> ShiftTeam.ofOffset(offset)?.let { "$p${it.name}" } }
 
 /**
  * 4조2교대 근무조.
@@ -23,7 +51,13 @@ enum class CrewGroup(val label: String, val role: CrewRole) {
  * 종전 0/1/2/3 배치는 A·C만 맞고 B·D가 서로 뒤바뀌어 있었다.
  */
 enum class ShiftTeam(val offset: Int) { A(0), B(3), C(2), D(1);
+    /** 공식 문서(근무계획표) 표기는 `반`이 아니라 **`조`** 다 — `A조`. */
     val label: String get() = "${name}조"
+
+    companion object {
+        /** `patternOffset` → 조. 4일 순환이라 0~3이 A~D에 일대일로 대응한다. */
+        fun ofOffset(offset: Int): ShiftTeam? = entries.firstOrNull { it.offset == offset }
+    }
 }
 
 /** 야간 다이아 당일→익일 조합 (토요일 = 휴일 시각 확정) */
@@ -89,12 +123,24 @@ object Bundled {
      */
     val SHIFT_PATTERN = Pattern(
         id = "bundled-shift42",
-        name = "4조2교대",
+        name = "운용",
         role = CrewRole.OPERATION,
         sequence = listOf("비번", "휴무", "주간", "야간"),
         anchorDate = LocalDate.of(2026, 8, 10),
         revision = REVISION,
     )
+
+    /**
+     * 기지관제 (v1.6.54) — **순환·기준일이 [SHIFT_PATTERN]과 완전히 같다.** 그래서 복사본이다.
+     * 근무를 정하는 건 조 글자뿐이므로 관제A조는 운용A조와 언제나 같은 근무다
+     * (8월 근무계획표 검증: 8/1 토요일에 운용A·관제A 모두 야간).
+     *
+     * 그런데도 [Pattern]을 따로 두는 이유는 **저장 때문**이다. Firestore `users` 문서는 소속을
+     * `patternId` 하나로만 적는다(`FirestoreRosterRepository.observeUsers`가 `groupFor`로 되읽는다).
+     * 두 부서가 id를 공유하면 관제 직원이 로그인해도 운용으로 되읽혀 부서가 사라진다.
+     * `copy()`라 순환값이 두 벌로 갈릴 일은 없다 — 한쪽만 고치는 사고가 구조적으로 불가능하다.
+     */
+    val CONTROL_PATTERN = SHIFT_PATTERN.copy(id = "bundled-control42", name = "관제")
 
     /**
      * 통상근무 (사무실·소장/부사업소장·지도과·관리과) — 월~금 주간, 토·일·공휴일 휴무.
@@ -114,19 +160,36 @@ object Bundled {
     )
 
     /** 내장 패턴 전체 — 패턴을 추가하면 여기만 늘리면 저장소 조회가 따라온다 */
-    val ALL_PATTERNS = listOf(BRANCH_PATTERN, MAIN_PATTERN, SHIFT_PATTERN, OFFICE_PATTERN)
+    val ALL_PATTERNS = listOf(BRANCH_PATTERN, MAIN_PATTERN, SHIFT_PATTERN, CONTROL_PATTERN, OFFICE_PATTERN)
 
     fun patternFor(group: CrewGroup): Pattern = when (group) {
         CrewGroup.BRANCH -> BRANCH_PATTERN
         CrewGroup.SHIFT_4_2 -> SHIFT_PATTERN
+        CrewGroup.SHIFT_CONTROL -> CONTROL_PATTERN
         CrewGroup.OFFICE_DAY -> OFFICE_PATTERN
         else -> MAIN_PATTERN
     }
 
-    fun groupFor(patternId: String?): CrewGroup? = when (patternId) {
+    /**
+     * `patternId` → 소속. **하위호환 지점**(v1.6.54).
+     *
+     * 옛 `"bundled-shift42"`는 부서가 갈리기 전 값이라 운용인지 관제인지 id만으로는 알 수 없다.
+     * 관제 직원도 그때는 고를 수 있는 것이 `4조2교대` 하나뿐이라 **이미 그 값으로 등록돼 있다**
+     * (Firestore `users` 실데이터에서 확인 — 그대로 두면 그 사람이 동료 탭에 운용·관제 두 줄로 뜬다).
+     *  · [name]을 주면 **기지관제 명단에 있는 이름은 관제로 되돌린다.** 한 사람은 두 부서에
+     *    동시에 속할 수 없으므로 이름이 곧 부서의 근거다.
+     *  · [name] 없이 부르면 종전대로 운용 — 부서가 갈리기 전 인원은 전원 운용이었다.
+     * 본인이 근무선택을 다시 하면 새 `patternId`가 저장돼 이 보정이 필요 없어진다.
+     * 되읽지 못하는 id는 종전대로 null이다.
+     */
+    fun groupFor(patternId: String?, name: String? = null): CrewGroup? = when (patternId) {
         BRANCH_PATTERN.id -> CrewGroup.BRANCH
         MAIN_PATTERN.id -> CrewGroup.MAIN_DRIVER
-        SHIFT_PATTERN.id -> CrewGroup.SHIFT_4_2
+        SHIFT_PATTERN.id ->
+            if (name != null && BundledRoster.SHIFT_CONTROL.any { it.first == name.trim() })
+                CrewGroup.SHIFT_CONTROL
+            else CrewGroup.SHIFT_4_2
+        CONTROL_PATTERN.id -> CrewGroup.SHIFT_CONTROL
         OFFICE_PATTERN.id -> CrewGroup.OFFICE_DAY
         else -> null
     }
@@ -257,11 +320,12 @@ object Bundled {
     val MAIN_DAY_WEEKDAY: Map<Int, TimeRow> = mapOf(
         1 to TimeRow("6:27", "15:56"), 2 to TimeRow("6:23", "15:23"),
         3 to TimeRow("6:33", "15:51", false, "7:18#10:33", "14:06-15:51"),
-        // 4·7 퇴근시각은 v1.6.33에서 맞바꿨다. v1.6.31이 [MainLegs] 후반종료만 바로잡고
-        // 여기를 안 고쳐 "signOff = 후반종료" 규칙(다른 9장 전부 성립)이 4·7만 깨져 있었다.
-        // 근거: 행로표 파일럿 wd_4(17:16)·wd_7(17:21) 실판독 + 앱 자체 모순.
-        4 to TimeRow("6:45", "17:16"), 5 to TimeRow("6:47", "17:05"),
-        6 to TimeRow("6:52", "17:26"), 7 to TimeRow("6:56", "17:21"),
+        // 4·7 퇴근시각은 v1.6.54에서 다시 맞바꿨다 — "signOff = [MainLegs] 후반종료" 규칙을 지키려면
+        // 후반이 맞바뀔 때 여기도 같이 따라와야 한다(`signOff_equals_mainLegs_second_half_end`가 잠금).
+        // 근거: 2026-08-23 배포 `4 7개정 행로표` PDF 실판독 — 4 = 17:21 · 7 = 17:16.
+        // 출근시각(6:45·6:56)은 전반이 안 바뀌어 그대로다(전반시작 −45분 = 신도림 교대).
+        4 to TimeRow("6:45", "17:21"), 5 to TimeRow("6:47", "17:05"),
+        6 to TimeRow("6:52", "17:26"), 7 to TimeRow("6:56", "17:16"),
         8 to TimeRow("6:57", "17:25"), 9 to TimeRow("7:02", "17:36"),
         10 to TimeRow("7:10", "18:55"), 11 to TimeRow("7:20", "18:42"),
         12 to TimeRow("7:22", "18:35"), 13 to TimeRow("7:36", "17:55"),

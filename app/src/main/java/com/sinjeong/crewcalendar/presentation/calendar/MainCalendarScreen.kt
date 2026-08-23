@@ -1111,8 +1111,12 @@ private fun KvRow(key: String, value: String, sub: Boolean = false) {
     }
 }
 
-/** 1단계에서 카드 한 장으로 묶어 보여주는 사업소 근무형태 (enum은 분리 유지 — 동료근무 섹션 구분용) */
-private val SITE_GROUPS = listOf(CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_4_2)
+/**
+ * 1단계에서 카드 한 장으로 묶어 보여주는 사업소 근무형태 (enum은 분리 유지 — 동료근무 섹션 구분용).
+ * v1.6.54에서 4조2교대가 운용·관제로 갈리며 셋이 됐다 — 1단계 카드 수는 **여전히 4장**이다
+ * (승무 3종 + 이 묶음 카드 1장). v1.6.42 ②의 "한 화면에 다 보이게"가 그대로 유지된다.
+ */
+private val SITE_GROUPS = listOf(CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_4_2, CrewGroup.SHIFT_CONTROL)
 
 /* ── 근무선택 시트: ① 소속 → (사업소면 근무형태) → ② 근무 그리드 ───────────────
    관리자 화면(동료 대리등록)도 이 시트를 그대로 재사용한다 — patternOffset 계산 경로를 하나로 유지. */
@@ -1176,7 +1180,8 @@ internal fun DutyPickerSheet(
                             Text(g.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text(
                                 when (g) {
-                                    CrewGroup.SHIFT_4_2 -> "운용조·기지관제 · 주간→야간→비번→휴무 · A~D조"
+                                    CrewGroup.SHIFT_4_2 -> "운용조 4조2교대 · 주간→야간→비번→휴무 · A~D조"
+                                    CrewGroup.SHIFT_CONTROL -> "기지관제 4조2교대 · 주간→야간→비번→휴무 · A~D조"
                                     CrewGroup.OFFICE_DAY -> "사무실·소장·지도과·관리과 · 월~금 주간, 토·일·공휴일 휴무"
                                     else -> "${pattern.length}칸 교번 순환"
                                 } + if (isCurrent) " · 현재 선택" else "",
@@ -1199,7 +1204,7 @@ internal fun DutyPickerSheet(
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold,
                             )
                             Text(
-                                "사무실·지도과·관리과·운용조·기지관제" +
+                                "사무실·지도과·관리과 · 운용조·기지관제(4조2교대)" +
                                     if (isCurrent) " · 현재 ${currentGroup?.label}" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1207,12 +1212,13 @@ internal fun DutyPickerSheet(
                         }
                     }
                 }
-            } else if (picker.group == CrewGroup.SHIFT_4_2) {
-                // 2단계(4조2교대): 29칸 다이아 대신 A·B·C·D 4개 조
-                val pattern = Bundled.SHIFT_PATTERN
+            } else if (picker.group.teamPrefix != null) {
+                // 2단계(4조2교대 — 운용·관제 공통): 29칸 다이아 대신 A·B·C·D 4개 조.
+                // 부서가 갈려도 고르는 것은 **조 하나뿐**이다 — 두 부서의 순환이 완전히 같기 때문(v1.6.54).
+                val pattern = Bundled.patternFor(picker.group)
                 val days = ChronoUnit.DAYS.between(pattern.anchorDate, picker.date).toInt()
                 Text(
-                    "근무선택  2/2 · 4조2교대",
+                    "근무선택  2/2 · ${picker.group.label} 4조2교대",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 근무형태 다시 선택") }
@@ -1227,7 +1233,7 @@ internal fun DutyPickerSheet(
                     val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                     OutlinedCard(
                         // offsetFor(date, idx) == team.offset 이 되는 idx 를 역산해 넘긴다
-                        onClick = { onPick(CrewGroup.SHIFT_4_2, Math.floorMod(team.offset + days, pattern.length)) },
+                        onClick = { onPick(picker.group, Math.floorMod(team.offset + days, pattern.length)) },
                         border = if (isCurrent) BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
                         else CardDefaults.outlinedCardBorder(),
                     ) {

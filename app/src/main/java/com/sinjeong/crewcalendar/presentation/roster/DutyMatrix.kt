@@ -71,7 +71,7 @@ val MatrixPerson.key: String get() = mateKey(cleanName, group)
 
 /** 로그인 사용자를 매트릭스 행으로. 소속은 patternId + 차장 여부로 결정 */
 fun meAsPerson(user: User?): MatrixPerson? = user?.let { u ->
-    val group = Bundled.groupFor(u.patternId)?.let { grp ->
+    val group = Bundled.groupFor(u.patternId, u.name)?.let { grp ->
         if (u.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else grp
     } ?: CrewGroup.BRANCH
     MatrixPerson("${u.name} (나)", group, u.patternOffset, isMe = true, uid = u.uid)
@@ -402,6 +402,17 @@ fun MatrixRow(
                 else MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
             )
+            // 4조2교대만 붙는 부서+조 배지 `운A`·`관D` (v1.6.54). 이름과 **따로** 그린다 —
+            // 이름 문자열에 이어 붙이면 `네글자이름 관D`가 한 덩어리로 자동축소돼 이름까지 작아진다.
+            // ★와 같은 8.5sp 고정이라 68dp 이름 열에서 이름 몫은 약 14dp만 준다(4글자 이름 유지).
+            // ⚠ 격자 칸(`DutyChip`)이 아니라 이름 열이므로 v1.6.52의 단일 크기 9.09sp와 무관하다.
+            teamBadge(p.group, p.offset)?.let {
+                Text(
+                    it, fontSize = m.dowSp, fontWeight = FontWeight.Bold,
+                    maxLines = 1, softWrap = false,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (isFav) Text("★", fontSize = m.dowSp, color = duty.onStandby)
         }
         Row(Modifier.horizontalScroll(hScroll)) {
@@ -673,8 +684,12 @@ fun PersonSheet(
                     )
                 }
             }
+            // 4조2교대면 조까지 풀어 적는다 — 격자 배지 `운A`가 무슨 뜻인지 여기서 확인한다.
+            // 공식 문서 표기를 따라 `반`이 아니라 `조`(`ShiftTeam.label`).
             Text(
-                person.group.label,
+                person.group.label +
+                    (ShiftTeam.ofOffset(person.offset)?.label
+                        ?.takeIf { person.group.teamPrefix != null }?.let { " $it" } ?: ""),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

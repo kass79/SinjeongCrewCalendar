@@ -149,14 +149,16 @@ class MatesViewModel @Inject constructor(
 }
 
 /**
- * 카테고리 칩 2행 (v1.6.49로 3+4 재배치).
+ * 카테고리 칩 2행 (v1.6.54로 4+4 재배치 — 소속이 6종이 되면서 칩이 8개다).
  *
- *     전체      ★즐겨찾기   본선 기관사
- *     본선 차장  신정지선  4조2교대  통상근무
+ *     전체  ★즐겨찾기  본선 기관사  운용
+ *     본선 차장  신정지선  통상근무  관제
  *
- * 첫 줄은 **소속이 아닌 두 가지 보기**(전체·★)로 시작하고, 이어서 소속 5종이 차례대로 온다.
- * ★즐겨찾기가 넓은 3칸 줄에 있는 건 **360dp에서 잘렸기 때문**이다 —
- * 4칸 줄의 글자 자리는 65dp인데 `★즐겨찾기`는 ★까지 다섯 글자라 70dp가 필요하다(실측).
+ * 첫 줄은 **소속이 아닌 두 가지 보기**(전체·★)로 시작하고, 이어서 소속 6종이 온다.
+ * 칸 폭이 균등이 아니라 [chipWeight] 비례라 `★즐겨찾기`가 4칸 줄에서도 안 잘린다
+ * (v1.6.49에 이 잘림 때문에 3칸 줄로 뺐던 것을 폭 배분으로 풀었다).
+ * **`운용`·`관제`가 두 줄의 같은(마지막) 칸**이라 가중치가 같아 세로로 정확히 겹친다 —
+ * 갈라져 나온 한 쌍이라는 게 배치로 보인다.
  *
  * `null` = ★즐겨찾기(저장한 동료 + 본인). 나머지는 그 소속 전원.
  * **`전체`는 이 목록에 없다** — 필터가 아니라 필터 **해제**라서 [MatesScreen]이 첫 줄 맨 앞에
@@ -166,14 +168,35 @@ class MatesViewModel @Inject constructor(
  * *"동료탭에 들어가면 먼저 전체를 보여줘야지..?"*). 칩은 **필터로만** 동작한다:
  * 누르면 그 갈래만, 눌린 칩을 다시 누르거나 `전체`를 누르면 해제되어 전체로 돌아온다.
  *
- * 3+3이 아니라 **3+4**인 이유: 칩 글자를 11 → 13dp로 키우면서(*"탭의 텍스트 크기를 가독성 있게
- * 키워죠"*) 칸이 하나 늘었다. 긴 라벨 셋을 넓은 3칸 줄에, 네 글자짜리 넷을 4칸 줄에 둔다 —
- * 360dp 화면에서도 잘림·줄바꿈이 없다.
+ * **3+5가 아니라 4+4인 이유**: 한 줄에 다섯을 넣으면 360dp에서 `본선 차장`·`통상근무`·`운용`이
+ * 실제로 잘린다(v1.6.54에서 에뮬레이터로 확인 — `본선 차ㅈ`·`운:`). 긴 라벨 둘이 서로 다른 줄에
+ * 가도록 갈랐고, 줄마다 필요 폭 합이 316.5dp로 같아 두 줄이 균형까지 맞는다([chipWeight] 주석).
  */
 private val CATEGORY_ROWS: List<List<CrewGroup?>> = listOf(
-    listOf(null, CrewGroup.MAIN_DRIVER),
-    listOf(CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH, CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY),
+    listOf(null, CrewGroup.MAIN_DRIVER, CrewGroup.SHIFT_4_2),
+    listOf(CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH, CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_CONTROL),
 )
+
+/**
+ * 칩이 **자기 글자가 필요한 만큼만** 폭을 가져가게 하는 가중치 (v1.6.54).
+ *
+ * `4조2교대` 한 칸이 `운용`·`관제` 두 칸으로 갈려 칩이 7 → 8개가 됐다. 종전처럼 `weight(1f)`로
+ * 균등 분배하면 한 줄에 다섯을 넣는 순간 360dp에서 `본선 차장`·`통상근무`가 **실제로 잘렸다**
+ * (에뮬레이터 720x1980/320 실측: `본선 차ㅈ`·`운:`). 그래서 **4+4로 되돌리고** 폭은 균등이 아니라
+ * "필요한 폭"에 비례해 나눈다.
+ *
+ * 필요 폭 = 칩 좌우 여백 32dp + 글자 13dp × (한글 1자 / 그 밖 0.5자).
+ * 비례 분배라 **줄 전체의 필요 폭 합이 화면에 들어가기만 하면 어느 칩도 안 잘린다** —
+ * 남는 폭도 같은 비율로 나눠 갖기 때문이다. 360dp 실산(좌우 여백 10dp씩·칸 사이 4dp → 한 줄 328dp):
+ *  · 1행 `전체`58 + `★즐겨찾기`97 + `본선 기관사`103.5 + `운용`58 = **316.5** ≤ 328 ✓
+ *  · 2행 `본선 차장`90.5 + `신정지선`84 + `통상근무`84 + `관제`58 = **316.5** ≤ 328 ✓
+ * 두 줄의 마지막 칸이 `운용`/`관제`라 세로로 정확히 겹쳐 보인다(같은 가중치 → 같은 폭).
+ *
+ * 칩 글자는 `13.dp.toSp()`라 **글자배율을 키워도 이 계산이 안 흔들린다**.
+ * ★그룹 하위 필터 줄(`★전체`·`동호회 0`…)도 같은 함수를 써서 합 316.5로 넉넉히 들어간다.
+ */
+private fun chipWeight(label: String): Float =
+    32f + 13f * label.sumOf { if (it.code < 128) 0.5 else 1.0 }.toFloat()
 
 /**
  * 동료 탭 — v1.6.39에서 상단바 `동료근무`(RosterScreen)를 흡수한 **통합 화면**.
@@ -278,8 +301,14 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     } else {
         // `category == null` = 전체(필터 없음). 한 줄로 두 경우를 다 본다 — 소속 칩은 필터일 뿐이다.
         // 전체일 땐 소속이 섞이므로 정렬 키에 소속을 끼워 같은 소속끼리 붙여 놓는다.
+        // 4조2교대는 부서(group.ordinal) 다음에 **조**로 한 번 더 묶는다 — 29명이 이름순으로만
+        // 섞이면 같은 조를 눈으로 찾아야 한다(v1.6.54). `teamBadge`는 4조2교대가 아니면 null이라
+        // 다른 소속의 정렬은 종전 그대로 이름순이다.
         roster.filter { (category == null || it.group == category) && (q.isEmpty() || it.name.contains(q)) }
-            .sortedWith(compareBy({ !it.isMe }, { it.key !in favKeys }, { it.group.ordinal }, { it.name }))
+            .sortedWith(
+                compareBy({ !it.isMe }, { it.key !in favKeys }, { it.group.ordinal },
+                    { teamBadge(it.group, it.offset) ?: "" }, { it.name }),
+            )
     }
 
     // 칩을 바꾸면 명단이 통째로 달라지는데 세로 위치는 그대로라 중간부터 보였다 — "나" 행이 화면 밖.
@@ -395,7 +424,8 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     },
                 )
             }
-            // 2행 고정(3+4) — 가로 스크롤이 아니라 격자라 일곱 칸이 항상 다 보인다.
+            // 2행 고정(4+4, v1.6.54 이전엔 3+4) — 가로 스크롤이 아니라 격자라 여덟 칸이 항상 다 보인다.
+            // 칸 폭은 균등이 아니라 [chipWeight] = **글자가 필요한 폭**에 비례한다(360dp 잘림 방지).
             // 좌우 여백 12 → 10dp, 칸 사이 5 → 4dp: 키운 글자(13dp)가 360dp 화면 4칸 줄에
             // 들어가도록 되찾은 폭이다(`★즐겨찾기` 실측이 가장 빠듯하다).
             Column(
@@ -588,7 +618,7 @@ private fun RowScope.MatesChip(label: String, selected: Boolean, onClick: () -> 
                 modifier = Modifier.fillMaxWidth(),
             )
         },
-        modifier = Modifier.weight(1f).height(34.dp),
+        modifier = Modifier.weight(chipWeight(label)).height(34.dp),
     )
 }
 

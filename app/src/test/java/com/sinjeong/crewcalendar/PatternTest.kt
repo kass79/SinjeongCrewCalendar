@@ -11,6 +11,7 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.domain.model.teamBadge
 import com.sinjeong.crewcalendar.widget.signOnAt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -87,6 +88,111 @@ class PatternTest {
                ShiftTeam.C to "최용재", ShiftTeam.D to "임종호").forEach { (team, name) ->
             assertTrue("$name ${team.label}", byTeam[team.offset]?.contains(name) == true)
         }
+    }
+
+    /**
+     * ★ v1.6.54 핵심 고정값 — **2026년 8월 근무계획표 실측표**를 8개 조 전부에 대해 잠근다.
+     *
+     * 관제 16명을 등록하면서 "관제도 조 글자만 같으면 운용과 같은 근무"라는 전제를 세웠다.
+     * 그 전제가 틀리면 관제 16명의 근무가 통째로 틀리므로, 근무계획표 `전체` 시트에서 읽은
+     * 8/1~8/10 열 그대로를 여기에 박아 둔다(`휴가`·`지근` 같은 개인 사유 덮어쓰기 날짜는 뺐다 —
+     * 순환이 아니라 그날만의 예외라 패턴으로 재현할 수 없다).
+     */
+    @Test fun shiftAndControlTeams_match_august2026_plan() {
+        // 근무계획표 표기(주/야/비/휴) → 앱 raw
+        val plan = mapOf('주' to "주간", '야' to "야간", '비' to "비번", '휴' to "휴무")
+        // 8/1(토)부터 10일. '·' = 휴가·지근 등 개인 사유로 덮인 날 (검증 제외)
+        //                             1234567890
+        val byTeam = mapOf(
+            ShiftTeam.A to "야비휴주야비휴주야비",
+            ShiftTeam.B to "··비휴주야비휴주야",
+            ShiftTeam.C to "휴주야비·주야비휴주",
+            ShiftTeam.D to "비·주야비휴주야비휴",
+        )
+        val start = LocalDate.of(2026, 8, 1)
+        var checked = 0
+        byTeam.forEach { (team, row) ->
+            row.forEachIndexed { i, ch ->
+                val expected = plan[ch] ?: return@forEachIndexed
+                val date = start.plusDays(i.toLong())
+                // 운용·관제 **두 부서 모두** 같은 값이어야 한다 — 조 글자만이 근무를 정한다
+                listOf(CrewGroup.SHIFT_4_2, CrewGroup.SHIFT_CONTROL).forEach { g ->
+                    assertEquals(
+                        "${g.label}${team.label} $date",
+                        expected, Bundled.patternFor(g).dutyOn(date, team.offset).raw,
+                    )
+                    checked++
+                }
+            }
+        }
+        assertEquals("대조한 칸 수", 72, checked) // (10+8+9+9)일 × 2부서
+    }
+
+    /**
+     * **부서(CrewGroup)와 조(patternOffset)는 끝까지 따로 둔다** (v1.6.54 사용자 확정 설계).
+     *
+     * 합쳐지는 곳은 화면 표기 [teamBadge] 하나뿐이고, 근무를 정하는 것은 조 글자뿐이다.
+     * 이 테스트가 깨지면 부서 이동이 근무를 흔드는 구조로 되돌아간 것이다.
+     */
+    @Test fun department_and_team_stay_separate() {
+        // ① 두 부서의 순환 데이터가 완전히 같다 (id·이름만 다름)
+        val op = Bundled.patternFor(CrewGroup.SHIFT_4_2)
+        val ctrl = Bundled.patternFor(CrewGroup.SHIFT_CONTROL)
+        assertEquals(op.sequence, ctrl.sequence)
+        assertEquals(op.anchorDate, ctrl.anchorDate)
+        assertTrue("두 부서가 patternId를 공유하면 저장 때 부서가 사라진다", op.id != ctrl.id)
+
+        // ② 부서를 바꿔도 근무는 한 칸도 안 바뀐다
+        (0..40).forEach { d ->
+            val date = LocalDate.of(2026, 8, 1).plusDays(d.toLong())
+            ShiftTeam.entries.forEach { t ->
+                assertEquals("$date ${t.label}", op.dutyOn(date, t.offset).raw, ctrl.dutyOn(date, t.offset).raw)
+            }
+        }
+
+        // ③ 표기는 괄호 없이 두 글자, 부서 글자 + 조 글자
+        assertEquals("운A", teamBadge(CrewGroup.SHIFT_4_2, ShiftTeam.A.offset))
+        assertEquals("관D", teamBadge(CrewGroup.SHIFT_CONTROL, ShiftTeam.D.offset))
+        assertEquals("관B", teamBadge(CrewGroup.SHIFT_CONTROL, ShiftTeam.B.offset))
+        // 4조2교대가 아닌 소속엔 조 개념이 없다 → 배지도 없다(정렬 키도 여기에 기댄다)
+        listOf(CrewGroup.BRANCH, CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.OFFICE_DAY)
+            .forEach { assertNull(it.name, teamBadge(it, 0)) }
+        // 공식 문서 표기: `반`이 아니라 `조`
+        assertEquals("A조", ShiftTeam.A.label)
+
+        // ④ 하위호환 — 옛 `4조2교대` 저장값(patternId)은 기본적으로 운용으로 되읽힌다.
+        //    부서가 갈리기 전 4조2교대 인원은 전원 운용이었다.
+        assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-shift42"))
+        assertEquals(CrewGroup.SHIFT_CONTROL, Bundled.groupFor("bundled-control42"))
+
+        // ⑤ 이름을 주면 **관제 인원은 관제로 되돌린다**. 관제 직원도 부서가 갈리기 전엔
+        //    고를 수 있는 게 `4조2교대` 하나뿐이라 이미 그 값으로 등록돼 있다(Firestore 실데이터).
+        //    안 하면 동료 탭에 운용·관제 두 줄로 뜬다 — v1.6.54 에뮬레이터에서 박영무로 실제로 잡혔다.
+        assertEquals(CrewGroup.SHIFT_CONTROL, Bundled.groupFor("bundled-shift42", "박영무"))
+        assertEquals(CrewGroup.SHIFT_CONTROL, Bundled.groupFor("bundled-shift42", " 남궁용권 "))
+        assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-shift42", "황태상"))  // 운용은 그대로
+        assertEquals(CrewGroup.SHIFT_4_2, Bundled.groupFor("bundled-shift42", "박태호"))  // 명단 밖도 운용
+        // 이름 보정은 옛 id에만 건다 — 다른 소속은 이름으로 흔들리면 안 된다
+        assertEquals(CrewGroup.BRANCH, Bundled.groupFor("bundled-branch", "박영무"))
+        assertEquals(CrewGroup.MAIN_DRIVER, Bundled.groupFor("bundled-main", "박영무"))
+        // 동료 저장 키(`이름|enum이름`)도 그대로여야 저장된 동료가 유령이 되지 않는다
+        assertEquals("SHIFT_4_2", CrewGroup.SHIFT_4_2.name)
+    }
+
+    /** 관제 16명이 4개 조에 4명씩 들어갔는지 — 한 명이라도 빠지면 그 사람 근무가 안 뜬다 */
+    @Test fun controlRoster_has_sixteen_across_four_teams() {
+        val list = BundledRoster.forGroup(CrewGroup.SHIFT_CONTROL)
+        assertEquals("기지관제 인원", 16, list.size)
+        assertEquals("이름 중복", 16, list.map { it.first }.toSet().size)
+        val byTeam = list.groupBy({ it.second }, { it.first })
+        listOf(ShiftTeam.A to "백형록", ShiftTeam.B to "나원필",
+               ShiftTeam.C to "이형호", ShiftTeam.D to "이광우").forEach { (team, name) ->
+            assertEquals("관제${team.label} 인원", 4, byTeam[team.offset]?.size)
+            assertTrue("$name 관제${team.label}", byTeam[team.offset]?.contains(name) == true)
+        }
+        // 운용과 이름이 겹치면 한쪽이 잘못 들어간 것이다
+        val op = BundledRoster.forGroup(CrewGroup.SHIFT_4_2).map { it.first }.toSet()
+        assertEquals("운용·관제 겹치는 이름", emptySet<String>(), op intersect list.map { it.first }.toSet())
     }
 
     /** 좁은 칸 표기(v1.6.24): 낱말 코드는 한 글자. 색을 정하는 `type`·원본 `raw`는 그대로다 */
@@ -172,7 +278,7 @@ class PatternTest {
     @Test fun new_group_names_resolve_to_phone_numbers() {
         val knownMissingPhone = setOf("김대호", "이영란")
         val missing = mutableListOf<String>()
-        listOf(CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY).forEach { g ->
+        listOf(CrewGroup.SHIFT_4_2, CrewGroup.SHIFT_CONTROL, CrewGroup.OFFICE_DAY).forEach { g ->
             BundledRoster.forGroup(g).forEach { (name, _) ->
                 // 이름이 어긋나면(오타 등) phoneFor 가 null 을 주므로 여기서 같이 걸린다
                 if (BundledStaff.phoneFor(name, false) == null) missing += name
@@ -532,6 +638,53 @@ class PatternTest {
     }
 
     /**
+     * ★ v1.6.54 — **평일 4·7 다이아 개정본**(2026-08-23 배포 `4 7개정 행로표` PDF)을 통째로 잠근다.
+     *
+     * 개정으로 **후반이 서로 맞바뀌었다.** v1.6.31~33의 옛 값(4 = 14:01/17:16 · 7 = 15:36/17:21)은
+     * 개정 **전** 기준이라 그 시절 주석·기억을 근거로 되돌리면 안 된다. 전반은 개정 전후가 같다.
+     *
+     * PDF 실판독(2쪽 4번 교번 18-49 / 3쪽 7번 교번 24-48):
+     *  · 4번 전반 편승 7:15 → 7:30 발 2057·2121·2605·5922 ▽10:45 /
+     *        후반 편승 15:21 → 신도림 15:36 발 2297·2335 → 17:06 → 퇴근 17:21. 계 10:56.
+     *  · 7번 전반 편승 7:26 → 7:41 발 2060·2114·6928 ▽9:19 /
+     *        후반 편승 13:46 → 신도림 14:01 발 2261·2295·2333 → 17:01 → 퇴근 17:16. 계 10:41.
+     *
+     * 세 파일이 같이 움직여야 한다 — 하나만 고치면 앱이 같은 값을 두 벌로 들고 있게 된다
+     * (`signOff_equals_mainLegs_second_half_end`·`mainSecondLeg_starts_are_handover_points`가
+     *  나머지 짝을 각각 전수로 잠근다).
+     */
+    @Test fun weekday_4_and_7_match_revised_route_sheet_2026_08_23() {
+        assertEquals(listOf("7:30", "10:45", "15:36", "17:21"), MainLegs.WEEKDAY.getValue(4))
+        assertEquals(listOf("7:41", "9:19", "14:01", "17:16"), MainLegs.WEEKDAY.getValue(7))
+
+        RouteTable.forMainDay(4, false)!!.let {
+            assertEquals("2057·2121·2605·5922", it.firstHalf)
+            assertEquals("2297·2335", it.secondHalf)
+            assertEquals("10:56", it.totalWorkTime)
+        }
+        RouteTable.forMainDay(7, false)!!.let {
+            assertEquals("2060·2114·6928", it.firstHalf)
+            assertEquals("2261·2295·2333", it.secondHalf)
+            assertEquals("10:41", it.totalWorkTime)
+        }
+
+        // 출근은 안 바뀐다(전반이 그대로라 전반시작 −45분 = 신도림 교대)
+        assertEquals("6:45" to "17:21", Bundled.MAIN_DAY_WEEKDAY.getValue(4).let { it.signOn to it.signOff })
+        assertEquals("6:56" to "17:16", Bundled.MAIN_DAY_WEEKDAY.getValue(7).let { it.signOn to it.signOff })
+
+        // 후반 편승 알람도 따라 바뀐다 (`mainSecondLeg_alarm_table`의 손계산과 같은 값)
+        val weekday = LocalDate.of(2026, 8, 18) // 화
+        assertEquals(LocalTime.of(15, 16), BundledTimetable.advise(DutyCode.parse("4"), weekday, true).at)
+        assertEquals(LocalTime.of(13, 46), BundledTimetable.advise(DutyCode.parse("7"), weekday, true).at)
+
+        // 개정 대상은 4·7뿐 — 이웃 다이아가 딸려 움직이지 않았는지 확인한다
+        assertEquals(listOf("7:18", "10:33", "14:06", "15:51"), MainLegs.WEEKDAY.getValue(3))
+        assertEquals(listOf("7:47", "10:55", "15:20", "17:05"), MainLegs.WEEKDAY.getValue(5))
+        assertEquals(listOf("7:52", "11:00", "15:26", "17:26"), MainLegs.WEEKDAY.getValue(6))
+        assertEquals(listOf("7:57", "11:05", "15:41", "17:25"), MainLegs.WEEKDAY.getValue(8))
+    }
+
+    /**
      * **`signOnAt`의 24시+ 표기 규칙을 잠근다** (v1.6.33에 브리핑·위젯 2벌을 한 벌로 통합).
      *
      * 출근 브리핑 예약과 위젯 부제·경계 갱신이 같은 함수를 쓴다. `LocalTime.parse`로 바꾸는
@@ -705,13 +858,14 @@ class PatternTest {
         assertEquals(LocalTime.of(18, 55), at(29, weekday).at)
         // 평일 23: 신도림 17:40 → 17:19~17:30 → 17:30 → 알람 17:25
         assertEquals(LocalTime.of(17, 25), at(23, weekday).at)
-        // ── v1.6.31 사용자 실근무 확정 (행로표 `wd_4`·`wd_7` 스캔과 일치) ──
-        // 평일 4: 신도림 14:01 → 13:40~13:51 → 13:51 → 알람 13:46
-        assertEquals(LocalTime.of(13, 46), at(4, weekday).at)
-        assertTrue(at(4, weekday).text, at(4, weekday).text.contains("신도림 14:01 출발"))
-        // 평일 7: 신도림 15:36 → 15:15~15:26 → 15:21 → 알람 15:16
-        assertEquals(LocalTime.of(15, 16), at(7, weekday).at)
-        assertTrue(at(7, weekday).text, at(7, weekday).text.contains("신도림 15:36 출발"))
+        // ── 평일 4·7은 2026-08-23 `4 7개정 행로표`로 후반이 서로 맞바뀌었다 (v1.6.54) ──
+        // v1.6.31~33은 4 = 13:46 · 7 = 15:16이었다. 개정 전 기준이므로 되돌리지 말 것.
+        // 평일 4: 신도림 15:36 → 15:15~15:26 → 15:21 → 알람 15:16
+        assertEquals(LocalTime.of(15, 16), at(4, weekday).at)
+        assertTrue(at(4, weekday).text, at(4, weekday).text.contains("신도림 15:36 출발"))
+        // 평일 7: 신도림 14:01 → 13:40~13:51 → 13:51 → 알람 13:46
+        assertEquals(LocalTime.of(13, 46), at(7, weekday).at)
+        assertTrue(at(7, weekday).text, at(7, weekday).text.contains("신도림 14:01 출발"))
         // 휴일 2: 표 13:33 + 15 = 신도림 13:48 → 13:27~13:38 → 13:31 → 알람 13:26
         assertEquals(LocalTime.of(13, 26), at(2, holiday).at)
         assertTrue(at(2, holiday).text, at(2, holiday).text.contains("신도림 13:48 출발"))
