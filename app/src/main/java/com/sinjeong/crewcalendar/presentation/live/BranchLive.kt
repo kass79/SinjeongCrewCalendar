@@ -207,6 +207,32 @@ internal object BranchLive {
         }
     }
 
+    /**
+     * **신정지선 영업 열번인가**(v1.6.58) — 종착역명만으로 못 가르는 자리를 열번이 가른다.
+     *
+     * `destKind("신도림") = 1` 이라 신도림에서 **종착하는 본선 열차**가 신도림에 닿는 순간
+     * [branchTrains]가 지선 상행으로 올렸고, [applyTurnaround]가 +5를 먹여
+     * **실재하지 않는 지선 열차**를 세웠다(`4376` → `4381`). 지선 5역 중 신도림만 본선과
+     * 공유하는 역이라 거기서만 새던 구멍이다.
+     *
+     * 범위 근거 두 갈래(서로 무관한 출처):
+     *
+     * ① **행로표**([RouteTable]) — 지선 다이아의 영업 열번은 `5501`~`5720`이 전부다
+     *    (주간 지1~지8 `5527`~`5672`, 야간 지10~지14 `5501`~`5720`).
+     *    · 야간 다이아 꼬리의 `5901`·`5902`·`5903`·`5904`·`5905`·`5906`·`5907(회송)` = 지선 막차 입고 회송
+     *    · 본선 다이아 전반 첫 열번 `5922`·`5928`·`5930`·`5932`·`5934`·`5949`·`5951`·`5953`·`5955`·`5961`
+     *      = 본선 신정기지 출고 회송 — 지선 선로를 타지만 **승객이 못 탄다.**
+     *    → `59xx`는 양쪽 다 회송이라 편승 지도에 올리지 않는다. 그래서 상한이 `5899`다.
+     *
+     * ② **실호출**(2026-08-23 `realtimePosition/2호선` 폴링) — 지선 전용 4역(까치산·신정네거리·
+     *    양천구청·도림천)에 실재한 열차는 **전부 5xxx**였고, 종착이 `"신도림"`인데 지선 전용역엔
+     *    한 번도 안 온 열차는 **전부 4xxx**(`4376`·`4397`·`4398`·`4408`)였다.
+     *    상세 기록은 `docs/project-notes.md`.
+     *
+     * ⚠ [inboundFromPositions]에는 걸지 않는다 — 거기는 본선 입고 열차를 **일부러** 쓴다.
+     */
+    private fun isBranchNo(no: String) = (no.toIntOrNull() ?: 0) in 5000..5899
+
     /** trainSttus(0진입 1도착 2출발 3전역출발) → 역 인덱스 주변의 미세 위치 */
     private fun posOf(idx: Int, dir: Float, sttus: String) = when (sttus) {
         "0" -> idx - dir * 0.15f
@@ -219,7 +245,7 @@ internal object BranchLive {
     /** 1차: 종착역명이 지선 종착인 2호선 열차 */
     internal fun branchTrains(rows: List<PositionRow>): List<TrainMark> =
         rows.asSequence()
-            .filter { it.subwayId == BranchLine.SUBWAY_ID_LINE2 }
+            .filter { it.subwayId == BranchLine.SUBWAY_ID_LINE2 && isBranchNo(it.trainNo) }
             .filter { destKind(it.statnTnm) != 0 }
             .mapNotNull { r ->
                 val idx = stationIdx(r.statnNm)
@@ -242,7 +268,7 @@ internal object BranchLive {
     internal fun branchTrainsLoose(rows: List<PositionRow>, strict: List<TrainMark>): List<TrainMark> {
         val have = strict.map { it.trainNo }.toSet()
         return rows.asSequence()
-            .filter { it.subwayId == BranchLine.SUBWAY_ID_LINE2 && it.trainNo !in have }
+            .filter { it.subwayId == BranchLine.SUBWAY_ID_LINE2 && isBranchNo(it.trainNo) && it.trainNo !in have }
             .filter { norm(it.statnNm) in BRANCH_ONLY }
             .map { r ->
                 val idx = BranchLine.stations.indexOf(norm(r.statnNm))
@@ -261,6 +287,7 @@ internal object BranchLive {
     /** 안전망 3단계: 위치 API가 지선 열차를 하나도 못 주면 양천구청 도착정보로 합성 */
     internal fun trainsFromArrivals(yang: List<ArrivalRow>): List<TrainMark> =
         yang.mapNotNull { r ->
+            if (!isBranchNo(r.trainNo)) return@mapNotNull null   // 회송·본선은 편승 대상이 아니다
             val dest = norm(r.destName)
             val toSindorim = dest.contains("신도림")
             if (!toSindorim && !dest.contains("까치산")) return@mapNotNull null

@@ -277,4 +277,90 @@ class BranchLiveTest {
         val stale = pipeline(listOf(row("5679", "양천구청", "신도림지선", "1", "1")), t0 + 12 * 60_000L + 1)
         assertTrue("12분이 지나도 회차 아이콘이 남아 있다", stale.none { it.trainNo == "5681" })
     }
+
+    /* ── 본선 열차 배제 (v1.6.58) ───────────────────────────────────────────
+     *
+     * 2026-08-23 `realtimePosition/2호선` 실호출에서 본선 열차가 지선 지도에 섞였다.
+     * `4376`은 `statnNm`·`statnTnm`이 둘 다 `"신도림"`인 **본선 입고 열차**인데
+     * `destKind("신도림")=1` 이라 지선 상행으로 올라왔고, `applyTurnaround`가 +5를 먹여
+     * `4381`이라는 **있지도 않은 열차**를 신도림에 세웠다. 양천구청에서 편승을 기다리는
+     * 사람에게는 **오지 않을 열차**다 — 이 앱에서 가장 나쁜 실패다.
+     *
+     * 지선 열차는 같은 신도림에서도 `statnNm`이 `"신도림지선"`으로 오고, 열번이 5xxx다.
+     */
+
+    /** 실호출 응답 그대로(형식만 줄임): 본선 3대 + 지선 2대가 한 응답에 섞여 온다. */
+    private val mixed = """
+    {"errorMessage":{"status":200,"code":"INFO-000","message":"정상 처리되었습니다.","total":5},"realtimePositionList":[
+    {"subwayId":"1002","subwayNm":"2호선","statnNm":"신도림","trainNo":"4376","updnLine":"0","statnTid":"1002000234","statnTnm":"신도림","trainSttus":"0"},
+    {"subwayId":"1002","subwayNm":"2호선","statnNm":"신림","trainNo":"4398","updnLine":"0","statnTid":"1002000234","statnTnm":"신도림","trainSttus":"1"},
+    {"subwayId":"1002","subwayNm":"2호선","statnNm":"강변","trainNo":"4408","updnLine":"0","statnTid":"1002000234","statnTnm":"신도림","trainSttus":"2"},
+    {"subwayId":"1002","subwayNm":"2호선","statnNm":"신도림지선","trainNo":"5689","updnLine":"1","statnTid":"1002000234","statnTnm":"신도림지선","trainSttus":"1"},
+    {"subwayId":"1002","subwayNm":"2호선","statnNm":"양천구청","trainNo":"5692","updnLine":"0","statnTid":"1002002344","statnTnm":"까치산","trainSttus":"1"}
+    ]}
+    """.trimIndent()
+
+    @Test
+    fun `본선 신도림 종착 열차는 지선 지도에 안 올라온다`() {
+        val rows = BranchLive.parsePositions(mixed)
+        assertEquals(5, rows.size)
+
+        val marks = BranchLive.branchTrains(rows)
+        assertEquals(listOf("5689", "5692"), marks.map { it.trainNo }.sorted())
+
+        // 안전망 2단계(지선 전용역 열차)도 본선을 주워 오면 안 된다
+        assertTrue(BranchLive.branchTrainsLoose(rows, marks).none { it.trainNo.startsWith("4") })
+
+        // 회차 개명까지 태워도 유령 `4381`이 안 생긴다 — 화면이 실제로 받는 순서 그대로
+        val drawn = BranchLive.squashOverlaps(
+            BranchLive.applyTurnaround(BranchLive.ensureFleet(marks, 1_800_000_000_000L)))
+        assertTrue("본선 열차가 지도에 올라왔다",
+            drawn.none { it.trainNo == "4376" || it.trainNo == "4381" })
+        assertTrue("지선 실차가 같이 사라졌다", drawn.any { it.trainNo == "5692" })
+    }
+
+    /** 같은 응답의 **본선 입고 안내**는 그대로여야 한다 — 거기는 본선 열차를 일부러 쓴다. */
+    @Test
+    fun `본선 입고 안내는 필터에 안 걸린다`() {
+        val inbound = BranchLive.inboundFromPositions(BranchLive.parsePositions(mixed))
+        assertEquals(listOf("4398"), inbound.map { it.trainNo })   // 신림 = 4역 앞
+        assertEquals(4 * 110, inbound[0].etaSec)
+    }
+
+    /**
+     * 회송 열번(`59xx`)은 지선 선로를 타도 **승객이 못 탄다** — 편승 지도에서 뺀다.
+     * 근거는 행로표(`RouteTable`): 지선 야간 다이아 꼬리 `5901`~`5907`(막차 입고)과
+     * 본선 다이아 전반 첫 열번 `5922`·`5930`·`5949`·`5961`(신정기지 출고)이 전부 회송이다.
+     */
+    @Test
+    fun `59xx 회송은 지도에 안 올라온다`() {
+        val rows = BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"양천구청","trainNo":"5930","updnLine":"1","statnTnm":"신도림","trainSttus":"1"},""" +
+            """{"subwayId":"1002","statnNm":"양천구청","trainNo":"5601","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1"}]""")
+        val marks = BranchLive.branchTrains(rows)
+        assertEquals(listOf("5601"), marks.map { it.trainNo })                       // 영업 열번만
+        assertTrue(BranchLive.branchTrainsLoose(rows, marks).none { it.trainNo == "5930" })
+    }
+
+    /** 안전망 3단계(양천구청 도착정보 합성)에도 같은 가드가 걸린다. */
+    @Test
+    fun `도착정보 합성도 지선 열번만 쓴다`() {
+        val yang = BranchLive.parseArrivals(
+            """[{"btrainNo":"5601","bstatnNm":"신도림지선","barvlDt":"60"},""" +
+            """{"btrainNo":"4376","bstatnNm":"신도림","barvlDt":"90"}]""")
+        assertEquals(listOf("5601"), BranchLive.trainsFromArrivals(yang).map { it.trainNo })
+    }
+
+    /** 경계값 — 행로표 실범위(5501~5720)와 회송 하한(5901)을 그대로 잠근다. */
+    @Test
+    fun `열번대 경계`() {
+        fun ok(no: String) = BranchLive.branchTrains(BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"양천구청","trainNo":"$no","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1"}]""")).isNotEmpty()
+        assertTrue(ok("5501"))     // 야간 다이아 첫 영업 열번
+        assertTrue(ok("5720"))     // 야간 다이아 마지막 영업 열번
+        assertFalse(ok("5901"))    // 지선 막차 입고 회송
+        assertFalse(ok("5922"))    // 본선 신정기지 출고 회송
+        assertFalse(ok("4376"))    // 본선 신도림 종착
+        assertFalse(ok("6114"))    // 본선 성수 계열
+    }
 }
