@@ -137,12 +137,22 @@ fun MainCalendarScreen(
                     RestCountChip(state.restDayCount)
                     // 날씨는 달력 빈 칸 카드에서 헤더로 올렸다(v1.6.59 사용자 요청) — 휴N개 바로 옆.
                     // 날씨가 없으면 스스로 아무것도 안 그린다(자리도 안 먹는다).
-                    Spacer(Modifier.width(4.dp))
-                    WeatherChip()
+                    // v1.6.65: **이번 달을 볼 때만** 그린다 — 칩 값은 "지금" 날씨라 11월 달력 옆
+                    // 오늘 기온이 붙으면 한 박자 멈칫한다. 다른 달이면 Spacer까지 같이 빠져
+                    // 오른쪽 weight(1f)가 그만큼 늘 뿐, 다른 요소는 움직이지 않는다.
+                    if (state.month == YearMonth.now()) {
+                        Spacer(Modifier.width(4.dp))
+                        WeatherChip()
+                    }
                     Spacer(Modifier.weight(1f))
-                    FilledTonalButton(
+                    // v1.6.65: 초록 채움(FilledTonalButton) → 외곽선. 1년에 두세 번 누르는 버튼이
+                    // 헤더에서 가장 무거웠다. 크기·위치·문구·동작은 그대로다.
+                    // 테두리는 M3 기본 `outline`이 라이트에서 1.6:1로 사실상 안 보여 primary 70%로 깐다
+                    // — 라이트 3.2:1 / 다크 6.0:1(비문자 3:1 통과), 글자는 5.9:1 / 11.1:1.
+                    OutlinedButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
                         contentPadding = PaddingValues(horizontal = 6.dp),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
                         modifier = Modifier.height(28.dp),
                     ) { Text("근무선택", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
                     // 아이콘 3종은 반대로 한 단계 키웠다(32→36dp, 아이콘 18→21dp) — 44dp 헤더에 아직 여유가 있다
