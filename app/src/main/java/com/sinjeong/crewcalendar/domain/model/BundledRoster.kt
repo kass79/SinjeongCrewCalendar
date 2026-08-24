@@ -159,4 +159,42 @@ object BundledRoster {
         CrewGroup.SHIFT_4_2 -> SHIFT_ALL
         CrewGroup.OFFICE_DAY -> OFFICE_DAY
     }
+
+    /**
+     * 동명이인 구분 접미 `A`·`B`… — 이름 옆에 붙는 **표시 전용** 글자다
+     * (v1.6.62 사용자 요청: *"동일 인물이면 A, B, C 이렇게 붙여줘..이름옆에"*).
+     *
+     * ## 명단에서 **자동으로 도출**한다 — 하드코딩이 아니다
+     * [forGroup] 다섯 소속을 통째로 훑어 **같은 이름이 둘 이상이면** 붙이고 하나뿐이면 안 붙인다.
+     * 명단은 해마다 개정되므로(v1.6.13·14·24·54의 이동·추가·삭제) 동명이인이 늘거나 줄어도
+     * 여기 고칠 것은 없다. 2026-08 기준 **3쌍**이고 전부 본선 기관사 ↔ 본선 차장이다
+     * (김지환 · 박두원 · 이용석).
+     *
+     * ## 순서 = 소속([CrewGroup] **선언 순서**) → offset
+     * 1차 기준이 소속이라 `본선 기관사`(ordinal 1)가 `본선 차장`(ordinal 2)보다 앞서고,
+     * 그래서 **기관사가 `A` · 차장이 `B`** 다(사용자 확정). 사람이 아니라 **자리**에 붙는 규칙이라
+     * 명단이 개정돼도 `김지환A`는 계속 기관사다 — 이름 순서로 정하면 한 사람이 이동·퇴직할 때마다
+     * 남은 사람의 글자가 바뀐다.
+     *
+     * 2차 기준 offset은 **같은 소속 안에 동명이인이 생겼을 때**를 위한 것이다(지금은 0쌍).
+     * 목록 안의 나열 순서로 정하면 명단 파일을 손볼 때마다 글자가 흔들리는데, offset은 소속 안에서
+     * 유일한 값이라(`PatternTest.no_duplicate_offsets_within_crew_group`) 못을 박을 수 있다.
+     *
+     * ⚠ **저장·조회에는 절대 쓰지 않는다.** 동료 저장 키는 `이름|소속`(`mateKey`)이고,
+     * 전화조회([BundledStaff])는 차장 쪽에 **`b`** 를 붙이는 **별도 관례**를 쓴다. 여기서 만든
+     * `A`/`B`가 그쪽으로 새면 전화번호가 조용히 틀린 사람 것으로 간다. 그래서 이 값은
+     * **화면에 글자를 그리는 자리에서만** 쓴다(`MatrixPerson.displayName` · `PersonSheet`).
+     */
+    fun dupSuffix(name: String, group: CrewGroup): String? = DUP_SUFFIX[name.trim() to group]
+
+    private val DUP_SUFFIX: Map<Pair<String, CrewGroup>, String> =
+        CrewGroup.entries
+            .flatMap { g -> forGroup(g).map { (name, off) -> Triple(name, g, off) } }
+            .groupBy { it.first }
+            .filterValues { it.size > 1 }
+            .flatMap { (_, sameName) ->
+                sameName.sortedWith(compareBy({ it.second.ordinal }, { it.third }))
+                    .mapIndexed { i, (name, group, _) -> (name to group) to ('A' + i).toString() }
+            }
+            .toMap()
 }

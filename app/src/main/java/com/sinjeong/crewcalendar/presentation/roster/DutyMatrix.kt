@@ -69,6 +69,21 @@ val MatrixPerson.cleanName: String get() = name.removeSuffix(" (나)").trim()
 
 val MatrixPerson.key: String get() = mateKey(cleanName, group)
 
+/**
+ * **화면에 그리는 이름** — 동명이인이면 뒤에 `A`·`B`가 붙는다(v1.6.62, [BundledRoster.dupSuffix]).
+ *
+ * 괄호를 안 쓰는 건 이름 열이 56dp라 폭이 빠듯하기 때문이다(v1.6.61) — 사용자 확정 표기는
+ * `김지환(기관사)`가 아니라 **`김지환A`** 다. `(나)` 꼬리표는 접미 **뒤**에 남는다(`김지환A (나)`).
+ *
+ * ⚠ [cleanName]·[key]는 접미를 **모른다.** 저장 키(`이름|소속`)·전화조회([BundledStaff]의 `b`
+ * 관례)·즐겨찾기 매칭은 전부 접미 없는 이름으로 돌아야 한다 — 이 값은 그리는 데만 쓴다.
+ */
+val MatrixPerson.displayName: String
+    get() {
+        val suffix = BundledRoster.dupSuffix(cleanName, group) ?: return name
+        return if (isMe) "$cleanName$suffix (나)" else "$cleanName$suffix"
+    }
+
 /** 로그인 사용자를 매트릭스 행으로. 소속은 patternId + 차장 여부로 결정 */
 fun meAsPerson(user: User?): MatrixPerson? = user?.let { u ->
     val group = Bundled.groupFor(u.patternId)?.let { grp ->
@@ -462,8 +477,10 @@ fun MatrixRow(
             // 말줄임 대신 자동 축소 — `강민성 (나)`도 `남궁용권 관D`도 잘리지 않고 작아지기만 한다.
             // v1.6.61에 이 장치가 **폭 기준 그 자체**가 됐다: 이름 열은 세 글자 이름에 맞춰 좁히고
             // (262명 중 261명이 세 글자 이하), 예외인 네 글자·`(나)` 줄은 여기서 흡수한다.
+            // 동명이인은 여기서 `김지환A`가 된다([displayName]) — 세 글자 + ASCII 한 자라
+            // 12sp에서도 43dp쯤이고 52dp 안에 그대로 들어간다(배지 없는 본선 줄).
             AutoFitText(
-                p.name,
+                p.displayName,
                 base = m.nameSp, min = m.nameSp * 0.62f,
                 color = if (p.isMe) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.onSurface,
@@ -749,6 +766,9 @@ fun PersonSheet(
     val clipboard = LocalClipboardManager.current
     val duty = com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors.current
     val cleanName = person.cleanName
+    // 제목·삭제 확인에만 쓰는 표시용 이름 — 목록에서 `김지환A`를 눌렀는데 시트가 `김지환`이면
+    // 둘 중 누구를 연 건지 다시 헷갈린다(v1.6.62). **전화조회·삭제 매칭은 [cleanName] 그대로**다.
+    val shownName = cleanName + (BundledRoster.dupSuffix(cleanName, person.group) ?: "")
     val phone = BundledStaff.phoneFor(cleanName, person.group == CrewGroup.MAIN_CONDUCTOR)
     var favMenu by remember { mutableStateOf(false) }
     var confirmRemove by remember { mutableStateOf(false) }
@@ -758,7 +778,7 @@ fun PersonSheet(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(cleanName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
+            Text(shownName, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold)
             Box {
                 // 별 아이콘만 있으면 "이게 즐겨찾기"라는 걸 알 수 없다 → 글자와 화살표를 한 덩어리로.
                 FavLabel(fav = fav, onClick = { favMenu = true })
@@ -826,7 +846,7 @@ fun PersonSheet(
     if (confirmRemove) {
         AlertDialog(
             onDismissRequest = { confirmRemove = false },
-            title = { Text("$cleanName 삭제") },
+            title = { Text("$shownName 삭제") },
             text = { Text("저장한 동료 목록에서 지웁니다. 다시 추가할 수 있습니다.") },
             confirmButton = {
                 TextButton(onClick = { confirmRemove = false; onRemove?.invoke(); onDismiss() }) {

@@ -311,6 +311,50 @@ class PatternTest {
         assertEquals("49", main.dutyOn(LocalDate.of(2026, 8, 1), 89).raw)    // 4조2교대→본선 이동
     }
 
+    /**
+     * v1.6.62: 동명이인 접미(`김지환A`·`김지환B`) 규칙 잠금.
+     *
+     * 잠그는 것은 **명단이 아니라 규칙**이다 — 이름을 하드코딩해 붙이면 명단이 개정될 때마다
+     * 조용히 틀리므로, ①붙는 조건이 "동명이인일 때만"인지 ②순서가 소속 선언 순서대로
+     * `A`,`B`,`C`… 빠짐없이 나오는지를 **명단 전체에 대해** 건다.
+     * ③은 사용자 확정 규칙(**기관사 A · 차장 B**)이 지금 명단에서 실제로 그렇게 나오는지의 확인이고,
+     * 여기가 깨지면 동명이인 쌍이 늘거나 소속 순서가 바뀐 것이니 표기를 다시 봐야 한다.
+     */
+    @Test fun duplicate_names_get_suffix_by_group_order() {
+        val all = CrewGroup.entries.flatMap { g -> BundledRoster.forGroup(g).map { it.first to g } }
+        val dupNames = all.groupBy { it.first }.filterValues { it.size > 1 }.keys
+
+        // ① 동명이인에게만 붙는다 — 유일한 이름 260여 명에는 하나도 안 붙어야 한다
+        all.forEach { (name, g) ->
+            assertEquals("$name|$g 접미 여부", name in dupNames, BundledRoster.dupSuffix(name, g) != null)
+        }
+        // ② 소속 선언 순서대로 A,B,C… 가 건너뜀 없이
+        dupNames.forEach { name ->
+            val got = all.filter { it.first == name }.sortedBy { it.second.ordinal }
+                .map { BundledRoster.dupSuffix(name, it.second) }
+            assertEquals("$name 접미 순서", List(got.size) { ('A' + it).toString() }, got)
+        }
+        // ③ 현재 명단(2026-08)의 동명이인 3쌍은 전부 본선 기관사 ↔ 본선 차장이고,
+        //    소속 순서(기관사 ordinal 1 < 차장 2) 덕분에 기관사가 A · 차장이 B가 된다.
+        assertEquals("동명이인 쌍이 달라졌다", setOf("김지환", "박두원", "이용석"), dupNames)
+        dupNames.forEach {
+            assertEquals("$it 기관사", "A", BundledRoster.dupSuffix(it, CrewGroup.MAIN_DRIVER))
+            assertEquals("$it 차장", "B", BundledRoster.dupSuffix(" $it ", CrewGroup.MAIN_CONDUCTOR))
+        }
+        // ④ 접미는 **표시 전용**이다 — 조회 쪽은 접미를 몰라야 한다.
+        //    전화조회는 `A`/`B`가 아니라 [BundledStaff]의 **`b` 관례**로 동명이인을 가른다.
+        //    `phoneFor`는 `b`만 알고 `A`/`B`는 모르므로, 새 접미가 그쪽으로 새면 여기가 깨진다.
+        assertNull("접미 붙은 이름이 다시 접미를 받으면 안 된다", BundledRoster.dupSuffix("김지환A", CrewGroup.MAIN_DRIVER))
+        dupNames.forEach {
+            val driver = BundledStaff.phoneFor(it, false)
+            val conductor = BundledStaff.phoneFor(it, true)
+            assertNotNull("$it 기관사 번호", driver)
+            assertNotNull("$it 차장 번호", conductor)
+            assertTrue("$it 기관사·차장 번호가 같다(b 관례 깨짐)", driver != conductor)
+            assertNull("$it 접미가 전화조회로 샜다", BundledStaff.phoneFor(it + "A", false))
+        }
+    }
+
     /** 같은 소속에 같은 offset이 둘이면 둘 중 하나가 틀린 것 — 8월 대조에서 실제로 잡힌 유형 */
     @Test fun no_duplicate_offsets_within_crew_group() {
         listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH).forEach { g ->
