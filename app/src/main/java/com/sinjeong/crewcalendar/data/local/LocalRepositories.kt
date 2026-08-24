@@ -16,6 +16,35 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * 교번 변경 구간 직렬화 (v1.6.63). 한 줄 JSON 배열 — 값이 넷뿐이라 스키마를 따로 두지 않는다.
+ * **깨진 값은 통째로 버린다**(빈 목록 = 옛 형식) — 반쪽만 읽으면 달력이 조용히 틀려진다.
+ */
+internal fun writeSegments(segments: List<PatternSegment>): String =
+    segments.fold(org.json.JSONArray()) { arr, s ->
+        arr.put(
+            JSONObject()
+                .put("from", s.from.toString())
+                .put("patternId", s.patternId ?: "")
+                .put("offset", s.patternOffset)
+                .put("role", s.role.name)
+        )
+    }.toString()
+
+internal fun readSegments(raw: String?): List<PatternSegment> = runCatching {
+    if (raw.isNullOrBlank()) return emptyList()
+    val arr = org.json.JSONArray(raw)
+    (0 until arr.length()).map { i ->
+        val o = arr.getJSONObject(i)
+        PatternSegment(
+            from = LocalDate.parse(o.getString("from")),
+            patternId = o.getString("patternId").ifBlank { null },
+            patternOffset = o.getInt("offset"),
+            role = CrewRole.valueOf(o.getString("role")),
+        )
+    }
+}.getOrDefault(emptyList())
+
+/**
  * 오프라인 체험판 저장소 (Firebase 연결 전).
  * 모든 데이터를 SharedPreferences에 저장한다 — 로그인 없이 전 기능 동작.
  * Firebase 연동 시 di/AppModule 바인딩만 Firestore 구현으로 교체하면 된다.
@@ -38,6 +67,7 @@ class LocalUserRepository @Inject constructor(
                 .getOrDefault(CrewRole.DRIVER_BRANCH),
             patternId = prefs.getString("patternId", Bundled.BRANCH_PATTERN.id),
             patternOffset = prefs.getInt("patternOffset", 0),
+            patternSegments = readSegments(prefs.getString("patternSegments", null)),
             visibleToOthers = prefs.getBoolean("visible", true),
         )
     }
@@ -60,6 +90,8 @@ class LocalUserRepository @Inject constructor(
             .putString("role", user.role.name)
             .putString("patternId", user.patternId)
             .putInt("patternOffset", user.patternOffset)
+            // 구간이 없으면 키 자체를 지운다 — 저장 모양이 v1.6.62와 완전히 같아진다
+            .putString("patternSegments", user.patternSegments.takeIf { it.isNotEmpty() }?.let(::writeSegments))
             .putBoolean("visible", user.visibleToOthers)
             .apply()
         state.value = user
@@ -69,11 +101,6 @@ class LocalUserRepository @Inject constructor(
     suspend fun logout() = signOut()
 
     override suspend fun searchByName(query: String): List<User> = emptyList()
-
-    override suspend fun updatePatternPosition(patternId: String, offset: Int) {
-        val cur = state.value ?: return // 로그인 전에는 근무선택 불가
-        upsert(cur.copy(patternId = patternId, patternOffset = offset))
-    }
 
     override suspend fun register(user: User) {
         upsert(user)          // 이름·사번·패턴 저장

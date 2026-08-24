@@ -71,11 +71,6 @@ class FirestoreUserRepository @Inject constructor(
         publish(user)
     }
 
-    override suspend fun updatePatternPosition(patternId: String, offset: Int) {
-        local.updatePatternPosition(patternId, offset)
-        local.observeMe().first()?.let { publish(it) }
-    }
-
     suspend fun logout() = local.logout()
 
     override suspend fun register(user: User) {
@@ -85,7 +80,13 @@ class FirestoreUserRepository @Inject constructor(
     }
     override suspend fun signOut() = local.signOut()
 
-    /** 내 근무선택을 공용 명단에 미러 (숨김 설정이면 제거) */
+    /**
+     * 내 근무선택을 공용 명단에 미러 (숨김 설정이면 제거).
+     *
+     * `patternId`/`patternOffset`은 **오늘 시점의 교번**이라(`User.withSegments`) 옛 버전 앱과
+     * 동료근무 화면이 종전대로 읽는다 — 예약된 다음 교번이 있어도 오늘 근무는 어긋나지 않는다.
+     * `patternSegments`는 기록용 미러일 뿐 되읽지 않는다(내 달력의 진실은 로컬).
+     */
     private suspend fun publish(user: User) {
         runCatching {
             if (!ensureAuth()) return
@@ -97,6 +98,14 @@ class FirestoreUserRepository @Inject constructor(
                     "role" to user.role.name,
                     "patternId" to user.patternId,
                     "patternOffset" to user.patternOffset,
+                    "patternSegments" to user.patternSegments.map {
+                        mapOf(
+                            "from" to it.from.toString(),
+                            "patternId" to it.patternId,
+                            "patternOffset" to it.patternOffset,
+                            "role" to it.role.name,
+                        )
+                    },
                     "updatedAt" to FieldValue.serverTimestamp(),
                 )
             ) // await 안 함 — 오프라인이면 Firestore가 큐잉 후 자동 전송

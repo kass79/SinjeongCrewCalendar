@@ -12,7 +12,13 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.domain.model.User
+import com.sinjeong.crewcalendar.domain.model.cancelPendingSegments
+import com.sinjeong.crewcalendar.domain.model.pendingSegment
+import com.sinjeong.crewcalendar.domain.model.scheduleSegment
+import com.sinjeong.crewcalendar.domain.model.segmentOn
 import com.sinjeong.crewcalendar.domain.model.teamBadge
+import com.sinjeong.crewcalendar.domain.model.withSegments
 import com.sinjeong.crewcalendar.widget.signOnAt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -1402,5 +1408,113 @@ class PatternTest {
             assertEquals("$n", null, Bundled.timeRowFor(DutyCode.parse("$n"), election))
             assertNotNull("$n", Bundled.timeRowFor(DutyCode.parse("$n"), election.minusDays(1)))
         }
+    }
+
+    /* ── 교번 변경 "적용 시작일" (v1.6.63) ───────────────────────────────
+       실제 업무: 신정지선 2개월 → 본선 4~6개월. 바뀌는 시점은 언제나 달 경계라
+       "이번 달 말일까지 옛 근무 · 다음 달 1일부터 새 근무"가 지켜져야 한다. */
+
+    /** 실사용 중인 사용자(강민성) — 옛 형식 그대로 저장돼 있다 */
+    private val legacyUser = User(uid = "21715160", name = "강민성", role = CrewRole.DRIVER_BRANCH,
+        patternId = Bundled.BRANCH_PATTERN.id, patternOffset = 26)
+    private val aug = LocalDate.of(2026, 8, 24)
+    private val sep1 = LocalDate.of(2026, 9, 1)
+
+    /**
+     * **하위호환 1순위**: 구간이 비면(= 이미 배포된 모든 사용자) 어떤 날짜든 옛 필드 그대로다.
+     * 이게 깨지면 실사용자 달력이 통째로 바뀐다.
+     */
+    @Test fun legacyUser_without_segments_is_one_segment_forever() {
+        listOf(LocalDate.of(2020, 1, 1), aug, sep1, LocalDate.of(2030, 12, 31)).forEach { d ->
+            val s = legacyUser.segmentOn(d)
+            assertEquals("$d", Bundled.BRANCH_PATTERN.id, s.patternId)
+            assertEquals("$d", 26, s.patternOffset)
+        }
+        assertNull(legacyUser.pendingSegment(aug))
+    }
+
+    /** 경계 날짜: 8/31까지는 옛 교번, 9/1부터 새 교번. 하루라도 밀리면 근무가 통째로 어긋난다 */
+    @Test fun segment_boundary_is_exact() {
+        val idx = Bundled.MAIN_PATTERN.sequence.indexOf("12")
+        val off = Bundled.MAIN_PATTERN.offsetFor(sep1, idx)
+        val u = legacyUser.scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, off, CrewRole.DRIVER_MAIN, aug)
+
+        assertEquals(Bundled.BRANCH_PATTERN.id, u.segmentOn(LocalDate.of(2026, 8, 31)).patternId)
+        assertEquals(Bundled.MAIN_PATTERN.id, u.segmentOn(sep1).patternId)
+        assertEquals(Bundled.MAIN_PATTERN.id, u.segmentOn(LocalDate.of(2026, 10, 15)).patternId)
+    }
+
+    /** 과거 불변: 예약을 걸어도 8월 근무는 한 칸도 안 바뀐다 (시나리오 3의 계산 근거) */
+    @Test fun scheduling_does_not_move_current_month() {
+        val u = legacyUser.scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 40, CrewRole.DRIVER_MAIN, aug)
+        (1..31).forEach { d ->
+            val date = LocalDate.of(2026, 8, d)
+            val before = Bundled.BRANCH_PATTERN.dutyOn(date, 26).raw
+            val s = u.segmentOn(date)
+            val after = Bundled.ALL_PATTERNS.first { it.id == s.patternId }.dutyOn(date, s.patternOffset).raw
+            assertEquals("8/$d", before, after)
+        }
+    }
+
+    /**
+     * **가장 틀리기 쉬운 자리**: `다음 달 1일부터`로 고른 다이아는 **9월 1일의 근무**여야 한다.
+     * 기준일을 오늘(8/24)로 두면 9/1이 한 칸 어긋난다.
+     */
+    @Test fun scheduled_pick_lands_on_the_start_date() {
+        Bundled.MAIN_PATTERN.sequence.indices.forEach { idx ->
+            val off = Bundled.MAIN_PATTERN.offsetFor(sep1, idx)
+            val u = legacyUser.scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, off, CrewRole.DRIVER_MAIN, aug)
+            val s = u.segmentOn(sep1)
+            assertEquals(
+                Bundled.MAIN_PATTERN.sequence[idx],
+                Bundled.MAIN_PATTERN.dutyOn(sep1, s.patternOffset).raw,
+            )
+        }
+    }
+
+    /** 옛 버전 앱이 읽는 patternId/patternOffset은 **오늘 교번**이어야 한다 (동시 업데이트 안 함) */
+    @Test fun legacy_fields_mirror_todays_segment() {
+        val u = legacyUser.scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 40, CrewRole.DRIVER_MAIN, aug)
+        assertEquals(Bundled.BRANCH_PATTERN.id, u.patternId)   // 8월엔 아직 지선
+        assertEquals(26, u.patternOffset)
+        assertEquals(CrewRole.DRIVER_BRANCH, u.role)
+
+        val after = u.withSegments(u.patternSegments, sep1)     // 9월이 되면 본선으로 승격
+        assertEquals(Bundled.MAIN_PATTERN.id, after.patternId)
+        assertEquals(40, after.patternOffset)
+        assertEquals(CrewRole.DRIVER_MAIN, after.role)
+        // 승격돼도 구간은 그대로 남아 8월 계산이 안 바뀐다
+        assertEquals(Bundled.BRANCH_PATTERN.id, after.segmentOn(LocalDate.of(2026, 8, 31)).patternId)
+    }
+
+    /** 예약을 다시 걸어도 구간이 쌓이지 않는다 — 시작 안 한 구간은 대체된다 */
+    @Test fun rescheduling_replaces_the_pending_segment() {
+        val u = legacyUser
+            .scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 40, CrewRole.DRIVER_MAIN, aug)
+            .scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 7, CrewRole.DRIVER_MAIN, aug)
+        assertEquals(2, u.patternSegments.size)
+        assertEquals(7, u.segmentOn(sep1).patternOffset)
+    }
+
+    /** 취소하면 옛 형식으로 되돌아간다 = 9월 달력이 원래대로 (시나리오 6) */
+    @Test fun cancelling_restores_the_legacy_shape() {
+        val u = legacyUser.scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 40, CrewRole.DRIVER_MAIN, aug)
+        val c = u.cancelPendingSegments(aug)
+        assertTrue(c.patternSegments.isEmpty())
+        assertEquals(legacyUser.patternId, c.patternId)
+        assertEquals(legacyUser.patternOffset, c.patternOffset)
+        assertEquals(Bundled.BRANCH_PATTERN.dutyOn(sep1, 26).raw, Bundled.BRANCH_PATTERN.dutyOn(sep1, c.patternOffset).raw)
+        // 이미 시작한 구간은 취소 대상이 아니다
+        assertEquals(2, u.cancelPendingSegments(sep1).patternSegments.size)
+    }
+
+    /** 구간이 무한정 자라지 않는다 — 상한을 넘으면 오래된 것부터(그 달들은 스냅샷이 동결) */
+    @Test fun segments_are_capped() {
+        var u = legacyUser
+        (1..20).forEach { i ->
+            val from = LocalDate.of(2026, 9, 1).plusMonths(i.toLong())
+            u = u.scheduleSegment(from, Bundled.MAIN_PATTERN.id, i, CrewRole.DRIVER_MAIN, from.minusDays(1))
+        }
+        assertTrue("${u.patternSegments.size}", u.patternSegments.size <= User.MAX_SEGMENTS)
     }
 }

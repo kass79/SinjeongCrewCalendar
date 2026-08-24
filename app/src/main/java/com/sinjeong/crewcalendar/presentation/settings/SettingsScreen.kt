@@ -25,6 +25,8 @@ import com.sinjeong.crewcalendar.BuildConfig
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.User
+import com.sinjeong.crewcalendar.domain.model.cancelPendingSegments
+import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
@@ -105,6 +107,12 @@ class SettingsViewModel @Inject constructor(
 
     fun setTheme(mode: ThemeMode) = themeController.set(mode)
 
+    /** 예약된 교번 변경 취소 — 아직 시작 안 한 구간만 버린다(지난 달력은 그대로) */
+    fun cancelScheduledPattern() {
+        val u = user.value ?: return
+        viewModelScope.launch { userRepo.upsert(u.cancelPendingSegments()) }
+    }
+
     fun logout() {
         viewModelScope.launch {
             when (val r = userRepo) {
@@ -154,6 +162,22 @@ fun SettingsScreen(
                     append(" · 변경은 달력 상단 [근무선택]")
                 },
             )
+            // 예약된 교번 변경 (v1.6.63). 예약해 둔 날이 오기 전에는 달력이 하나도 안 바뀌어
+            // **예약했는지 알 수 없다.** 상시 확인·취소는 여기 한 곳뿐이고(과하게 늘리지 않는다),
+            // 예약 직후에는 달력 스낵바가 한 번 더 알린다.
+            user?.pendingSegment()?.let { seg ->
+                val g = Bundled.groupFor(seg.patternId)
+                val duty = Bundled.ALL_PATTERNS.firstOrNull { it.id == seg.patternId }
+                    ?.dutyOn(seg.from, seg.patternOffset)?.display.orEmpty()
+                SettingRow(
+                    title = "${seg.from.monthValue}월 ${seg.from.dayOfMonth}일부터 ${g?.label ?: "새 교번"}",
+                    sub = "그 전날까지는 지금 교번 그대로입니다" +
+                        if (duty.isNotBlank()) " · ${seg.from.monthValue}/${seg.from.dayOfMonth} 근무 $duty" else "",
+                    trailing = {
+                        TextButton(onClick = { viewModel.cancelScheduledPattern() }) { Text("예약 취소") }
+                    },
+                )
+            }
 
             // 화면
             SectionTitle("화면")

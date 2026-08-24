@@ -295,6 +295,7 @@ fun MainCalendarScreen(
             onBack = viewModel::backToGroupStep,
             onPick = viewModel::confirmDutyPosition,
             onDismiss = viewModel::closeDutyPicker,
+            onScheduledChange = viewModel::setPickerScheduled,
         )
     }
 
@@ -1137,9 +1138,13 @@ internal fun DutyPickerSheet(
     onBack: () -> Unit,
     onPick: (CrewGroup, Int) -> Unit,
     onDismiss: () -> Unit,
+    /** null이면 적용 시작일 선택을 감춘다 — 관리자 대리등록은 남의 offset을 찍는 자리라 구간이 없다 */
+    onScheduledChange: ((Boolean) -> Unit)? = null,
 ) {
     val duty = LocalDutyColors.current
-    val dateLabel = picker.date.format(DateTimeFormatter.ofPattern("M/d (E)", Locale.KOREAN))
+    // "9/1 (화)"가 아니라 **"9월 1일 (화)"**. 적용 시작일이 붙은 뒤로는 이 라벨이
+    // "어느 날 근무를 고르는 것인가"를 나르는 유일한 문구라 달을 흘려 읽으면 한 칸이 어긋난다.
+    val dateLabel = picker.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN))
 
     // 소속 카드가 화면을 넘는다 → 소속 단계에서만 세로 스크롤
     // (근무 그리드 단계는 LazyVerticalGrid를 품고 있어 스크롤을 겹치면 안 된다)
@@ -1228,6 +1233,7 @@ internal fun DutyPickerSheet(
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 근무형태 다시 선택") }
+                ApplyFromRow(picker, currentGroup, currentOffset, onScheduledChange)
                 Text(
                     "내 조를 고르세요. 괄호는 $dateLabel 근무입니다.",
                     style = MaterialTheme.typography.bodySmall,
@@ -1279,10 +1285,14 @@ internal fun DutyPickerSheet(
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
+                ApplyFromRow(picker, currentGroup, currentOffset, onScheduledChange)
                 Text(
-                    "$dateLabel 내 근무를 고르세요. 앞뒤 모든 날짜가 교번 순서대로 자동 입력됩니다.",
+                    if (picker.scheduled) "$dateLabel 내 근무를 고르세요. 새 교번표에서 그 날 다이아를 보고 고르면 됩니다."
+                    else "$dateLabel 내 근무를 고르세요. 앞뒤 모든 날짜가 교번 순서대로 자동 입력됩니다.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = if (picker.scheduled) FontWeight.Bold else FontWeight.Normal,
+                    color = if (picker.scheduled) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 DutySequenceGrid(pattern.sequence, currentIndex) { i -> onPick(group, i) }
                 Text(
@@ -1293,6 +1303,62 @@ internal fun DutyPickerSheet(
                 )
             }
         }
+    }
+}
+
+/**
+ * 적용 시작일 (v1.6.63) — 근무선택 2단계 맨 위 버튼 두 개.
+ *
+ * 기관사는 신정지선 2개월 / 본선 4~6개월 주기로 교번이 바뀌고 그 시점이 **언제나 달 경계**라
+ * 선택지를 딱 둘로 좁혔다. `길게 누르기` 같은 새 제스처는 만들지 않는다(사용자가 새로 배워야 하고
+ * 달력 칸 롱프레스는 오조작이 쉽다 — 사용자와 확인된 판단).
+ *
+ * ⚠ 경계 사례 안내: 시작일 **전날**이 야간이면 그 다음날은 원래 비번인데, 시작일부터는 새 교번이라
+ * 두 교번표가 이어 붙는다. 자동으로 비번을 끼워 넣지 않는다 — 사용자가 새 교번표에서 읽은 값을
+ * 덮어쓰는 것이 더 위험하다. 대신 여기서 알리고, 고치는 길(`근무변경`)을 알려 준다.
+ */
+@Composable
+private fun ApplyFromRow(
+    picker: DutyPickerState,
+    currentGroup: CrewGroup?,
+    currentOffset: Int,
+    onScheduledChange: ((Boolean) -> Unit)?,
+) {
+    if (onScheduledChange == null) return
+    val start = picker.nextMonthFirst
+    Text(
+        "적용 시작일", style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 2.dp),
+    )
+    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+        SegmentedButton(
+            selected = !picker.scheduled,
+            onClick = { onScheduledChange(false) },
+            shape = SegmentedButtonDefaults.itemShape(0, 2),
+        ) { Text("바로 적용", fontSize = 12.sp, maxLines = 1) }
+        SegmentedButton(
+            selected = picker.scheduled,
+            onClick = { onScheduledChange(true) },
+            shape = SegmentedButtonDefaults.itemShape(1, 2),
+        ) { Text("${start.monthValue}월 1일부터", fontSize = 12.sp, maxLines = 1) }
+    }
+    Text(
+        if (picker.scheduled)
+            "${picker.today.monthValue}월 달력은 지금 교번 그대로 두고, ${start.monthValue}월 1일부터 새 교번으로 바뀝니다."
+        else "지난 날짜까지 포함해 달력 전체가 이 교번으로 다시 계산됩니다.",
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    // 경계 전날이 야간이면 알린다. 하루 단위 `근무변경`은 무시하고 교번값만 본다 —
+    // 안내문 하나 때문에 오버라이드까지 끌고 오는 건 과하다(못 띄워도 근무는 안 틀어진다).
+    val prevDuty = currentGroup?.let { Bundled.patternFor(it).dutyOn(start.minusDays(1), currentOffset) }
+    if (picker.scheduled && prevDuty?.isOvernight == true) {
+        Text(
+            "※ ${start.minusDays(1).monthValue}월 ${start.minusDays(1).dayOfMonth}일이 야간(${prevDuty.display})입니다. " +
+                "새 교번표에 ${start.monthValue}월 1일이 비번(~)으로 돼 있으면 그 날을 [근무변경]으로 비번 처리하세요.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error,
+        )
     }
 }
 

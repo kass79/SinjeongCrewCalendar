@@ -37,12 +37,25 @@ class GetMonthScheduleUseCase @Inject constructor(
                     val isPast = month < YearMonth.now()
                     var snapshot = if (isPast) snapshotRepo.load(u.uid, month) else null
 
+                    // 교번 변경 구간(v1.6.63): 날짜마다 그 날 유효한 구간의 패턴·오프셋으로 계산한다.
+                    // 구간이 없으면(옛 형식 · `바로 적용`) 종전 그대로 pattern/patternOffset 한 벌 —
+                    // 기존 사용자의 달력이 한 칸도 달라지지 않는다.
+                    //
+                    // ⚠ 달력·위젯·브리핑·편승 알람·공유 이미지가 **전부 이 UseCase 하나**로 근무를 뽑는다
+                    //   (`DutyWidgetWorker`·`Briefing`·`DutyNotifyWorker`가 이걸 주입받는다).
+                    //   여기 한 곳만 구간을 존중하면 계산 경로 전체가 따라온다.
+                    val byId = if (u.patternSegments.isEmpty()) emptyMap()
+                    else patternRepo.getPatterns().associateBy { it.id }
+
                     val byDate = overrides.associateBy { it.date }
                     val days = (1..month.lengthOfMonth()).map { d ->
                         val date = month.atDay(d)
                         val ov = byDate[date]
+                        val fromPattern =
+                            if (u.patternSegments.isEmpty()) pattern?.dutyOn(date, u.patternOffset)
+                            else u.segmentOn(date).let { s -> byId[s.patternId]?.dutyOn(date, s.patternOffset) }
                         val patternDuty = snapshot?.get(date)?.let { DutyCode.parse(it) }
-                            ?: pattern?.dutyOn(date, u.patternOffset)
+                            ?: fromPattern
                             ?: DutyCode.parse(null)
                         val isChanged = ov != null && ov.source != Schedule.Source.PATTERN && ov.dutyRaw.isNotBlank()
                         val duty = if (isChanged) ov!!.duty else patternDuty

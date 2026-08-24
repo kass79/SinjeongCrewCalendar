@@ -62,6 +62,14 @@ data class MatrixPerson(
     val isMe: Boolean = false,
     /** 로그인 근무자(사번) — 근무변경 실시간 반영 대상 */
     val uid: String? = null,
+    /**
+     * **본인 행 전용** 교번 변경 구간(v1.6.63). 매트릭스는 오늘부터 한 달을 그리므로 예약 시작일을
+     * 걸쳐 넘어간다 — 비어 있으면 [offset] 한 벌로 종전과 똑같이 계산한다.
+     *
+     * ⚠ 동료는 언제나 비어 있다. 동료 근무는 `BundledRoster`(이름 → offset)에서 나오고 거기엔
+     * 날짜 개념이 없다 — 전사 교번 개정은 명단을 통째로 갱신해 새 버전으로 내는 별도 절차다.
+     */
+    val segments: List<PatternSegment> = emptyList(),
 )
 
 /** 즐겨찾기·전화번호는 " (나)" 꼬리표 없는 실제 이름으로 매칭한다 */
@@ -89,7 +97,7 @@ fun meAsPerson(user: User?): MatrixPerson? = user?.let { u ->
     val group = Bundled.groupFor(u.patternId)?.let { grp ->
         if (u.role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR else grp
     } ?: CrewGroup.BRANCH
-    MatrixPerson("${u.name} (나)", group, u.patternOffset, isMe = true, uid = u.uid)
+    MatrixPerson("${u.name} (나)", group, u.patternOffset, isMe = true, uid = u.uid, segments = u.patternSegments)
 }
 
 /**
@@ -510,7 +518,14 @@ fun MatrixRow(
         Row(Modifier.horizontalScroll(hScroll)) {
             dates.forEach { date ->
                 val changed = overrides[date] != null
-                val code = overrides[date]?.let { DutyCode.parse(it) } ?: pattern.dutyOn(date, p.offset)
+                // 본인 행에 예약된 교번 변경이 있으면 날짜마다 그 날 구간으로 계산한다 —
+                // 달력이 새 교번인데 이 표만 옛 교번이면 내 근무가 두 화면에서 갈린다.
+                val seg = p.segments.filter { it.from <= date }.maxByOrNull { it.from }
+                val code = overrides[date]?.let { DutyCode.parse(it) }
+                    ?: seg?.let { s ->
+                        Bundled.ALL_PATTERNS.firstOrNull { it.id == s.patternId }?.dutyOn(date, s.patternOffset)
+                    }
+                    ?: pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
                     Modifier.width(m.cellW).height(m.cellH + m.rowPadV * 2)

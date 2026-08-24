@@ -10,8 +10,9 @@ interface UserRepository {
     fun observeMe(): Flow<User?>
     suspend fun upsert(user: User)
     suspend fun searchByName(query: String): List<User>
-    /** 근무선택: 패턴 + 순환 오프셋 저장 → 전체 달력 자동 재계산 */
-    suspend fun updatePatternPosition(patternId: String, offset: Int)
+    // 근무선택은 `SelectDutyPositionUseCase` → [upsert] 한 길뿐이다. v1.6.63에서 아무도 안 부르던
+    // `updatePatternPosition`을 지웠다 — 교번 구간(`User.patternSegments`)을 건드리지 않고
+    // patternId만 갈아 끼우는 자리라 남겨 두면 달력이 조용히 틀어지는 뒷문이 된다.
 
     /**
      * 로그인 완료: 신원 저장 + 잠금해제.

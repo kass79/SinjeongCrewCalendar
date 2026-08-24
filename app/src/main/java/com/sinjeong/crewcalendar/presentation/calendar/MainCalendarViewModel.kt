@@ -18,14 +18,31 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.YearMonth
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 
-/** 근무선택 피커 상태: 1단계(소속) → 2단계(근무 그리드) */
+/**
+ * 근무선택 피커 상태: 1단계(소속) → 2단계(근무 그리드).
+ *
+ * v1.6.63에서 **적용 시작일**이 붙었다. 새 단계를 만들지 않고 2단계 안에 버튼 두 개로 넣은 이유:
+ * 고르는 값이 `그리드가 기준으로 삼는 날짜` 하나뿐이라 화면을 늘릴 값어치가 없고,
+ * 버튼을 누르는 즉시 바로 위 안내문이 `9월 1일 내 근무를 고르세요`로 바뀌어
+ * **어느 날 기준인지**가 고를 때 눈앞에 있다(여기가 이 기능에서 제일 틀리기 쉬운 자리다).
+ */
 data class DutyPickerState(
-    val date: LocalDate,
+    /** 피커를 연 날 (보통 오늘) */
+    val today: LocalDate,
     /** null이면 1단계(소속 선택) */
     val group: CrewGroup? = null,
-)
+    /** true면 [nextMonthFirst]부터만 적용, false면 지금 교번 자체를 교체(종전 동작) */
+    val scheduled: Boolean = false,
+) {
+    val nextMonthFirst: LocalDate get() = today.withDayOfMonth(1).plusMonths(1)
+
+    /** 적용 시작일 = 그리드·A~D조 카드가 근무를 계산하는 기준 날짜 */
+    val date: LocalDate get() = if (scheduled) nextMonthFirst else today
+}
 
 data class CalendarUiState(
     val month: YearMonth = YearMonth.now(),
@@ -107,13 +124,24 @@ class MainCalendarViewModel @Inject constructor(
     fun pickGroup(group: CrewGroup) { picker.update { it?.copy(group = group) } }
     fun backToGroupStep() { picker.update { it?.copy(group = null) } }
     fun closeDutyPicker() { picker.value = null }
+    fun setPickerScheduled(scheduled: Boolean) { picker.update { it?.copy(scheduled = scheduled) } }
 
-    /** 기준 날짜의 근무를 해당 소속 패턴의 patternIndex 칸으로 지정 → 전체 자동 재계산 */
+    /**
+     * 적용 시작일의 근무를 해당 소속 패턴의 patternIndex 칸으로 지정.
+     * `바로 적용`이면 종전대로 전체 재계산, `다음 달 1일부터`면 그 날부터만 새 교번이다.
+     */
     fun confirmDutyPosition(group: CrewGroup, patternIndex: Int) {
         val p = picker.value ?: return
         viewModelScope.launch {
-            runCatching { selectDutyPosition(p.date, group, patternIndex) }
+            runCatching { selectDutyPosition(p.date, group, patternIndex, p.scheduled) }
                 .onFailure { error.value = it.message ?: "근무선택 실패" }
+                // 예약은 그 날이 오기 전엔 화면이 하나도 안 바뀐다 → 됐는지 알 길이 없다.
+                // 스낵바로 한 번 알리고, 상시 확인·취소는 설정 화면에 둔다.
+                .onSuccess {
+                    if (p.scheduled) error.value =
+                        "${p.date.format(DateTimeFormatter.ofPattern("M월 d일", Locale.KOREAN))}부터 " +
+                            "${group.label}로 바뀝니다 · 취소는 설정 › 근무 패턴"
+                }
             picker.value = null
         }
     }
