@@ -255,19 +255,47 @@ private fun columnTint(date: LocalDate, today: LocalDate, duty: DutyColors): Col
 }
 
 /**
- * 열 배경 + 오늘 열 좌우 세로 레일.
+ * 열 배경 + 오늘 열 좌우 세로 레일 + **월 경계선**(v1.6.64).
  * 칩이 칸을 거의 꽉 채워서 반투명 밴드만으론 오늘이 잘 안 보인다 — 레일을 같이 그어
  * 헤더부터 마지막 행까지 이어지는 세로 기둥을 만든다.
+ *
+ * ### 월 경계선 — 1일 **왼쪽**에 회색 한 줄(v1.6.64)
+ *
+ * 이 표는 `8/24 ~ 9/23`처럼 **언제나 두 달에 걸친다.** 헤더가 1일에만 `9/1`을 적기는 하지만
+ * (v1.6.39), 크기·굵기·색이 옆 날짜와 똑같아 `29 30 31 9/1 2` 안에서 그냥 묻힌다
+ * (사용자: *"동료탭에 월이 바뀌면 약간 구분을 해주자..9월1일 이라면.."*). 글자를 더 키우거나
+ * 굵히는 건 37dp 칸에서 쓸 수 있는 수가 없다 → **경계는 글자가 아니라 선으로 긋는다.**
+ * [columnTint]와 같은 자리(헤더 + 모든 데이터 행)에 그리므로 표가 세로로 8월/9월로 갈린다.
+ *
+ * **오늘 레일과 헷갈리지 않는 근거 — 셋이 전부 다르다.**
+ * | | 오늘 | 월 경계 |
+ * |---|---|---|
+ * | 색 | `primary` **초록 불투명** | `onSurfaceVariant` **회색 반투명(0.5)** |
+ * | 굵기 | 2.5dp | **1.5dp** |
+ * | 개수·위치 | 칸 **좌우 두 줄**(기둥으로 보인다) | **왼쪽 한 줄**(경계로 보인다) |
+ *
+ * 오늘이 마침 1일이면 둘이 같은 자리에 온다 → 월 경계선만 레일 **바로 안쪽**(x = 2.5dp)으로
+ * 비켜 긋는다. 초록 2.5 + 회색 1.5이 나란히 서서 둘 다 읽힌다(실화면 확인, v1.6.64).
+ *
+ * 주말 틴트와도 안 부딪힌다 — 틴트는 칸을 덮는 면이고 이건 1.5dp 선이라 층이 다르다.
  */
 @Composable
 private fun Modifier.columnBand(date: LocalDate, today: LocalDate, duty: DutyColors): Modifier {
     val tint = columnTint(date, today, duty)
     val rail = MaterialTheme.colorScheme.primary
+    val monthEdge = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
     val isToday = date == today
+    val isMonthStart = date.dayOfMonth == 1
     return this.drawBehind {
         if (tint != Color.Transparent) drawRect(tint)
+        val w = 2.5.dp.toPx()
+        // 폭은 전부 px로 계산한다(dp.toPx만 쓴다) — sp 환산이 낄 자리가 없다(v1.6.42 ⑥).
+        if (isMonthStart) drawRect(
+            monthEdge,
+            topLeft = Offset(if (isToday) w else 0f, 0f),
+            size = Size(1.5.dp.toPx(), size.height),
+        )
         if (isToday) {
-            val w = 2.5.dp.toPx()
             drawRect(rail, topLeft = Offset(0f, 0f), size = Size(w, size.height))
             drawRect(rail, topLeft = Offset(size.width - w, 0f), size = Size(w, size.height))
         }
@@ -357,8 +385,10 @@ fun MatrixDateHeader(
                         date.dayOfWeek.value == 6 -> duty.saturday
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     }
-                    // 달이 바뀜는 칸은 `9/1`로 적는다 — 범위가 두 달에 걸치므로
-                    // 날짜만 있으면 31 다음 1이 뭐지 알 수 없다(v1.6.39).
+                    // 달이 바뀌는 칸은 `9/1`로 적는다 — 범위가 두 달에 걸치므로
+                    // 날짜만 있으면 31 다음 1이 뭔지 알 수 없다(v1.6.39).
+                    // ⚠ **이 글자만으론 부족했다**(v1.6.64) — 옆 날짜와 크기·굵기·색이 같아 묻힌다.
+                    // 경계는 [columnBand]의 회색 세로선이 긋고 이 글자는 "몇 월인지"만 말한다.
                     //
                     // ⚠ **`lineHeight`를 반드시 같이 준다**(v1.6.48). `fontSize`만 줄이면 줄 높이는
                     // M3 기본 스타일(`bodyLarge`)의 **24sp 그대로**라, 10.5sp 날짜도 8.5sp 요일도
