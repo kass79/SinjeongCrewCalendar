@@ -73,11 +73,12 @@ class MatesViewModel @Inject constructor(
      * *"한달보여주는건 좋은데 다음달 넘어가는 기능이 없네?"*
      * 달(月) 단위가 아니라 **구간** 단위다 — 1이면 9/21~10/20처럼 오늘 날짜를 유지한 채 밀린다.
      * 0 아래로는 안 간다(*"과거는 필요 없다"* — 지난 근무는 달력 탭에서 본다).
+     * 위로도 [MAX_PERIOD](1년)에서 막힌다(v1.6.61) — 그 근거는 상수 주석에 있다.
      */
     private val _period = MutableStateFlow(0)
     val period: StateFlow<Int> = _period.asStateFlow()
 
-    fun movePeriod(delta: Int) { _period.update { (it + delta).coerceAtLeast(0) } }
+    fun movePeriod(delta: Int) { _period.update { (it + delta).coerceIn(0, MAX_PERIOD) } }
     val mates: StateFlow<List<Mate>> = mateRepo.observeMates()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
@@ -146,6 +147,27 @@ class MatesViewModel @Inject constructor(
 
     fun remove(mate: Mate) {
         viewModelScope.launch { mateRepo.remove(mate) }
+    }
+
+    companion object {
+        /**
+         * 앞으로 갈 수 있는 마지막 구간 = **1년 뒤**(v1.6.61).
+         *
+         * v1.6.60까지 [movePeriod]는 아래로만 막혀 있었다(`coerceAtLeast(0)`) — `‹`는
+         * `enabled = period > 0`으로 꺼지는데 `›`는 무제한이라, 몇십 초만 눌러도 10년 뒤로 간다.
+         * 실측(에뮬레이터에서 초당 3~25회로 900회 넘게 연타): 크래시·ANR·메모리 누수는 **없었지만**
+         * 헤더가 `10/24 ~ 11/23`처럼 **연도를 안 적어서 몇 년 뒤인지 알 길이 없었다.**
+         * 왼쪽에만 한계가 있는 건 그 자체로 비대칭 결함이라 어차피 막아야 한다.
+         *
+         * **1년으로 정한 근거 — 그 너머는 앱이 책임질 수 없는 값이다:**
+         *  · `Bundled.PUBLIC_HOLIDAYS`는 **2026년치뿐**이다. 통상근무(`restOnHolidays`)는 공휴일을
+         *    휴무로 덮으므로, 표에 없는 해로 넘어가면 설날·추석이 **근무일로 그려진다.**
+         *    순환 교번은 계산이 되니까 화면은 멀쩡해 보이는데 값만 틀린다 — 조용히 틀리는 자리다.
+         *  · 교번표·명단은 해마다 개정된다(v1.6.54·57의 `4·7 개정 행로표`가 그 예).
+         *  · 승무원이 실제로 확인하는 범위(다음 몇 달)를 한참 넘는다.
+         * 상한에 닿으면 `›`가 `‹`와 같은 방식으로 **꺼진다** — 눌러도 안 움직이는 대신 못 누른다.
+         */
+        const val MAX_PERIOD = 12
     }
 }
 
@@ -387,8 +409,12 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                         fontSize = 12.sp, fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    // `›`도 `‹`와 똑같이 꺼진다(v1.6.61). 종전엔 오른쪽만 무제한이라 연타하면
+                    // 몇십 년 뒤까지 갔다 — 공휴일표가 2026년치뿐이라 그쪽 값은 이미 틀린다
+                    // ([MatesViewModel.MAX_PERIOD]에 근거).
                     IconButton(
                         onClick = { viewModel.movePeriod(1) },
+                        enabled = period < MatesViewModel.MAX_PERIOD,
                         modifier = Modifier.size(30.dp),
                     ) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 구간", Modifier.size(22.dp)) }
                     Spacer(Modifier.width(4.dp))

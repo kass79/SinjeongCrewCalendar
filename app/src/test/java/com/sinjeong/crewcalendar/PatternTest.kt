@@ -1329,6 +1329,28 @@ class PatternTest {
         assertEquals("대기\n지2", mateGridLabels().first { it.first == "대기충당 지2" }.second)
     }
 
+    /**
+     * **동료 탭 구간 이동 상한(`MatesViewModel.MAX_PERIOD` = 12개월)의 근거를 고정한다**(v1.6.61).
+     *
+     * v1.6.60까지 `movePeriod`는 `coerceAtLeast(0)`뿐이라 `›`가 **무제한**이었다 — 연타하면
+     * 10년, 20년 뒤까지 간다(에뮬레이터에서 900회 넘게 눌러 실제로 2037년까지 갔다).
+     * 크래시는 안 났지만 **거기 그려지는 통상근무는 이미 틀린 값**이다:
+     * [Bundled.PUBLIC_HOLIDAYS]가 한 해치뿐이라 표 밖으로 나가면 `restOnHolidays`가 덮을 게 없어
+     * 설날·신정·추석이 **근무일로 그려진다.** 순환 교번은 멀쩡히 계산되니 화면은 정상으로 보인다 —
+     * 조용히 틀리는 자리라서 화면 쪽에 한계를 두는 것이 답이다.
+     *
+     * ⚠ 이 테스트가 깨지는 경우는 하나뿐이다: **공휴일표에 새 해를 넣었을 때.**
+     * 그때는 `MatesViewModel.MAX_PERIOD`도 같이 다시 정할 것(표가 덮는 만큼 늘릴 수 있다).
+     */
+    @Test fun holidayTable_covers_one_year_which_bounds_the_mates_period() {
+        assertEquals(setOf(2026), Bundled.PUBLIC_HOLIDAYS.keys.mapTo(mutableSetOf()) { it.year })
+
+        // 표 안: 신정이 휴무로 덮인다
+        assertEquals("휴무", Bundled.OFFICE_PATTERN.dutyOn(LocalDate.of(2026, 1, 1), 0).raw)
+        // 표 밖(한 해 뒤 신정, 금요일): 덮을 게 없어 그냥 주간 근무로 그려진다 = 상한이 필요한 이유
+        assertEquals("주간", Bundled.OFFICE_PATTERN.dutyOn(LocalDate.of(2027, 1, 1), 0).raw)
+    }
+
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */
     @Test fun mainDay_26to29_have_no_holiday_timetable() {
         assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)
