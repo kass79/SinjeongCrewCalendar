@@ -101,7 +101,7 @@ private fun inService(t: LocalTime = LocalTime.now()): Boolean {
  *
  * **생명주기가 이 컴포넌트의 핵심이다.** 여기 있는 코루틴은 전부 컴포지션에 묶여 있어
  * 시트가 닫혀 이 컴포저블이 컴포지션에서 빠지는 순간 함께 취소된다:
- *  · 폴링 [LaunchedEffect] (5초) — 취소되면 [BranchLive.loadSnapshot] 호출이 멎는다
+ *  · 폴링 [LaunchedEffect] (2초 tick) — 취소되면 [BranchLive.loadSnapshot] 호출이 멎는다
  *  · 시계 [LaunchedEffect] (1초) — 보간 이동·입고 카운트다운의 시간축
  *  · 새로고침 버튼의 [rememberCoroutineScope] 일회성 launch
  *  · [rememberInfiniteTransition] 애니메이션(셔머·바브·셰브런)
@@ -135,11 +135,30 @@ internal fun BranchLiveMap(bleed: Dp = 0.dp, modifier: Modifier = Modifier) {
         }
         BranchLive.restoreTurnMemory(sp.getString(TURN_KEY, "").orEmpty(), System.currentTimeMillis())
         var saved = ""
+        var nextTick = System.currentTimeMillis()
         while (isActive) {
             snap = BranchLive.loadSnapshot()
-            // 바뀔 때만 쓴다 — 시트가 열려 있는 동안 5~15초마다 도는 자리다.
+            // 바뀔 때만 쓴다 — 시트가 열려 있는 동안 4~10초마다 값이 바뀌는 자리다.
             BranchLive.turnMemory().let { if (it != saved) { saved = it; sp.edit().putString(TURN_KEY, it).apply() } }
-            delay(5_000)
+            /*
+             * ⚠ 실제 갱신 주기를 정하는 건 [BranchLive.pollIntervalMs](10초/4초)다. 여기 눈금은
+             * 그 주기를 **정확히 집어낼 수 있는 자**여야 하고, 조건이 둘이다. 둘 다 v1.6.72
+             * 실측에서 하나씩 걸린 것이라 어느 쪽도 장식이 아니다.
+             *
+             * 1. 눈금이 두 주기의 **최대공약수** — `gcd(10, 4) = 2`초. 5초 눈금에 4초 주기를 넣으면
+             *    첫 눈금이 5초라 실제 간격이 5초로 반올림된다.
+             * 2. **눈금은 절대 시각으로 놓는다.** `delay(2_000)`처럼 "지금부터 2초"로 재우면
+             *    네트워크에 쓴 시간(실측 0.9~1.2초)과 `delay` 오버슈트(에뮬 실측 눈금당 ~0.17초)가
+             *    **누적**된다 — 실측으로 10초 주기가 11.5초(10.4~12.2초)까지 밀렸고,
+             *    "지금부터 2초"를 "이번 눈금부터 2초"로만 고쳤을 때도 4초가 4.34초로 남았다.
+             *
+             * 눈금 사이의 호출은 캐시가 같은 인스턴스를 돌려주므로 리컴포지션도 안 난다(공짜다).
+             * 뒤처지면(백그라운드 등) 밀린 눈금을 몰아치지 않고 **자를 다시 놓는다.**
+             */
+            nextTick += 2_000
+            val nowMs = System.currentTimeMillis()
+            if (nextTick < nowMs) nextTick = nowMs + 2_000
+            delay(nextTick - nowMs)
         }
     }
     LaunchedEffect(Unit) {
@@ -265,7 +284,7 @@ private fun LineMapCard(
                              * 다시 잡혔다 — 남은 거리가 크면 빨라지고 작으면 느려져서, 갱신
                              * 경계마다 **속도가 확 달라졌다**(사용자가 본 가속·감속의 정체).
                              * 이제 거리가 얼마든 속도는 `1구간 ÷ segSec` 하나뿐이라
-                             * ③의 갱신 주기가 15↔5초로 바뀌어도 화면 속도는 안 변한다.
+                             * ③의 갱신 주기가 10↔4초로 바뀌어도(v1.6.72) 화면 속도는 안 변한다.
                              *
                              * ponytail: 상한 = 한 구간 주행시간. 그보다 먼 목표(열차가 오래
                              * 사라졌다 나타난 경우)는 그만큼 빨리 따라붙는다 — 데이터 도약이라

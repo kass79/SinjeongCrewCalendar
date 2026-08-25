@@ -132,11 +132,30 @@ internal object BranchLive {
     private const val BASE = "http://swopenapi.seoul.go.kr/api/subway"
 
     /**
-     * 갱신 주기 — **적응형**(v1.6.70). 평소 15초, 편승 열차가 양천구청으로 다가오는 동안만 5초.
-     * 판정은 [approachingYangcheon]. 한도 산정은 `docs/project-notes.md` v1.6.70 절.
+     * 갱신 주기 — **적응형**(v1.6.70, 값은 v1.6.72에서 15/5 → **10/4초**).
+     * 평소 10초, 편승 열차가 양천구청으로 다가오는 동안만 4초. 판정은 [approachingYangcheon].
+     * 한도 산정은 `docs/project-notes.md` **v1.6.72 절**(실이용자 50명 전제 — 282명이 아니다).
+     *
+     * ⚠ **[BranchLiveMap]의 폴링 눈금(2초)과 맞물려 있다.** 이 상수는 "중복 호출을 흡수하는
+     * 하한"이라 실제 호출 시각은 *이 값 이상이 되는 첫 폴링 눈금*이다. 그래서 눈금이
+     * 두 값의 **최대공약수**여야 한다 — `gcd(10, 4) = 2`초. 한쪽만 바꾸면 조용히 어긋난다:
+     * 종전 5초 눈금에 4초를 넣으면 첫 눈금이 5초라 **실제 간격이 5초로 반올림**된다.
      */
-    private const val IDLE_INTERVAL_MS = 15_000L
-    private const val NEAR_INTERVAL_MS = 5_000L
+    private const val IDLE_INTERVAL_MS = 10_000L
+    private const val NEAR_INTERVAL_MS = 4_000L
+
+    /**
+     * 주기 판정에 주는 **여유** — 눈금의 절반. 없으면 **경계에서 동전 던지기가 된다.**
+     *
+     * 딱 맞아떨어지는 눈금(주기 10초 = 5번째 눈금)의 도착 시각은 `예정시각 + 지터`인데,
+     * `lastFetchAt`도 그 직전 fetch 눈금의 지터를 품고 있다. 두 지터의 대소에 따라 경계 눈금이
+     * 통과하기도(10.0초) 밀리기도(12.0초) 한다 — v1.6.72 실측에서 **10.03~12.10초로 갈렸다.**
+     *
+     * 여유가 `0 < slack < 눈금`이면 판정이 결정적이 된다: 한 눈금 이른 자리는 `주기 − 2초`라
+     * 여전히 걸리고, 제 눈금은 지터가 ±1초 안이면 항상 통과한다. 절반(1초)이 양쪽 여백이
+     * 가장 넓다. **눈금을 바꾸면 이 값도 같이 봐야 한다.**
+     */
+    internal const val TICK_SLACK_MS = 1_000L
     private const val STALE_KEEP_MS = 120_000L    // 실패 시 직전 성공 데이터 유지 한도
 
     /**
@@ -394,7 +413,7 @@ internal object BranchLive {
              * `barvlDt`는 **그 역에서의 정차 시간까지 포함**한다(2026-08-25 실측: `5653`이
              * 신정네거리에 **정차 중**인데 양천구청 ETA가 180초 — 실주행 130초보다 50초 많다).
              * 그대로 역변환하면 역에 서 있는 열차를 구간 한복판(0.5역 뒤)으로 끌어다 놓는다.
-             * 그러면 ③의 접근 판정(0.85~2.0)도 같이 빗나가 5초 갱신이 안 걸린다.
+             * 그러면 ③의 접근 판정(0.85~2.0)도 같이 빗나가 짧은 주기가 안 걸린다.
              *
              * 앞으로만 당기면 ETA가 충분히 작아진 **구간 후반부터** 보정이 걸린다 —
              * 양천구청에 다가올수록 정밀해진다는 원래 목적 그대로고, 뒤로 튀는 일이 없다.
@@ -504,7 +523,7 @@ internal object BranchLive {
      * · 12분([TURN_HOLD_MS]) 넘은 기억은 여기서 버린다 — 살아 있는 홀드와 같은 잣대다.
      * · `putIfAbsent` — 지금 눈에 보이는 관측이 항상 이긴다.
      * · 복원한 홀드도 **복귀 열차(+5/+1)가 첫 폴링에서 보이면 즉시 걷힌다**([ensureFleet]).
-     *   그 사이 회차가 끝나 있었더라도 15초 안에 스스로 정리된다.
+     *   그 사이 회차가 끝나 있었더라도 한 폴링 주기(10초) 안에 스스로 정리된다.
      */
     internal fun restoreTurnMemory(saved: String, nowMs: Long) {
         saved.split(",").forEach { e ->
@@ -583,7 +602,7 @@ internal object BranchLive {
      * 기준: 신도림행(편승 대상) 중 위치가 **0.85 이상 2.0 미만**.
      *  · 0.85 = 신정네거리 `진입`이 찍히는 자리([posOf]의 `"0"` = idx − 0.15). 승무원이
      *    양천구청 승강장에서 열차를 눈으로 찾기 시작하는 시점 — 여기부터 초 단위가 필요하다.
-     *  · 2.0 = 양천구청 도착. 지나가면 편승은 끝났으니 15초로 돌아간다.
+     *  · 2.0 = 양천구청 도착. 지나가면 편승은 끝났으니 평소 주기로 돌아간다.
      *  · 까치산행(하행)은 세지 않는다 — 양천구청에서 잡아 타는 건 신도림행뿐이다.
      * 창(0.85~2.0)의 실주행 시간 = 0.15 × 100 + 130 ≈ **145초**. 상행 배차 6분 기준
      * 가동률 ≈ 40%다(한도 계산의 근거 — `docs/project-notes.md` v1.6.70).
@@ -592,19 +611,25 @@ internal object BranchLive {
         trains.any { it.toSindorim && it.position >= 0.85f && it.position < 2f }
 
     /**
+     * 이번 갱신에 쓸 주기. [approachingYangcheon] 하나로 갈린다 — 값은 테스트가 잠근다
+     * (문서의 한도 계산표가 이 두 숫자에 얹혀 있어서, 조용히 바뀌면 표가 거짓말이 된다).
+     */
+    internal fun pollIntervalMs(trains: List<TrainMark>) =
+        if (approachingYangcheon(trains)) NEAR_INTERVAL_MS else IDLE_INTERVAL_MS
+
+    /**
      * 스냅샷 1회 = **API 2회**(2호선 위치 1 + 양천구청 도착 1).
      * v1.6.70이 더했던 신정네거리 도착(3번째)은 v1.6.71에서 껐다 — [loadFromSeoulApi] 주석.
-     * 주기 내 재호출은 캐시 반환(한도 보호) — 주기는 [approachingYangcheon]에 따라 15초/5초.
+     * 주기 내 재호출은 캐시 반환(한도 보호) — 주기는 [pollIntervalMs]에 따라 10초/4초.
      *
      * ⚠ 호출자는 반드시 **컴포지션에 묶인 코루틴**에서 부를 것 — 상세시트가 닫히면
      * [BranchLiveMap]의 LaunchedEffect가 취소되며 폴링이 함께 멎는다.
      */
     suspend fun loadSnapshot(force: Boolean = false): Snapshot {
         val nowMs = System.currentTimeMillis()
-        // 직전 스냅샷의 위치로 판정한다 — 최대 15초 묵은 값이지만, 접근 창이 145초라 놓치지 않는다.
-        val interval = if (approachingYangcheon(lastSnapshot?.trains.orEmpty()))
-            NEAR_INTERVAL_MS else IDLE_INTERVAL_MS
-        if (!force) lastSnapshot?.let { if (nowMs - lastFetchAt < interval) return it }
+        // 직전 스냅샷의 위치로 판정한다 — 최대 10초 묵은 값이지만, 접근 창이 145초라 놓치지 않는다.
+        val interval = pollIntervalMs(lastSnapshot?.trains.orEmpty())
+        if (!force) lastSnapshot?.let { if (nowMs - lastFetchAt < interval - TICK_SLACK_MS) return it }
         lastFetchAt = nowMs
         var snap = retainLastGood(loadFromSeoulApi())
         // ⚠ 순서 고정: 회차 공백 메꾸기(실측 열번) → 머리 전환(+5/+1) → 겹침 정리.
@@ -613,7 +638,7 @@ internal object BranchLive {
         lastSnapshot = snap
         // 주기는 **이번 호출을 통과시킨 값**이다 — logcat 타임스탬프 간격과 그대로 맞는다.
         // 열차 목록까지 남긴다 — 지도가 무엇을 그리는지(위치 융합·회차 홀드)를 실기기에서
-        // 확인할 유일한 창이다. 시트가 열려 있는 동안 5~15초에 한 줄이라 시끄럽지 않다.
+        // 확인할 유일한 창이다. 시트가 열려 있는 동안 4~10초에 한 줄이라 시끄럽지 않다.
         Log.i(TAG, "스냅샷: 열차 ${snap.trains.size}대 · 입고 ${snap.inbound.size}건 " +
             "· 주기 ${interval / 1000}초" + (snap.error?.let { " · $it" } ?: "") +
             snap.trains.joinToString(", ", " [", "]") {
@@ -650,7 +675,7 @@ internal object BranchLive {
      *     [refineWithArrivals]의 전진 가드에 그대로 막힌다.
      *  2. 접근 중 ETA도 `330 → 320 → 180 → 180 → 180`으로 **초 단위로 안 내려온다.**
      *  3. 도착 API는 열차가 그 역을 지난 뒤에도 **같은 행을 3분씩 되풀이한다**(잡음만 늘린다).
-     *  4. "한 정거장 앞부터 초 단위"를 실제로 만들고 있는 건 **적응형 5초 갱신 + 등속 보간**이다.
+     *  4. "한 정거장 앞부터 초 단위"를 실제로 만들고 있는 건 **적응형 갱신(4초) + 등속 보간**이다.
      *  5. 그런데 이 한 줄이 **일일 한도의 1/3을 쓴다**(키 6개 = 6000회/일을 282명이 나눠 쓴다.
      *     하루 감당 278분 → 끄면 **417분**).
      *

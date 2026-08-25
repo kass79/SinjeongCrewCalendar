@@ -213,7 +213,8 @@ class BranchLiveTest {
     }
 
     /**
-     * v1.6.70 적응형 갱신(15초 ↔ 5초)의 판정. 창은 **신정네거리 진입(0.85) ~ 양천구청 도착(2.0)**.
+     * v1.6.70 적응형 갱신의 판정(주기 값은 v1.6.72에서 10초 ↔ 4초).
+     * 창은 **신정네거리 진입(0.85) ~ 양천구청 도착(2.0)**.
      * 넓히면 한도가 새고, 좁히면 승강장에서 열차를 눈으로 찾는 구간을 놓친다.
      */
     @Test
@@ -223,9 +224,34 @@ class BranchLiveTest {
         assertTrue(BranchLive.approachingYangcheon(up(0.85f)))    // 신정네거리 진입(idx − 0.15)
         assertTrue(BranchLive.approachingYangcheon(up(1.99f)))
         assertFalse(BranchLive.approachingYangcheon(up(2f)))      // 양천구청 도착 = 편승 끝
-        // 까치산행은 편승 대상이 아니다 — 하행 때문에 5초로 당기면 한도만 샌다
+        // 까치산행은 편승 대상이 아니다 — 하행 때문에 주기를 당기면 한도만 샌다
         assertFalse(BranchLive.approachingYangcheon(listOf(TrainMark("5602", false, 1.5f, ""))))
         assertFalse(BranchLive.approachingYangcheon(emptyList()))
+    }
+
+    /**
+     * **주기 값 자체를 잠근다**(v1.6.72: 15/5 → 10/4초). `docs/project-notes.md`의 한도 계산표가
+     * 이 두 숫자에 통째로 얹혀 있다 — 조용히 바뀌면 문서가 거짓말이 되고 한도가 샌다.
+     *
+     * 그리고 **`LineMap`의 폴링 tick(2초)이 두 값의 최대공약수여야 한다.** 실제 호출은
+     * "주기 이상이 되는 첫 tick"에 일어나므로 나누어떨어지지 않으면 그 눈금으로 반올림된다
+     * (종전 5초 tick에 4초를 넣으면 실제 간격이 5초가 된다 — 한쪽만 고치면 나는 버그).
+     */
+    @Test
+    fun `접근 여부로 갱신 주기가 갈리고 폴링 눈금과 맞물린다`() {
+        val idle = BranchLive.pollIntervalMs(listOf(TrainMark("5601", true, 0.5f, "")))
+        val near = BranchLive.pollIntervalMs(listOf(TrainMark("5601", true, 1.5f, "")))
+        assertEquals(10_000L, idle)
+        assertEquals(4_000L, near)
+        assertEquals(10_000L, BranchLive.pollIntervalMs(emptyList()))
+        assertTrue(near < idle)
+        val tickMs = 2_000L                                   // LineMap 폴링 LaunchedEffect
+        assertEquals(0L, idle % tickMs)
+        assertEquals(0L, near % tickMs)
+        // 여유는 **한 눈금 미만**이어야 한 눈금 이른 자리가 여전히 걸리고, **0보다 커야**
+        // 경계 눈금이 지터로 밀리지 않는다. 이 창을 벗어나면 실측 간격이 주기와 달라진다.
+        assertTrue(BranchLive.TICK_SLACK_MS > 0L)
+        assertTrue(BranchLive.TICK_SLACK_MS < tickMs)
     }
 
     @Test
