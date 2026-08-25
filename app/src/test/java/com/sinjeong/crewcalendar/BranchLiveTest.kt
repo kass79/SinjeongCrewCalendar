@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
+import com.sinjeong.crewcalendar.presentation.live.TrainMark
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -78,16 +79,19 @@ class BranchLiveTest {
      * 양천구청 10초 전 = 양천구청(2.0)에 거의 붙은 자리로 당겨진다 —
      * 이게 열차가 역과 역 사이를 미끄러지듯 움직이는 근거다.
      *
-     * 두 소스가 1.2역 넘게 어긋나면 오데이터로 보고 무시한다. 여기선 3.0 vs 1.92 = 1.08 이라
-     * **통과**하는 쪽이다(경계 바로 안쪽 — 이 값이 흔들리면 보정이 통째로 꺼진다).
+     * ⚠ **앞으로만 당긴다**(v1.6.70). 종전엔 1.2역 이내면 뒤로도 끌었고, 그래서 도림천에 있는
+     * 열차를 양천구청으로 되돌려 놓는 실제 오배치가 났다(아래 `묵은 도착행` 테스트가 그 자리다).
      */
     @Test
     fun `양천구청 도착 초로 상행 위치를 정밀화한다`() {
-        val marks = BranchLive.branchTrains(BranchLive.parsePositions(positions))
+        // 신정네거리를 갓 출발한 상행(1.15) — 보정이 앞으로 당기는 정상 경로
+        val marks = BranchLive.branchTrains(BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"신정네거리","trainNo":"5553","updnLine":"1","statnTnm":"신도림지선","trainSttus":"2"},""" +
+            """{"subwayId":"1002","statnNm":"도림천","trainNo":"5556","updnLine":"0","statnTnm":"까치산","trainSttus":"1"}]"""))
         val refined = BranchLive.refineWithArrivals(
             marks,
             BranchLive.parseArrivals(
-                """[{"btrainNo":"5553","bstatnNm":"신도림지선","barvlDt":"10"}]"""),
+                """[{"btrainNo":"5553","bstatnNm":"신도림지선","barvlDt":"10","arvlCd":"3"}]"""),
         )
         val t = refined.first { it.trainNo == "5553" }
         assertEquals(1.923f, t.position, 0.01f)   // 10초 ÷ 신정↔양천 130초 = 0.077역 앞
@@ -95,6 +99,133 @@ class BranchLiveTest {
 
         // 까치산행(5556)은 상행이 아니라 손대지 않는다 — 하행에 상행 ETA를 먹이면 안 된다
         assertEquals(3f, refined.first { it.trainNo == "5556" }.position, 0.001f)
+    }
+
+    /**
+     * v1.6.70 — **묵은 도착행이 열차를 뒤로 끌지 못한다.** 실호출로 잡은 오배치를 그대로 재생한다.
+     *
+     * 2026-08-25 18:32~18:36, 30초 간격. 열차 `5651` 하나를 두 API가 이렇게 말했다:
+     * ```
+     * 18:32:48 위치=양천구청 출발   도착=cd2 출발/eta10
+     * 18:33:49 위치=도림천 도착     도착=cd0 진입/eta10   ← 출발 → 진입으로 되돌아간다
+     * 18:34:49 위치=도림천 도착     도착=cd1 도착/eta10
+     * 18:35:50 위치=신도림 도착     도착=cd2 출발/eta10   ← 3분째 같은 자리를 말한다
+     * ```
+     * 종전 코드는 도림천(3.0) 구간에서 `|1.92 − 3.0| = 1.08 ≤ 1.2` 라 이 묵은 행을 받아들여
+     * **열차를 양천구청으로 되돌려 그렸다.** 이제 두 겹으로 막는다 — cd 0·1·2 버리기 + 앞으로만.
+     */
+    @Test
+    fun `묵은 도착행이 열차를 뒤로 끌지 않는다`() {
+        val at도림천 = BranchLive.branchTrains(BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"도림천","trainNo":"5651","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1"}]"""))
+        assertEquals(3f, at도림천.single().position, 0.001f)
+
+        listOf("2", "0", "1").forEach { cd ->
+            val r = BranchLive.refineWithArrivals(at도림천, BranchLive.parseArrivals(
+                """[{"btrainNo":"5651","bstatnNm":"신도림지선","barvlDt":"10","arvlCd":"$cd"}]"""))
+            assertEquals("cd=$cd 는 그 역을 이미 지난 행이다", 3f, r.single().position, 0.001f)
+            assertEquals("도림천 도착", r.single().statusText)
+        }
+        // cd를 안 주는 응답이라도(구 스키마) 뒤로는 못 끈다 — 두 번째 자물쇠
+        val noCd = BranchLive.refineWithArrivals(at도림천, BranchLive.parseArrivals(
+            """[{"btrainNo":"5651","bstatnNm":"신도림지선","barvlDt":"10"}]"""))
+        assertEquals(3f, noCd.single().position, 0.001f)
+    }
+
+    /**
+     * v1.6.70 — `barvlDt`에 **정차 시간이 섞여 있다**(실측: 신정네거리에 서 있는 `5653`의
+     * 양천구청 ETA가 180초, 실주행 130초보다 50초 많다). 그대로 믿으면 역에 정차한 열차를
+     * 구간 한복판(0.5역)으로 끌어 내리고, 그러면 ③의 접근 판정(0.85~2.0)까지 같이 빗나간다.
+     */
+    @Test
+    fun `정차 시간이 섞인 ETA가 열차를 역 뒤로 못 내린다`() {
+        val 신정네거리정차 = BranchLive.branchTrains(BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"신정네거리","trainNo":"5653","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1"}]"""))
+        assertEquals(1f, 신정네거리정차.single().position, 0.001f)
+        val r = BranchLive.refineWithArrivals(신정네거리정차, BranchLive.parseArrivals(
+            """[{"btrainNo":"5653","bstatnNm":"신도림지선","barvlDt":"180","arvlCd":"5"}]"""))
+        assertEquals(1f, r.single().position, 0.001f)                 // 0.5로 안 내려간다
+        assertTrue(BranchLive.approachingYangcheon(r))                // ③ 5초 갱신이 그대로 걸린다
+    }
+
+    /**
+     * v1.6.70 — **신정네거리(1)로도 같은 융합**을 한다. 승무원은 양천구청에서 편승 열차를 타는데
+     * 신정네거리가 바로 앞 역이라, 한 정거장 앞에서부터 초 단위로 보인다.
+     *
+     * 상한이 역마다 다르다: 까치산→그 역까지의 실측 주행시간(양천구청 230초 · 신정네거리 100초).
+     */
+    @Test
+    fun `신정네거리 도착 초로도 상행 위치를 정밀화한다`() {
+        val rows = BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"까치산","trainNo":"5601","updnLine":"1","statnTnm":"신도림지선","trainSttus":"2"}]""")
+        val marks = BranchLive.branchTrains(rows)          // 까치산 출발 → 0.15
+        val refined = BranchLive.refineWithArrivals(
+            marks,
+            BranchLive.parseArrivals("""[{"btrainNo":"5601","bstatnNm":"신도림지선","barvlDt":"50"}]"""),
+            1,
+        )
+        val t = refined.single()
+        assertEquals(0.5f, t.position, 0.01f)              // 50초 ÷ 까치↔신정 100초 = 0.5역 앞
+        assertEquals("신정네거리 50초 전", t.statusText)
+
+        // 상한(100초) 밖은 0~1 역변환이 표현 못 하는 자리 — 손대지 않는다
+        val far = BranchLive.refineWithArrivals(
+            marks,
+            BranchLive.parseArrivals("""[{"btrainNo":"5601","bstatnNm":"신도림지선","barvlDt":"150"}]"""),
+            1,
+        )
+        assertEquals(0.15f, far.single().position, 0.01f)
+        assertEquals("까치산 출발", far.single().statusText)
+    }
+
+    /**
+     * v1.6.70 — 두 역이 같은 열차를 말하면 **양천구청이 이긴다**(보드 지점이라 더 중요).
+     * 순서로 보장한다: 신정네거리를 먼저 걸고 양천구청을 나중에 걸어 덮어쓴다.
+     *
+     * ⚠ 실호출(2026-08-25 18:3x)에서 **신정네거리 행이 한 역 묵어서 오는 것**을 봤다
+     * (5651이 위치 API로는 양천구청 도착인데 신정네거리 목록엔 `진입`으로 남아 있었다).
+     * 이 우선순위가 그 묵은 값을 덮는 자리다 — 뒤집히면 지나간 역을 말하게 된다.
+     */
+    @Test
+    fun `두 역이 겹치면 양천구청이 이긴다`() {
+        // loadFromSeoulApi 와 같은 순서: 신정네거리(1) → 양천구청(2)
+        fun fuse(marks: List<TrainMark>, sin: String, yang: String) = BranchLive.refineWithArrivals(
+            BranchLive.refineWithArrivals(marks, BranchLive.parseArrivals(sin), 1),
+            BranchLive.parseArrivals(yang), 2).single()
+
+        val 까치산출발 = BranchLive.branchTrains(BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"까치산","trainNo":"5601","updnLine":"1","statnTnm":"신도림지선","trainSttus":"2"}]"""))
+        val t = fuse(까치산출발,
+            """[{"btrainNo":"5601","bstatnNm":"신도림지선","barvlDt":"50","arvlCd":"3"}]""",   // → 0.5
+            """[{"btrainNo":"5601","bstatnNm":"신도림지선","barvlDt":"100","arvlCd":"3"}]""")  // → 1.23
+        assertEquals(1.231f, t.position, 0.01f)            // 양천구청 값이 신정네거리 값을 덮는다
+        assertEquals("양천구청 100초 전", t.statusText)
+
+        // 실제로 겪는 충돌은 이쪽이다 — **묵은 신정네거리 행 vs 지금 양천구청에 있는 열차**.
+        // (2026-08-25 실측: 5651이 위치 API로는 양천구청인데 신정네거리 목록엔 `진입`으로 남아 있었다)
+        val 양천구청도착 = BranchLive.branchTrains(BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"양천구청","trainNo":"5601","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1"}]"""))
+        val u = fuse(양천구청도착,
+            """[{"btrainNo":"5601","bstatnNm":"신도림지선","barvlDt":"10","arvlCd":"0"}]""",   // 묵은 행
+            """[]""")
+        assertEquals(2f, u.position, 0.001f)               // 신정네거리로 되돌아가지 않는다
+        assertEquals("양천구청 도착", u.statusText)
+    }
+
+    /**
+     * v1.6.70 적응형 갱신(15초 ↔ 5초)의 판정. 창은 **신정네거리 진입(0.85) ~ 양천구청 도착(2.0)**.
+     * 넓히면 한도가 새고, 좁히면 승강장에서 열차를 눈으로 찾는 구간을 놓친다.
+     */
+    @Test
+    fun `양천구청 접근 판정이 창 밖을 안 센다`() {
+        fun up(pos: Float) = listOf(TrainMark("5601", true, pos, ""))
+        assertFalse(BranchLive.approachingYangcheon(up(0.84f)))   // 신정네거리 진입 전
+        assertTrue(BranchLive.approachingYangcheon(up(0.85f)))    // 신정네거리 진입(idx − 0.15)
+        assertTrue(BranchLive.approachingYangcheon(up(1.99f)))
+        assertFalse(BranchLive.approachingYangcheon(up(2f)))      // 양천구청 도착 = 편승 끝
+        // 까치산행은 편승 대상이 아니다 — 하행 때문에 5초로 당기면 한도만 샌다
+        assertFalse(BranchLive.approachingYangcheon(listOf(TrainMark("5602", false, 1.5f, ""))))
+        assertFalse(BranchLive.approachingYangcheon(emptyList()))
     }
 
     @Test
@@ -276,6 +407,87 @@ class BranchLiveTest {
 
         val stale = pipeline(listOf(row("5679", "양천구청", "신도림지선", "1", "1")), t0 + 12 * 60_000L + 1)
         assertTrue("12분이 지나도 회차 아이콘이 남아 있다", stale.none { it.trainNo == "5681" })
+    }
+
+    /* ── 콜드 스타트 (v1.6.70 ⑤) ─────────────────────────────────────────────
+     *
+     * 사용자: *"신도림, 까치산에 정차해 있으면 가끔씩 안보이는 이유는 뭐야?"*
+     *
+     * v1.6.56이 **경과 세션 안에서는** 고쳤지만, `turningTrains`가 `object` 메모리라
+     * **프로세스가 죽으면 통째로 사라진다.** 앱을 새로 띄운 순간 이미 회차 중이던 열차는
+     * 위치 API가 안 주고(2026-08-25 재확인) 기억도 없어 **그릴 근거가 0**이었다 —
+     * v1.6.56이 *"콜드 스타트에선 안 그린다"* 로 적어 둔 그 자리가 사용자가 겪은 "가끔씩"이다.
+     *
+     * 아래 테스트는 **프로세스가 죽는 순간을 그대로 재현한다**: 관측 → 직렬화 → 기억 소거
+     * (= 프로세스 종료) → 복원 → 홀드 아이콘이 살아 있는가.
+     */
+
+    /** 프로세스가 죽었다 — 회차 기억을 통째로 날린다(만료 시각을 던져 비우는 것과 같다). */
+    private fun killProcess() = BranchLive.ensureFleet(emptyList(), Long.MAX_VALUE / 2)
+
+    @Test
+    fun `콜드 스타트에서 회차 기억을 되살린다`() {
+        val t0 = 1_800_000_000_000L
+        // ① 세션 1: 5651이 신도림에 도착하는 것을 봤다
+        pipeline(listOf(row("5651", "신도림지선", "신도림지선", "1", "1")), t0)
+        val saved = BranchLive.turnMemory()
+        assertTrue("관측한 회차 열차가 저장 문자열에 없다", saved.contains("5651"))
+
+        // ② 앱이 죽었다가 90초 뒤 새로 뜬다 — 위치 API는 회차 중인 열차를 **안 준다**
+        killProcess()
+        assertTrue("기억이 안 지워졌다면 이 테스트는 아무것도 안 잠근다",
+            pipeline(emptyList(), t0 + 90_000L).isEmpty())
+
+        // ③ 복원하면 같은 열차가 같은 자리에 선다(+5 = 5656, `회차 · 신도림 대기`)
+        killProcess()
+        BranchLive.restoreTurnMemory(saved, t0 + 90_000L)
+        val cold = pipeline(emptyList(), t0 + 90_000L)
+        assertEquals(listOf("5656"), cold.map { it.trainNo })
+        assertEquals(4f, cold.single().position, 0.001f)
+        assertEquals("회차 · 신도림 대기", cold.single().statusText)
+    }
+
+    /**
+     * 복원이 **유령을 만들면 안 된다.** 두 가지로 막는다:
+     *  · 12분([TURN_HOLD_MS])이 지난 기억은 복원 자체를 안 한다.
+     *  · 회차를 마치고 돌아온 열차(+5)가 보이면 첫 폴링에서 홀드가 걷힌다.
+     */
+    @Test
+    fun `복원한 회차 기억이 유령으로 남지 않는다`() {
+        val t0 = 1_800_000_000_000L
+        pipeline(listOf(row("5651", "신도림지선", "신도림지선", "1", "1")), t0)
+        val saved = BranchLive.turnMemory()
+
+        // ① 12분이 지난 기억은 되살리지 않는다
+        killProcess()
+        BranchLive.restoreTurnMemory(saved, t0 + 12 * 60_000L + 1)
+        assertTrue("만료된 기억이 되살아났다", pipeline(emptyList(), t0 + 12 * 60_000L + 1).isEmpty())
+
+        // ② 복원했는데 회차가 이미 끝나 있었다면(+5가 실차로 보인다) 즉시 걷힌다 — 중복 아이콘 0
+        killProcess()
+        BranchLive.restoreTurnMemory(saved, t0 + 200_000L)
+        val back = pipeline(listOf(row("5656", "도림천", "까치산", "1", "0")), t0 + 200_000L)
+        assertEquals(listOf("5656"), back.map { it.trainNo })
+        assertEquals(3f, back.single().position, 0.001f)      // 종착이 아니라 도림천에 있다
+
+        // ③ 깨진 문자열·빈 문자열에 안 죽는다(저장소가 오래된 형식일 수 있다)
+        killProcess()
+        BranchLive.restoreTurnMemory("", t0)
+        BranchLive.restoreTurnMemory("쓰레기,5651:없음:1,5651", t0)
+        assertTrue(pipeline(emptyList(), t0).isEmpty())
+    }
+
+    /** 저장 형식 왕복 — 열번·목격시각·어느 종착인지가 그대로 살아 돌아온다. */
+    @Test
+    fun `회차 기억 직렬화 왕복`() {
+        val t0 = 1_800_000_000_000L
+        pipeline(listOf(row("5651", "신도림지선", "신도림지선", "1", "1"),
+                        row("5680", "까치산", "까치산", "1", "0")), t0)
+        val saved = BranchLive.turnMemory()
+        killProcess()
+        BranchLive.restoreTurnMemory(saved, t0 + 60_000L)
+        // 신도림 홀드 → +5, 까치산 홀드 → +1. 양쪽 종착이 따로 살아난다.
+        assertEquals(setOf("5656", "5681"), pipeline(emptyList(), t0 + 60_000L).map { it.trainNo }.toSet())
     }
 
     /* ── 본선 열차 배제 (v1.6.58) ───────────────────────────────────────────

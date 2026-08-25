@@ -40,11 +40,14 @@ internal object BranchLine {
 
     const val SUBWAY_ID_LINE2 = "1002"
 
-    /** 양천구청 상행 도착까지 남은 초(x)를 0~2 위치로 역변환 */
-    fun posFromYangcheonSec(x: Float, toSindorim: Boolean): Float {
+    /**
+     * 역 [at]의 상행 도착까지 남은 초(x)를 0~[at] 위치로 역변환.
+     * (v1.6.70에서 양천구청 전용이던 것을 역 인덱스로 일반화 — 신정네거리도 같은 식을 탄다)
+     */
+    fun posFromStationSec(x: Float, at: Int, toSindorim: Boolean): Float {
         val seg = if (toSindorim) SEG_UP else SEG_DN
         var remain = x
-        var p = 2f
+        var p = at.toFloat()
         while (remain > 0f && p > 0f) {
             val idx = (p - 0.001f).toInt().coerceIn(0, 3)
             val segSec = seg[idx].toFloat()
@@ -52,7 +55,7 @@ internal object BranchLine {
             if (remain <= here) { p -= remain / segSec; remain = 0f }
             else { remain -= here; p = idx.toFloat() }
         }
-        return p.coerceIn(0f, 2f)
+        return p.coerceIn(0f, at.toFloat())
     }
 }
 
@@ -77,8 +80,15 @@ internal data class PositionRow(
     val trainSttus: String,  // 0진입 1도착 2출발 3전역출발
 )
 
-/** 실시간 도착 1건 (realtimeStationArrival 스키마 중 쓰는 필드만) */
-internal data class ArrivalRow(val trainNo: String, val destName: String, val etaSec: Int)
+/**
+ * 실시간 도착 1건 (realtimeStationArrival 스키마 중 쓰는 필드만).
+ *
+ * [arvlCd] 0진입 1도착 2출발 3전역출발 4전역진입 5전역도착 99운행중 — **0·1·2는 그 역에 이미
+ * 닿았거나 지나간 열차**라 접근 정보가 없다. 융합에서 왜 그걸 버려야 하는지는 [refineWithArrivals].
+ */
+internal data class ArrivalRow(
+    val trainNo: String, val destName: String, val etaSec: Int, val arvlCd: String = "",
+)
 
 /** 화면 한 벌 */
 internal data class Snapshot(
@@ -112,13 +122,31 @@ internal object BranchLive {
         "416a6775766b6173333545706a6863",
         "7658747a4e6b617337344261674f67",
         "68436e55736b61733636524f4d4d6c",
+        "6e624e7a7a6b617338347179415373",   // v1.6.70 추가 — 하루 한도 5000 → 6000회
     )
 
     // ⚠ HTTPS(443)가 안 열려 있다 — 이 호스트만 cleartext 허용(res/xml/network_security_config.xml).
     private const val BASE = "http://swopenapi.seoul.go.kr/api/subway"
 
-    private const val MIN_INTERVAL_MS = 15_000L   // 중복 호출 흡수(한도 보호)
+    /**
+     * 갱신 주기 — **적응형**(v1.6.70). 평소 15초, 편승 열차가 양천구청으로 다가오는 동안만 5초.
+     * 판정은 [approachingYangcheon]. 한도 산정은 `docs/project-notes.md` v1.6.70 절.
+     */
+    private const val IDLE_INTERVAL_MS = 15_000L
+    private const val NEAR_INTERVAL_MS = 5_000L
     private const val STALE_KEEP_MS = 120_000L    // 실패 시 직전 성공 데이터 유지 한도
+
+    /**
+     * 회차 홀드 상한. 안전망이지 정상 경로가 아니다 — 회차가 끝나면 **복귀 열차(+5/+1)가** 걷어낸다.
+     * 2026-08-23 20:45~21:20 실측 6회차의 API 실종 구간: 신도림 2:42 / 4:13 / 4:59,
+     * 까치산 5:14 / 6:20 / **7:36**(최대). 종전 8분은 최대치와 24초밖에 안 떨어져 있었다.
+     * 12분 = 실무 회차 상한 8분 + 관측된 API 보고 지연(양끝 1~3분). 더 늘리면 API가 통째로
+     * 조용할 때 이미 떠난 열차가 종착에 눌어붙는다.
+     *
+     * 2026-08-25 18:36 재확인(30초 폴링): `5651`이 18:36:20 신도림 도착을 마지막으로 위치 API에서
+     * 사라졌다 — 실종 구간의 존재와 성격은 v1.6.56 관측 그대로다.
+     */
+    private const val TURN_HOLD_MS = 12 * 60_000L
 
     @Volatile private var keyIdx = 0
     @Volatile private var quotaBlockedUntil = 0L
@@ -182,6 +210,7 @@ internal object BranchLive {
                 trainNo = field(o, "btrainNo")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null,
                 destName = field(o, "bstatnNm").orEmpty(),
                 etaSec = field(o, "barvlDt")?.toIntOrNull() ?: return@mapNotNull null,
+                arvlCd = field(o, "arvlCd").orEmpty(),
             )
         }.toList()
 
@@ -293,7 +322,7 @@ internal object BranchLive {
             if (!toSindorim && !dest.contains("까치산")) return@mapNotNull null
             val up2 = BranchLine.SEG_UP[0] + BranchLine.SEG_UP[1]
             if (r.etaSec <= 0 || r.etaSec > up2) return@mapNotNull null
-            val posv = if (toSindorim) BranchLine.posFromYangcheonSec(r.etaSec.toFloat(), true)
+            val posv = if (toSindorim) BranchLine.posFromStationSec(r.etaSec.toFloat(), 2, true)
                        else (2f + r.etaSec.toFloat() / up2 * 2f).coerceIn(2f, 4f)
             TrainMark(r.trainNo, toSindorim, posv.coerceIn(0f, 4f), "양천구청 ${r.etaSec}초 전")
         }.distinctBy { it.trainNo }
@@ -315,22 +344,66 @@ internal object BranchLive {
             .sortedBy { it.etaSec }
             .toList()
 
-    /** 위치 API(역 단위) + 도착 API(초 단위)를 융합해 양천구청 접근 상행 열차를 정밀화 */
-    internal fun refineWithArrivals(trains: List<TrainMark>, yang: List<ArrivalRow>): List<TrainMark> {
-        if (trains.isEmpty() || yang.isEmpty()) return trains
-        val etaByNo = yang.filter { norm(it.destName).contains("신도림") }
+    /**
+     * 위치 API(역 단위) + 도착 API(초 단위)를 융합해 **역 [at] 접근 상행 열차**를 정밀화.
+     *
+     * [at] = 2 양천구청(편승 보드 지점) · 1 신정네거리(그 바로 앞 역, v1.6.70).
+     * 신정네거리를 더한 이유: 승무원은 양천구청에서 편승 열차를 탄다. 한 정거장 앞부터
+     * 초 단위로 보이면 승강장에서 "지금 오는 그 열차"가 눈으로 잡힌다.
+     *
+     * ⚠ 두 역이 같은 열차를 말하면 **나중에 부른 쪽이 이긴다.** [loadFromSeoulApi]가
+     * 신정네거리 → 양천구청 순으로 걸어 **양천구청을 신뢰**한다(보드 지점이라 더 중요).
+     *
+     * ⚠⚠ **`arvlCd` 0·1·2(진입·도착·출발) 행은 버린다**(v1.6.70 — 실호출로 잡은 오배치).
+     * 도착 API는 열차가 그 역을 지난 뒤에도 **같은 행을 몇 분씩 되풀이해 준다.**
+     * 2026-08-25 18:32~18:36 실측(30초 간격), 열차 `5651` 한 대:
+     * ```
+     * 18:32:48 위치=양천구청 출발   도착행=cd2 출발/eta10   ← 여기까지만 맞다
+     * 18:33:49 위치=도림천 도착     도착행=cd0 진입/eta10   ← 출발 → 진입으로 되돌아간다
+     * 18:34:49 위치=도림천 도착     도착행=cd1 도착/eta10
+     * 18:35:50 위치=**신도림 도착** 도착행=cd2 출발/eta10   ← 3분째 같은 자리를 말한다
+     * ```
+     * eta 10초를 그대로 믿으면 도림천에 있는 열차를 **양천구청으로 끌어다 놓는다**
+     * (1.2역 가드가 |1.92 − 3.0| = 1.08 이라 못 막는다 — 종전에 실제로 새던 구멍).
+     * 반대로 접근 중인 행(cd 3·4·5·99)은 eta가 **330 → 320 → 180 → 150 → 140** 으로
+     * 제대로 내려온다. 융합이 원래 노리던 것이 이쪽이고, 이제 이쪽만 쓴다.
+     * 0·1·2를 버려도 잃는 게 없다 — 그 순간의 자리는 위치 API가 이미 역 단위로 정확히 준다.
+     */
+    internal fun refineWithArrivals(
+        trains: List<TrainMark>, arrivals: List<ArrivalRow>, at: Int = 2,
+    ): List<TrainMark> {
+        if (trains.isEmpty() || arrivals.isEmpty()) return trains
+        val etaByNo = arrivals
+            .filter { norm(it.destName).contains("신도림") && it.arvlCd !in AT_STATION_CD }
             .associate { it.trainNo to it.etaSec }
+        // ETA 상한 = 까치산에서 그 역까지 걸리는 시간(양천구청 230초 · 신정네거리 100초).
+        // 넘으면 0~at 역변환이 표현할 수 없는 자리라 손대지 않는다.
+        val maxSec = BranchLine.SEG_UP.take(at).sum()
         return trains.map { t ->
             val eta = etaByNo[t.trainNo] ?: return@map t
-            val up2 = BranchLine.SEG_UP[0] + BranchLine.SEG_UP[1]
-            if (!t.toSindorim || eta !in 1..up2) return@map t
-            val refined = BranchLine.posFromYangcheonSec(eta.toFloat(), true).coerceIn(0f, 2f)
-            // 위치 API 좌표와 1.2역 이상 어긋나면 오데이터로 보고 무시
-            if (kotlin.math.abs(refined - t.position) <= 1.2f)
-                t.copy(position = refined, statusText = "양천구청 ${eta}초 전")
+            if (!t.toSindorim || eta !in 1..maxSec) return@map t
+            val refined = BranchLine.posFromStationSec(eta.toFloat(), at, true)
+            /*
+             * **앞으로만 당긴다**(v1.6.70). 위치 API가 "어느 역"의 진실이고, 도착 ETA는 그 위에
+             * 역과 역 사이를 채우는 값이다 — 뒤로 끄는 보정은 전부 오데이터였다.
+             *
+             * `barvlDt`는 **그 역에서의 정차 시간까지 포함**한다(2026-08-25 실측: `5653`이
+             * 신정네거리에 **정차 중**인데 양천구청 ETA가 180초 — 실주행 130초보다 50초 많다).
+             * 그대로 역변환하면 역에 서 있는 열차를 구간 한복판(0.5역 뒤)으로 끌어다 놓는다.
+             * 그러면 ③의 접근 판정(0.85~2.0)도 같이 빗나가 5초 갱신이 안 걸린다.
+             *
+             * 앞으로만 당기면 ETA가 충분히 작아진 **구간 후반부터** 보정이 걸린다 —
+             * 양천구청에 다가올수록 정밀해진다는 원래 목적 그대로고, 뒤로 튀는 일이 없다.
+             * 상한 1.2역은 그대로 둔다(터무니없이 낙관적인 ETA 차단).
+             */
+            if (refined >= t.position && refined - t.position <= 1.2f)
+                t.copy(position = refined, statusText = "${BranchLine.stations[at]} ${eta}초 전")
             else t
         }
     }
+
+    /** 그 역에 이미 닿았거나 지나간 도착행 — 접근 정보가 없다([refineWithArrivals] 참고) */
+    private val AT_STATION_CD = setOf("0", "1", "2")
 
     /** 회차 열번 규칙(승무 실무): 신도림 회차 = 열번 +5, 까치산 회차 = 열번 +1 */
     private fun turnNo(no: String, add: Int) = no.toIntOrNull()?.let { (it + add).toString() } ?: no
@@ -365,13 +438,6 @@ internal object BranchLive {
      * "회차 완료" 판정이 지선의 다른 실차 번호와 겹친다 — v1.6.55까지 아이콘이 사라지던 원인.
      */
     internal fun ensureFleet(trains: List<TrainMark>, nowMs: Long): List<TrainMark> {
-        // 안전망 상한이지 정상 경로가 아니다 — 회차가 끝나면 **복귀 열차(+5/+1)가** 홀드를 걷어낸다.
-        // 2026-08-23 20:45~21:20 실측 6회차의 API 실종 구간: 신도림 2:42 / 4:13 / 4:59,
-        // 까치산 5:14 / 6:20 / **7:36**(최대). 종전 8분은 최대치와 24초밖에 안 떨어져 있었다.
-        // 12분 = 실무 회차 상한 8분 + 관측된 API 보고 지연(양끝 1~3분). 더 늘리면 API가 통째로
-        // 조용할 때 이미 떠난 열차가 종착에 눌어붙는다.
-        val turnHoldMs = 12 * 60_000L
-
         // 종착에 **들어온** 열차만 회차 대상이다(떠나는 열차는 아니다 — 신도림 출발도 pos 3.85라
         // 방향을 안 보면 같이 걸린다). 볼 때마다 시각을 갱신해 홀드 시계가 "눈에서 놓친 뒤"부터
         // 흐르게 한다 — 종전 putIfAbsent 는 종착에 보이던 시간까지 홀드 예산에서 깎아먹었다.
@@ -383,7 +449,7 @@ internal object BranchLive {
         val curNoStr = trains.map { it.trainNo }.toSet()
         turningTrains.entries.removeIf { (no, v) ->
             val (since, atSindorim) = v
-            if (nowMs - since > turnHoldMs) return@removeIf true
+            if (nowMs - since > TURN_HOLD_MS) return@removeIf true
             // 회차 완료 = **열번을 바꾼 그 열차**가 API에 다시 나타났다. [applyTurnaround]와 같은
             // 규칙 하나만 쓴다(2026-08-23 실측: 신도림 5677 → 5682(+5), 까치산 5680 → 5681(+1)).
             // 종전의 `+5 또는 +3` 추가 추측은 지선에 동시에 떠 있는 **다른 실차 번호**와 겹쳐
@@ -403,6 +469,46 @@ internal object BranchLive {
             else TrainMark(no, false, 0f, "까치산 도착")
         }
         return trains + holdIcons
+    }
+
+    /* ── 회차 기억을 프로세스 밖으로 (v1.6.70 ⑤) ───────────────────── */
+
+    /**
+     * **콜드 스타트 구멍**(v1.6.70). [turningTrains]는 `object`의 메모리라 프로세스가 죽으면 사라진다.
+     * 그래서 앱을 새로 띄운 순간 **이미 회차 중이던 열차는 그릴 근거가 통째로 없어** 안 보였다
+     * (v1.6.56이 *"콜드 스타트에선 안 그린다"* 라고 적어 둔 바로 그 자리 — 사용자가 말한 "가끔씩").
+     *
+     * 2026-08-25 18:32~18:38 실호출로 **다른 근거가 없다는 것까지** 확인했다:
+     *  · `realtimeStationArrival/신도림` — 지선 열차가 **한 건도 안 나온다**(전부 본선 성수행).
+     *  · `realtimeStationArrival/까치산` — 5호선 열차가 섞여 오고(`5683/마천`·`5154/방화`,
+     *    열번대가 지선과 겹친다!) 종착에 서 있는 지선 열차는 안 준다.
+     *  · `realtimeStationArrival/양천구청` — 방향마다 **가장 가까운 한 대**만 준다. 회차 중인
+     *    열차 자리는 방금 지나간 열차의 묵은 행이 차지하고 있었다.
+     * → 종착에 서 있는 열차를 말해 주는 API는 없다. **유일한 근거는 우리가 직접 본 것**이고,
+     *   그래서 그 기억만 디스크에 잠깐 남겼다가 되살린다. 없는 열차를 지어내지 않는다.
+     *
+     * 형식: `열번:마지막목격ms:종착(1=신도림)` 을 쉼표로. 저장·복원은 [BranchLiveMap]이 한다
+     * (여기를 안드로이드 클래스에서 자유롭게 둬야 유닛테스트가 [ensureFleet]를 그대로 돌린다).
+     */
+    internal fun turnMemory(): String = turningTrains.entries.joinToString(",") { (no, v) ->
+        "$no:${v.first}:${if (v.second) 1 else 0}"
+    }
+
+    /**
+     * 저장해 둔 회차 기억을 되살린다 — **관측했던 열차를 되돌리는 것이지 창작이 아니다.**
+     *
+     * · 12분([TURN_HOLD_MS]) 넘은 기억은 여기서 버린다 — 살아 있는 홀드와 같은 잣대다.
+     * · `putIfAbsent` — 지금 눈에 보이는 관측이 항상 이긴다.
+     * · 복원한 홀드도 **복귀 열차(+5/+1)가 첫 폴링에서 보이면 즉시 걷힌다**([ensureFleet]).
+     *   그 사이 회차가 끝나 있었더라도 15초 안에 스스로 정리된다.
+     */
+    internal fun restoreTurnMemory(saved: String, nowMs: Long) {
+        saved.split(",").forEach { e ->
+            val p = e.split(":")
+            val since = p.getOrNull(1)?.toLongOrNull() ?: return@forEach
+            if (p.size == 3 && nowMs - since <= TURN_HOLD_MS)
+                turningTrains.putIfAbsent(p[0], since to (p[2] == "1"))
+        }
     }
 
     /** 같은 방향 0.45역 이내 중복은 같은 편성으로 보고 하나만. 종착은 회차가 겹치므로 예외. */
@@ -461,26 +567,50 @@ internal object BranchLive {
     private suspend fun fetchPositions() =
         fetch("realtimePosition/0/100/${URLEncoder.encode("2호선", "UTF-8")}").map(::parsePositions)
 
-    private suspend fun fetchYangcheonArrivals() =
-        fetch("realtimeStationArrival/0/12/${URLEncoder.encode("양천구청", "UTF-8")}").map(::parseArrivals)
+    private suspend fun fetchArrivals(station: String) =
+        fetch("realtimeStationArrival/0/12/${URLEncoder.encode(station, "UTF-8")}").map(::parseArrivals)
 
     /**
-     * 스냅샷 1회 = API 2회. 15초 내 재호출은 캐시 반환(한도 보호).
+     * **양천구청으로 다가오는 신도림행 열차가 있나** — 적응형 갱신 주기의 판정(v1.6.70).
+     *
+     * 기준: 신도림행(편승 대상) 중 위치가 **0.85 이상 2.0 미만**.
+     *  · 0.85 = 신정네거리 `진입`이 찍히는 자리([posOf]의 `"0"` = idx − 0.15). 승무원이
+     *    양천구청 승강장에서 열차를 눈으로 찾기 시작하는 시점 — 여기부터 초 단위가 필요하다.
+     *  · 2.0 = 양천구청 도착. 지나가면 편승은 끝났으니 15초로 돌아간다.
+     *  · 까치산행(하행)은 세지 않는다 — 양천구청에서 잡아 타는 건 신도림행뿐이다.
+     * 창(0.85~2.0)의 실주행 시간 = 0.15 × 100 + 130 ≈ **145초**. 상행 배차 6분 기준
+     * 가동률 ≈ 40%다(한도 계산의 근거 — `docs/project-notes.md` v1.6.70).
+     */
+    internal fun approachingYangcheon(trains: List<TrainMark>) =
+        trains.any { it.toSindorim && it.position >= 0.85f && it.position < 2f }
+
+    /**
+     * 스냅샷 1회 = **API 3회**(2호선 위치 1 + 양천구청 도착 1 + 신정네거리 도착 1).
+     * 주기 내 재호출은 캐시 반환(한도 보호) — 주기는 [approachingYangcheon]에 따라 15초/5초.
      *
      * ⚠ 호출자는 반드시 **컴포지션에 묶인 코루틴**에서 부를 것 — 상세시트가 닫히면
      * [BranchLiveMap]의 LaunchedEffect가 취소되며 폴링이 함께 멎는다.
      */
     suspend fun loadSnapshot(force: Boolean = false): Snapshot {
         val nowMs = System.currentTimeMillis()
-        if (!force) lastSnapshot?.let { if (nowMs - lastFetchAt < MIN_INTERVAL_MS) return it }
+        // 직전 스냅샷의 위치로 판정한다 — 최대 15초 묵은 값이지만, 접근 창이 145초라 놓치지 않는다.
+        val interval = if (approachingYangcheon(lastSnapshot?.trains.orEmpty()))
+            NEAR_INTERVAL_MS else IDLE_INTERVAL_MS
+        if (!force) lastSnapshot?.let { if (nowMs - lastFetchAt < interval) return it }
         lastFetchAt = nowMs
         var snap = retainLastGood(loadFromSeoulApi())
         // ⚠ 순서 고정: 회차 공백 메꾸기(실측 열번) → 머리 전환(+5/+1) → 겹침 정리.
         //   [ensureFleet] KDoc 참고 — 뒤집으면 회차 중 아이콘이 사라진다.
         snap = snap.copy(trains = squashOverlaps(applyTurnaround(ensureFleet(snap.trains, nowMs))))
         lastSnapshot = snap
-        Log.i(TAG, "스냅샷: 열차 ${snap.trains.size}대 · 입고 ${snap.inbound.size}건" +
-            (snap.error?.let { " · $it" } ?: ""))
+        // 주기는 **이번 호출을 통과시킨 값**이다 — logcat 타임스탬프 간격과 그대로 맞는다.
+        // 열차 목록까지 남긴다 — 지도가 무엇을 그리는지(위치 융합·회차 홀드)를 실기기에서
+        // 확인할 유일한 창이다. 시트가 열려 있는 동안 5~15초에 한 줄이라 시끄럽지 않다.
+        Log.i(TAG, "스냅샷: 열차 ${snap.trains.size}대 · 입고 ${snap.inbound.size}건 " +
+            "· 주기 ${interval / 1000}초" + (snap.error?.let { " · $it" } ?: "") +
+            snap.trains.joinToString(", ", " [", "]") {
+                "${it.trainNo}@${"%.2f".format(it.position)} ${it.statusText}"
+            })
         return snap
     }
 
@@ -490,6 +620,9 @@ internal object BranchLive {
             if (snap.trains.isNotEmpty()) lastGood = snap
             return snap
         }
+        // **부분 실패**(도착 API 셋 중 하나만 죽음)면 방금 받은 위치가 옛 스냅샷보다 낫다.
+        // 호출이 3개로 늘어난 v1.6.70에서 이 경우가 그만큼 잦아졌다.
+        if (snap.trains.isNotEmpty()) return snap
         val lg = lastGood ?: return snap
         if (System.currentTimeMillis() - lg.fetchedAtMillis > STALE_KEEP_MS) return snap
         val ageSec = ((System.currentTimeMillis() - lg.fetchedAtMillis) / 1000).toInt()
@@ -499,17 +632,22 @@ internal object BranchLive {
     private suspend fun loadFromSeoulApi(): Snapshot = try {
         coroutineScope {
             val posD = async { fetchPositions() }
-            val yangD = async { fetchYangcheonArrivals() }
+            val yangD = async { fetchArrivals("양천구청") }
+            val sinD = async { fetchArrivals("신정네거리") }
             val pos = posD.await()
             val yang = yangD.await()
+            val sin = sinD.await()
             val posRows = pos.getOrDefault(emptyList())
             val yangRows = yang.getOrDefault(emptyList())
+            val sinRows = sin.getOrDefault(emptyList())
 
             Snapshot(
                 // 머리 전환은 여기서 하지 않는다 — [ensureFleet]가 **회차 전 열번**을 봐야 한다.
                 // [loadSnapshot]이 ensureFleet → applyTurnaround 순으로 이어 붙인다.
                 trains = run {
-                    val strict = refineWithArrivals(branchTrains(posRows), yangRows)
+                    // 신정네거리(1) 먼저, 양천구청(2) 나중 — 겹치면 **양천구청이 이긴다**.
+                    val strict = refineWithArrivals(
+                        refineWithArrivals(branchTrains(posRows), sinRows, 1), yangRows, 2)
                     val merged = (strict + branchTrainsLoose(posRows, strict)).distinctBy { it.trainNo }
                     merged.ifEmpty { trainsFromArrivals(yangRows) }
                 },
@@ -517,7 +655,8 @@ internal object BranchLive {
                 fetchedAtMillis = System.currentTimeMillis(),
                 // 두 호출이 같은 이유로 죽으면 문구도 하나만 (`인터넷 연결 안 됨 · 인터넷 연결 안 됨` 방지).
                 // 원문은 logcat으로 — 진단은 그쪽에서 한다.
-                error = listOfNotNull(pos.exceptionOrNull(), yang.exceptionOrNull())
+                error = listOfNotNull(
+                    pos.exceptionOrNull(), yang.exceptionOrNull(), sin.exceptionOrNull())
                     .onEach { Log.w(TAG, "조회 실패", it) }
                     .map(::humanError).distinct().joinToString(" · ").ifBlank { null },
             )

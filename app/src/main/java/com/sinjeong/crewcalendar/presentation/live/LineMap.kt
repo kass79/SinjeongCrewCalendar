@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.live
 
+import android.content.Context
 import android.util.Log
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -48,6 +49,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
@@ -58,9 +60,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.LocalTime
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -83,6 +87,8 @@ private val StopRed = Color(0xFFFF2D2D)
 private const val DEPOT_RUN_END = 2.5f     // 도림천 지나 중간쯤에서 기지 진입(아이콘 소멸)
 private const val DEPOT_RUN_SEC = 150f     // 신도림→기지 진입 소요 가정
 private const val TAG = "BranchLive"
+/** 회차 기억 저장 키 — 값 형식은 [BranchLive.turnMemory] */
+private const val TURN_KEY = "turn_memory"
 
 /** 영업시간: 05:30~24:00 + 익일 0~1시(전날 영업 연장). 빈 상태 문구를 고르는 데만 쓴다. */
 private fun inService(t: LocalTime = LocalTime.now()): Boolean {
@@ -114,13 +120,25 @@ internal fun BranchLiveMap(bleed: Dp = 0.dp, modifier: Modifier = Modifier) {
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val scope = rememberCoroutineScope()
 
+    val ctx = LocalContext.current
+
     DisposableEffect(Unit) {
         Log.i(TAG, "지도 열림 — 폴링 시작")
         onDispose { Log.i(TAG, "지도 닫힘 — 폴링·애니메이션 취소") }
     }
     LaunchedEffect(Unit) {
+        // 회차 기억 복원(v1.6.70 ⑤) — 프로세스가 죽어도 **직전에 본** 회차 열차를 되살린다.
+        // 근거와 한계는 [BranchLive.restoreTurnMemory] KDoc. 저장소를 여기서 다루는 이유는
+        // [BranchLive]를 안드로이드 클래스에서 자유롭게 둬야 유닛테스트가 그대로 돌기 때문이다.
+        val sp = withContext(Dispatchers.IO) {
+            ctx.getSharedPreferences("branch_live", Context.MODE_PRIVATE)
+        }
+        BranchLive.restoreTurnMemory(sp.getString(TURN_KEY, "").orEmpty(), System.currentTimeMillis())
+        var saved = ""
         while (isActive) {
             snap = BranchLive.loadSnapshot()
+            // 바뀔 때만 쓴다 — 시트가 열려 있는 동안 5~15초마다 도는 자리다.
+            BranchLive.turnMemory().let { if (it != saved) { saved = it; sp.edit().putString(TURN_KEY, it).apply() } }
             delay(5_000)
         }
     }
@@ -188,11 +206,11 @@ private fun LineMapCard(
                 val infinite = rememberInfiniteTransition(label = "did")
                 val shimmer by infinite.animateFloat(
                     1f, 0.90f, infiniteRepeatable(tween(900), RepeatMode.Reverse), label = "shimmer")
-                // **아래로만** 흔들린다(v1.6.55). 종전 ±1.2dp는 절반의 시간 동안 아이콘을
-                // 레일에서 들어 올려 "바퀴가 안 닿는다"는 인상을 보탰다. 0~1.2면 접지 상태에서
-                // 눌렸다 돌아오는 서스펜션이 되고 **떠오르는 순간이 없다**.
-                val bob by infinite.animateFloat(
-                    0f, 1.2f, infiniteRepeatable(tween(620), RepeatMode.Reverse), label = "bob")
+                // v1.6.70: 여기 있던 `bob`(상하 까딱임)을 **뺐다**(사용자: *"가속, 감속은
+                // 없었으면해!"*). 이징이 기본값(FastOutSlowIn)이라 끝에서 느려졌다 가운데서
+                // 빨라지는 **가속·감속 그 자체**였다 — 게다가 왕복 운동이라 양 끝에서 방향이
+                // 꺾인다. v1.6.55에서 진폭을 ±1.2 → 0~1.2dp로 좁혀 "떠오르는 순간"만 없앴던
+                // 것을, 이번엔 운동을 통째로 걷어냈다. 주행/정차 구분은 [shimmer]가 계속 한다.
                 val phase by infinite.animateFloat(
                     0f, 1f, infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
                     label = "phase")
@@ -201,9 +219,12 @@ private fun LineMapCard(
                 val elapsedSec = ((nowMillis - fetchedAtMillis) / 1000f).coerceAtLeast(0f)
                 val maxIdx = (BranchLine.stations.size - 1).toFloat()
                 val lastShown = remember { HashMap<String, Float>() }
+                // 화면에 **실제로 그려진** 위치. 등속 지속시간을 남은 거리로 잡는 데 쓴다(v1.6.70).
+                val lastDrawn = remember { HashMap<String, Float>() }
                 run { // 사라진 열차의 기억 정리
                     val alive = trains.map { it.trainNo + if (it.toSindorim) "U" else "D" }.toSet()
                     lastShown.keys.retainAll(alive)
+                    lastDrawn.keys.retainAll(alive)
                 }
                 val animated = trains
                     .sortedBy { it.trainNo + if (it.toSindorim) "U" else "D" }
@@ -212,13 +233,14 @@ private fun LineMapCard(
                             val atTerminus = t.position <= 0.2f || t.position >= 3.8f
                             val holding = t.statusText.endsWith("진입") || t.statusText.endsWith("도착") ||
                                 (t.statusText.contains("회차") && atTerminus)
+                            // 현재 구간의 실측 주행시간 = **화면 속도의 유일한 기준**(실차와 같은 리듬).
+                            // 역 화면 간격(`stFrac`)도 같은 실측시간 비율이라 px/초가 구간마다 같다.
+                            val segIdx = (if (t.toSindorim) floor(t.position.toDouble())
+                                          else ceil(t.position.toDouble()) - 1).toInt().coerceIn(0, 3)
+                            val segSec = (if (t.toSindorim) BranchLine.SEG_UP[segIdx]
+                                          else BranchLine.SEG_DN[segIdx]).toFloat()
                             val target = if (holding) t.position else {
                                 val dir = if (t.toSindorim) 1f else -1f
-                                // 현재 구간의 실측 주행시간으로 화면 속도 결정 → 실제 열차와 같은 리듬
-                                val segIdx = (if (t.toSindorim) floor(t.position.toDouble())
-                                              else ceil(t.position.toDouble()) - 1).toInt().coerceIn(0, 3)
-                                val segSec = (if (t.toSindorim) BranchLine.SEG_UP[segIdx]
-                                              else BranchLine.SEG_DN[segIdx]).toFloat()
                                 val advance = elapsedSec / segSec
                                 // 다음 역까지 '완주'하는 연속 보간 (도착 후 그 자리에서 대기)
                                 val cap = if (t.toSindorim)
@@ -236,9 +258,24 @@ private fun LineMapCard(
                                 if (backstep > 0f) prev else target
                             }
                             lastShown[k] = forwardSafe
-                            // 갱신 주기(5초)에 걸쳐 선형으로 흘러 역과 역 사이를 일정 속도로 이동
+                            /*
+                             * **등속**(v1.6.70). 지속시간을 `남은 거리 ÷ 실제 주행속도`로 잡는다.
+                             *
+                             * 종전 `tween(5000)`은 목표가 새로 올 때마다 "5초 안에 거기까지"로
+                             * 다시 잡혔다 — 남은 거리가 크면 빨라지고 작으면 느려져서, 갱신
+                             * 경계마다 **속도가 확 달라졌다**(사용자가 본 가속·감속의 정체).
+                             * 이제 거리가 얼마든 속도는 `1구간 ÷ segSec` 하나뿐이라
+                             * ③의 갱신 주기가 15↔5초로 바뀌어도 화면 속도는 안 변한다.
+                             *
+                             * ponytail: 상한 = 한 구간 주행시간. 그보다 먼 목표(열차가 오래
+                             * 사라졌다 나타난 경우)는 그만큼 빨리 따라붙는다 — 데이터 도약이라
+                             * 어차피 등속으로 메울 거리가 아니다. 필요하면 여기 clamp만 손본다.
+                             */
+                            val durMs = (kotlin.math.abs(forwardSafe - (lastDrawn[k] ?: forwardSafe))
+                                * segSec * 1000f).toInt().coerceIn(1, segSec.toInt() * 1000)
                             val p by animateFloatAsState(
-                                forwardSafe, tween(5000, easing = LinearEasing), label = "t${t.trainNo}")
+                                forwardSafe, tween(durMs, easing = LinearEasing), label = "t${t.trainNo}")
+                            lastDrawn[k] = p
                             Triple(t, p, holding)
                         }
                     }
@@ -431,9 +468,8 @@ private fun LineMapCard(
                         // 까치산 방면(상단 선로)은 선로 톤에 맞춰 살짝 흐리게
                         val alpha = (if (t.toSindorim) 1f else 0.78f) *
                             if (holding) 1f else shimmer      // 정차·회차 = 고정 / 주행 = 셔머
-                        // 주행 중엔 레일 진동 같은 미세한 상하 바브
-                        val ty = trainY(t.toSindorim, pos)
-                        val y = ty + (if (!holding) bob.dp.toPx() else 0f)
+                        // 아이콘 y = 선로 중심 그대로(v1.6.70에서 상하 `bob`을 뺐다 — 위 주석)
+                        val y = trainY(t.toSindorim, pos)
                         // 아이콘은 선로 **위에 얹혀** 그려진다 — 넘기는 y는 선로 중심,
                         // 돌려받는 값은 그려진 아이콘의 윗변이다(`↻ 회차`를 그 위에 붙이려고).
                         val iconTop = drawTrainIcon(
