@@ -13,25 +13,29 @@ import javax.inject.Inject
  *  ① 소속(신정지선 / 본선 기관사 / 본선 차장) 선택
  *  ② "date의 내 근무는 패턴의 patternIndex 칸" 지정 → offset 재계산 저장
  *
- * [scheduled]로 **적용 시작일**이 갈린다 (v1.6.63):
- *  - `false` = `바로 적용` — 종전 그대로. 구간을 비워 저장 모양까지 v1.6.62와 같아진다.
+ * [applyFrom]으로 **적용 시작일**이 갈린다 (v1.6.63, v1.6.69에 날짜로 일반화):
+ *  - `null` = `바로 적용` — 종전 그대로. 구간을 비워 저장 모양까지 v1.6.62와 같아진다.
  *    앞뒤 모든 날짜가 새 교번으로 다시 계산된다(근무가 밀렸을 때 과거까지 바로잡는 길).
- *  - `true`  = `다음 달 1일부터` — [date] 이전은 지금 교번 그대로, [date]부터 새 교번.
+ *  - 날짜  = 그 날부터만 새 교번, 그 전날까지는 지금 교번 그대로.
  *    기관사가 지선 2개월 / 본선 4~6개월 주기로 **달 경계에서** 소속이 바뀌기 때문이다.
- *    이때 [date]는 곧 적용 시작일이고 [patternIndex]는 **그 날의 근무**다 —
- *    사용자가 새 교번표를 보고 "9/1은 몇 다이아"를 읽어 고른다.
+ *    `다음 달 1일부터`(v1.6.63)와 `근무 저장한 다음 날부터`(v1.6.69)가 같은 길로 들어온다.
+ *
+ * ⚠ [date]와 [applyFrom]은 **다른 값**이다. [date]는 사용자가 다이아를 읽어 고른 **기준 날짜**
+ * (= [patternIndex]가 가리키는 날의 근무)이고, [applyFrom]은 그 교번이 **적용되기 시작하는 날**이다.
+ * 근무 저장이 과거 날짜(예: 7/15)에 걸려 있으면 기준일은 오늘이고 시작일만 7/16이 된다 —
+ * `offsetFor`가 돌려주는 오프셋은 날짜에 독립적이라 둘을 갈라도 근무가 어긋나지 않는다.
  */
 class SelectDutyPositionUseCase @Inject constructor(
     private val userRepo: UserRepository,
 ) {
-    suspend operator fun invoke(date: LocalDate, group: CrewGroup, patternIndex: Int, scheduled: Boolean = false) {
+    suspend operator fun invoke(date: LocalDate, group: CrewGroup, patternIndex: Int, applyFrom: LocalDate? = null) {
         val user = userRepo.observeMe().first() ?: error("로그인이 필요합니다")
         val pattern = Bundled.patternFor(group)
         require(patternIndex in pattern.sequence.indices) { "잘못된 근무 위치" }
 
         val offset = pattern.offsetFor(date, patternIndex)
         userRepo.upsert(
-            if (scheduled) user.scheduleSegment(date, pattern.id, offset, group.role)
+            if (applyFrom != null) user.scheduleSegment(applyFrom, pattern.id, offset, group.role)
             else user.copy(
                 patternId = pattern.id, patternOffset = offset, role = group.role,
                 patternSegments = emptyList(),

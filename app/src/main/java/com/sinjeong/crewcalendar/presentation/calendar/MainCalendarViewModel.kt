@@ -22,6 +22,9 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
 
+/** `9월 1일` — 달을 흘려 읽으면 한 칸이 어긋나는 자리라 `9/1`을 쓰지 않는다(v1.6.63) */
+internal val MD: DateTimeFormatter = DateTimeFormatter.ofPattern("M월 d일", Locale.KOREAN)
+
 /**
  * 근무선택 피커 상태: 1단계(소속) → 2단계(근무 그리드).
  *
@@ -37,11 +40,36 @@ data class DutyPickerState(
     val group: CrewGroup? = null,
     /** true면 [nextMonthFirst]부터만 적용, false면 지금 교번 자체를 교체(종전 동작) */
     val scheduled: Boolean = false,
+    /** `근무 저장`으로 확정해 둔 마지막 날 (v1.6.69). null이면 저장한 적 없음 */
+    val frozenUntil: LocalDate? = null,
 ) {
     val nextMonthFirst: LocalDate get() = today.withDayOfMonth(1).plusMonths(1)
 
-    /** 적용 시작일 = 그리드·A~D조 카드가 근무를 계산하는 기준 날짜 */
-    val date: LocalDate get() = if (scheduled) nextMonthFirst else today
+    /** 근무선택이 손댈 수 있는 가장 이른 날 = 저장해 둔 날의 다음 날 */
+    val thawFrom: LocalDate? get() = frozenUntil?.plusDays(1)
+
+    /**
+     * 구간 시작일. `null`이면 "처음부터"(= `바로 적용`, 옛 형식으로 저장).
+     *
+     * 저장은 **바닥만 올린다** — 종전 두 선택지를 그대로 두되 저장한 날보다 앞설 수 없게 한다.
+     * 저장이 없으면 v1.6.63과 한 글자도 다르지 않다(`null` / [nextMonthFirst]).
+     */
+    val applyFrom: LocalDate? get() = when {
+        scheduled -> maxOf(nextMonthFirst, thawFrom ?: nextMonthFirst)
+        else -> thawFrom
+    }
+
+    /**
+     * 두 선택지가 같은 날로 붙었는가 = 고를 것이 없다 → 버튼 줄 대신 안내문 한 줄.
+     * `8월 31일까지 저장`처럼 **달 경계에서 저장한 보통의 경우**가 전부 여기 걸린다.
+     */
+    val applyChoiceFixed: Boolean get() = thawFrom?.let { it >= nextMonthFirst } == true
+
+    /**
+     * 그리드·A~D조 카드가 근무를 계산하는 **기준 날짜** — 사용자가 새 교번표에서 읽어 고르는 날.
+     * 시작일이 과거면(저장이 지난 날짜에 걸린 경우) 오늘을 기준으로 고른다.
+     */
+    val date: LocalDate get() = applyFrom?.coerceAtLeast(today) ?: today
 }
 
 data class CalendarUiState(
@@ -118,7 +146,8 @@ class MainCalendarViewModel @Inject constructor(
     // ── 근무선택 (핵심): ① 소속 → ② 근무 ─────────────────
     fun openDutyPicker(date: LocalDate = LocalDate.now()) {
         selectedDate.value = null
-        picker.value = DutyPickerState(date)
+        // 저장해 둔 날이 있으면 피커가 열리는 순간부터 시작일 바닥이 그 다음 날로 잡힌다
+        picker.value = DutyPickerState(date, frozenUntil = uiState.value.user?.frozenUntil)
     }
 
     fun pickGroup(group: CrewGroup) { picker.update { it?.copy(group = group) } }
@@ -133,16 +162,35 @@ class MainCalendarViewModel @Inject constructor(
     fun confirmDutyPosition(group: CrewGroup, patternIndex: Int) {
         val p = picker.value ?: return
         viewModelScope.launch {
-            runCatching { selectDutyPosition(p.date, group, patternIndex, p.scheduled) }
+            runCatching { selectDutyPosition(p.date, group, patternIndex, p.applyFrom) }
                 .onFailure { error.value = it.message ?: "근무선택 실패" }
                 // 예약은 그 날이 오기 전엔 화면이 하나도 안 바뀐다 → 됐는지 알 길이 없다.
                 // 스낵바로 한 번 알리고, 상시 확인·취소는 설정 화면에 둔다.
                 .onSuccess {
-                    if (p.scheduled) error.value =
-                        "${p.date.format(DateTimeFormatter.ofPattern("M월 d일", Locale.KOREAN))}부터 " +
-                            "${group.label}로 바뀝니다 · 취소는 설정 › 근무 패턴"
+                    p.applyFrom?.let { from ->
+                        error.value = "${from.format(MD)}부터 ${group.label}로 바뀝니다 · 취소는 설정 › 근무 패턴"
+                    }
                 }
             picker.value = null
+        }
+    }
+
+    /**
+     * **근무 저장**(v1.6.69) — [until]까지의 근무를 지금 값으로 확정한다.
+     *
+     * 저장하는 것은 **날짜 하나**뿐이다(`User.frozenUntil`). 날짜별로 근무를 복사하지 않으므로
+     * 저장 직후 달력에 보이는 근무는 한 칸도 달라지지 않고, 바탕색만 연녹색이 된다.
+     * 이후 `근무선택`은 [until] 다음 날부터만 적용된다(`DutyPickerState.applyFrom`).
+     */
+    fun freezeDuties(until: LocalDate) {
+        val u = uiState.value.user ?: return
+        viewModelScope.launch {
+            runCatching { userRepo.upsert(u.copy(frozenUntil = until)) }
+                .onFailure { error.value = "근무 저장 실패: ${it.message}" }
+                .onSuccess {
+                    error.value = "${until.withDayOfMonth(1).format(MD)} ~ ${until.dayOfMonth}일 " +
+                        "근무를 저장했습니다 · 해제는 설정 › 내 정보"
+                }
         }
     }
 

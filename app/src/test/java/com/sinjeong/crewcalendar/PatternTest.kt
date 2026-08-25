@@ -19,6 +19,7 @@ import com.sinjeong.crewcalendar.domain.model.scheduleSegment
 import com.sinjeong.crewcalendar.domain.model.segmentOn
 import com.sinjeong.crewcalendar.domain.model.teamBadge
 import com.sinjeong.crewcalendar.domain.model.withSegments
+import com.sinjeong.crewcalendar.presentation.calendar.DutyPickerState
 import com.sinjeong.crewcalendar.widget.signOnAt
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -1516,5 +1517,86 @@ class PatternTest {
             u = u.scheduleSegment(from, Bundled.MAIN_PATTERN.id, i, CrewRole.DRIVER_MAIN, from.minusDays(1))
         }
         assertTrue("${u.patternSegments.size}", u.patternSegments.size <= User.MAX_SEGMENTS)
+    }
+
+    /* ── 근무 저장 (v1.6.69) ────────────────────────────────────────────
+       *"9월1일에 근무가 바뀔수도 있으니, 8월말까지 근무저장되고, 9월부터 다른근무지정할수있게…
+       1일 부터 길게 누른 날짜까지 저장되게~"*
+       저장은 **날짜 하나**만 기억한다 — 값을 복사하지 않으므로 저장 자체로는 근무가 안 바뀌고,
+       근무선택의 적용 시작일 바닥만 올라간다. */
+
+    private val aug31 = LocalDate.of(2026, 8, 31)
+
+    /** **저장은 값을 바꾸지 않는다** — 8월 31칸이 저장 전후로 한 칸도 안 달라진다(픽셀 동일의 근거) */
+    @Test fun freezing_changes_no_duty() {
+        val frozen = legacyUser.copy(frozenUntil = aug31)
+        (1..31).forEach { d ->
+            val date = LocalDate.of(2026, 8, d)
+            val a = legacyUser.segmentOn(date)
+            val b = frozen.segmentOn(date)
+            assertEquals("8/$d", a, b)
+        }
+        // 저장해도 구간은 안 생긴다 = 저장 모양이 v1.6.68과 같다(하위호환)
+        assertTrue(frozen.patternSegments.isEmpty())
+    }
+
+    /** 저장해 둔 날 다음 날이 적용 시작일이 된다. 달 말일까지 저장하면 선택지가 하나로 붙는다 */
+    @Test fun freeze_floors_the_apply_date() {
+        val p = DutyPickerState(today = aug, frozenUntil = aug31)
+        assertEquals(sep1, p.applyFrom)              // `바로 적용`을 골라도 9/1이 바닥
+        assertEquals(sep1, p.copy(scheduled = true).applyFrom)
+        assertTrue(p.applyChoiceFixed)               // 둘이 같은 날 → 버튼 줄을 감춘다
+        assertEquals(sep1, p.date)                   // 그리드 기준일도 9/1
+    }
+
+    /** 저장이 없으면 v1.6.63과 한 글자도 다르지 않다 (하위호환 1순위) */
+    @Test fun without_freeze_apply_date_is_unchanged() {
+        val p = DutyPickerState(today = aug)
+        assertNull(p.applyFrom)                      // `바로 적용` = 처음부터(옛 형식)
+        assertEquals(sep1, p.copy(scheduled = true).applyFrom)
+        assertTrue(!p.applyChoiceFixed)
+        assertEquals(aug, p.date)
+    }
+
+    /** 달 중간·과거에 저장하면 선택지가 둘 다 살아 있고, 기준일은 오늘보다 앞서지 않는다 */
+    @Test fun freeze_in_the_middle_keeps_both_choices() {
+        val mid = DutyPickerState(today = aug, frozenUntil = LocalDate.of(2026, 8, 10))
+        assertEquals(LocalDate.of(2026, 8, 11), mid.applyFrom)
+        assertEquals(sep1, mid.copy(scheduled = true).applyFrom)
+        assertTrue(!mid.applyChoiceFixed)
+        assertEquals(aug, mid.date)                  // 시작일이 과거 → 오늘 근무를 보고 고른다
+
+        // 저장이 지난달에 걸린 채로 다음 달이 온 경우(묵은 저장)도 9월을 통째로 덮지 않는다
+        val stale = DutyPickerState(today = LocalDate.of(2026, 9, 10), frozenUntil = aug31)
+        assertEquals(sep1, stale.applyFrom)
+        assertEquals(LocalDate.of(2026, 10, 1), stale.copy(scheduled = true).applyFrom)
+        assertTrue(!stale.applyChoiceFixed)          // 9/1과 10/1은 다른 날 → 고를 수 있어야 한다
+    }
+
+    /**
+     * **저장 → 새 교번 → 다시 저장 → 또 새 교번**이 앞 구간을 안 잡아먹는다.
+     * v1.6.68의 `scheduleSegment`는 "아직 시작 안 한 구간"을 통째로 버려 9월이 옛 교번으로 돌아갔다.
+     */
+    @Test fun scheduling_twice_keeps_the_earlier_pending_segment() {
+        val oct1 = LocalDate.of(2026, 10, 1)
+        val u = legacyUser
+            .scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 40, CrewRole.DRIVER_MAIN, aug)
+            .scheduleSegment(oct1, Bundled.MAIN_PATTERN.id, 7, CrewRole.DRIVER_MAIN, aug)
+
+        assertEquals(Bundled.BRANCH_PATTERN.id, u.segmentOn(aug31).patternId)   // 8월 = 지선 그대로
+        assertEquals(40, u.segmentOn(LocalDate.of(2026, 9, 15)).patternOffset)  // 9월 = 첫 예약 살아 있음
+        assertEquals(7, u.segmentOn(oct1).patternOffset)                        // 10월 = 새 예약
+    }
+
+    /** 저장 해제는 날짜만 지운다 — 이미 걸어 둔 교번 구간(예약)은 그대로 남는다 */
+    @Test fun clearing_the_freeze_keeps_the_segments() {
+        val u = legacyUser
+            .copy(frozenUntil = aug31)
+            .scheduleSegment(sep1, Bundled.MAIN_PATTERN.id, 40, CrewRole.DRIVER_MAIN, aug)
+        val cleared = u.copy(frozenUntil = null)
+        assertNull(cleared.frozenUntil)
+        assertEquals(u.patternSegments, cleared.patternSegments)
+        assertEquals(Bundled.BRANCH_PATTERN.id, cleared.segmentOn(aug31).patternId)
+        assertEquals(Bundled.MAIN_PATTERN.id, cleared.segmentOn(sep1).patternId)
     }
 }

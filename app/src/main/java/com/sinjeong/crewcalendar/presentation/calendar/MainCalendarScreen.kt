@@ -2,10 +2,12 @@ package com.sinjeong.crewcalendar.presentation.calendar
 
 import androidx.compose.foundation.BorderStroke
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -25,6 +27,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Modifier
@@ -97,6 +100,9 @@ fun MainCalendarScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
+    // 근무 저장 확인 대화상자가 걸린 날짜(길게 누른 날). ⚠ `rememberSaveable`은 이 파일에서
+    // 초기값이 조용히 깨진다(CLAUDE.md) — `remember`를 쓴다(회전 시 대화상자는 닫힌다).
+    var freezeAsk by remember { mutableStateOf<LocalDate?>(null) }
     // 폭 600dp 이상(폴드 펼침·태블릿) = 좌우 2패널. 그 미만은 기존 바텀시트 그대로
     val wide = LocalConfiguration.current.screenWidthDp >= 600
     // 펼침 전용 선택 날짜 — 접었다 펴도 살아남게 epochDay(Long)로 저장
@@ -213,6 +219,8 @@ fun MainCalendarScreen(
                         onSwipeMonth = viewModel::moveMonth,
                         onOpenTimetable = { fullTimetable = "tt_work" to "근무시각표" },
                         onOpenDeadhead = { fullTimetable = "tt_deadhead" to "편승시각표" },
+                        frozenUntil = state.user?.frozenUntil,
+                        onLongPress = { freezeAsk = it },
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -227,8 +235,11 @@ fun MainCalendarScreen(
                 // 메모와 버튼 줄이 함께 키보드 바로 위에 오게 한다.
                 val panelScroll = rememberScrollState()
                 val panelImeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                val panelFocus = LocalFocusManager.current
                 LaunchedEffect(panelImeOpen, day?.date) {
                     if (panelImeOpen) snapshotFlow { panelScroll.maxValue }.collect { panelScroll.scrollTo(it) }
+                    // 키보드가 내려가면 커서·선택 손잡이도 같이 치운다(v1.6.69, 접힘 시트와 같은 규칙)
+                    else panelFocus.clearFocus()
                 }
                 if (day == null) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -280,8 +291,14 @@ fun MainCalendarScreen(
             ) {
                 val scroll = rememberScrollState()
                 val imeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                val sheetFocus = LocalFocusManager.current
                 LaunchedEffect(imeOpen) {
                     if (imeOpen) snapshotFlow { scroll.maxValue }.collect { scroll.scrollTo(it) }
+                    // **키보드를 내리면 커서도 내린다**(v1.6.69). 뒤로가기로 키보드만 내렸을 때
+                    // 메모칸에 커서와 초록 물방울 손잡이가 그대로 남아 있었다(에뮬 실측).
+                    // `imeOpen`은 IME 인셋이 애니메이션으로 0↔N을 오갈 때 딱 한 번씩만 뒤집히므로
+                    // 키보드가 올라오는 도중에 포커스를 뺏지 않는다. 위 바닥고정 동작은 그대로다.
+                    else sheetFocus.clearFocus()
                 }
                 DayDetailContent(
                     day = day,
@@ -324,6 +341,70 @@ fun MainCalendarScreen(
     fullTimetable?.let { (asset, title) ->
         RouteImageDialog(asset = asset, title = title, onDismiss = { fullTimetable = null })
     }
+
+    // 근무 저장 (v1.6.69) — 길게 누른 날짜까지 확정
+    freezeAsk?.let { date ->
+        FreezeConfirmDialog(
+            date = date,
+            current = state.user?.frozenUntil,
+            onConfirm = { viewModel.freezeDuties(date); freezeAsk = null },
+            onDismiss = { freezeAsk = null },
+        )
+    }
+}
+
+/**
+ * **근무 저장** 확인 (v1.6.69). 사용자 요청:
+ * *"9월1일에 근무가 바뀔수도 있으니, 8월말까지 근무저장되고, 9월부터 다른근무지정할수있게…
+ * 1일 부터 길게 누른 날짜까지 저장되게~"*
+ *
+ * 문구는 참고 앱을 베끼지 않고 이 앱 말투로 쓰되 **무엇이 일어나는지**를 못 박는다:
+ * 저장은 값을 바꾸지 않고 `근무선택`이 손댈 수 없는 바닥을 만든다는 것, 하루짜리 `근무변경`은
+ * 계속 된다는 것, 그리고 되돌리는 자리.
+ */
+@Composable
+private fun FreezeConfirmDialog(
+    date: LocalDate,
+    current: LocalDate?,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("근무 저장", fontWeight = FontWeight.ExtraBold) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "${date.format(MD)}까지의 근무를 저장합니다. " +
+                        "(${date.monthValue}월 1일 ~ ${date.dayOfMonth}일)",
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    "나중에 [근무선택]으로 다른 교번을 지정해도 이 날까지는 바뀌지 않고, " +
+                        "${date.plusDays(1).format(MD)}부터만 새 교번이 들어갑니다.\n" +
+                        "저장된 날은 바탕이 연녹색이 됩니다.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(
+                    "※ 하루짜리 [근무변경](연차·충당 등)은 저장한 날에도 그대로 할 수 있습니다.\n" +
+                        "※ 해제는 설정 › 내 정보.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                // 이미 저장돼 있으면 범위가 어떻게 되는지 먼저 말한다 — 앞 날짜를 누르면 줄어든다
+                if (current != null && current != date) Text(
+                    "지금은 ${current.format(MD)}까지 저장돼 있습니다 — " +
+                        if (date > current) "${date.format(MD)}까지로 늘어납니다."
+                        else "${date.format(MD)}까지로 줄어듭니다.",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onConfirm) { Text("근무 저장", fontWeight = FontWeight.ExtraBold) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("취소") } },
+    )
 }
 
 /* ── 달력 위 오늘 카드 = **v1.6.45에서 제거**(사용자: "내일 다이아 출근 헤드 위쪽에 있는거 없어도
@@ -384,6 +465,9 @@ private fun CalendarGrid(
     onSwipeMonth: (Long) -> Unit,
     onOpenTimetable: () -> Unit,
     onOpenDeadhead: () -> Unit,
+    /** 근무 저장(v1.6.69)으로 확정한 마지막 날. 이 날 이하 칸은 연녹색 바탕 */
+    frozenUntil: LocalDate?,
+    onLongPress: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val leading = month.atDay(1).dayOfWeek.value % 7
@@ -446,7 +530,9 @@ private fun CalendarGrid(
                         day, isSelected = day.date == selected, height = cellHeight,
                         big = cellHeight >= 100.dp, // 펼침 화면 등 칸이 크면 글자도 키움
                         nameBelow = nameBelow,
+                        frozen = frozenUntil != null && day.date <= frozenUntil,
                         onClick = { onSelect(day.date) },
+                        onLongClick = { onLongPress(day.date) },
                     )
                 }
             }
@@ -513,6 +599,7 @@ private fun HolidayTag(name: String, size: TextUnit, color: Color, modifier: Mod
     )
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DayCell(
     day: DaySchedule,
@@ -520,7 +607,10 @@ private fun DayCell(
     height: Dp,
     big: Boolean,
     nameBelow: Boolean,
+    /** 근무 저장(v1.6.69)으로 확정된 날 — 바탕이 연녹색 */
+    frozen: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
 ) {
     val duty = LocalDutyColors.current
     val isToday = day.date == LocalDate.now()
@@ -533,6 +623,15 @@ private fun DayCell(
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
     val signOnSize = if (big) 8.sp else 7.sp
     val memoSize = if (big) 9.5.sp else 8.sp
+
+    // 근무 저장된 칸의 연녹색(v1.6.69 사용자 요청 — 참고 앱의 "저장된 근무는 바탕이 연녹색").
+    // 새 색을 만들지 않고 앱 고유색 `primaryContainer`를 얹는다: 라이트는 #A8F2C1 45% → 연녹색,
+    // 다크는 #005229 45%가 바탕 위에서 주간 근무칩(#005229)보다 확실히 어두워져 칩이 안 묻힌다
+    // (v1.6.41이 겪은 "오늘 바탕 = 주간 근무색" 함정을 알파로 피한다).
+    // 오늘 칸과의 구분은 **2.5dp 초록 테두리 + 꽉 찬 날짜 배지**가 계속 맡는다.
+    val frozenBg = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+    val plainBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    val baseBg = if (frozen) frozenBg else plainBg
 
     Column(
         Modifier
@@ -547,13 +646,15 @@ private fun DayCell(
                     // 알파 얹기는 바탕이 칩보다 늘 어둡게(다크)/밝게(라이트) 남아 칩 대비가 다른 칸과 같다.
                     // 오늘 표시는 2.5dp 테두리 + 꽉 찬 날짜 배지 + 달력 위 오늘 카드가 함께 진다.
                     isToday -> Modifier
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .background(baseBg)
                         .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
                         .border(2.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
-                    isSelected -> Modifier.background(MaterialTheme.colorScheme.surfaceVariant)
+                    isSelected -> Modifier.background(
+                        if (frozen) frozenBg else MaterialTheme.colorScheme.surfaceVariant
+                    )
                     // 칸 구분: 희미한 라운드 사각형
                     else -> Modifier
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .background(baseBg)
                         .border(
                             1.dp,
                             MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
@@ -567,7 +668,10 @@ private fun DayCell(
                     Modifier.changedCorner(MaterialTheme.colorScheme.primary, if (big) 12.dp else 10.dp)
                 else Modifier
             )
-            .clickable(onClick = onClick)
+            // 길게 누르기 = 근무 저장(v1.6.69 사용자 요청 *"1일 부터 길게 누른 날짜까지 저장되게~"*).
+            // v1.6.63에 "롱프레스는 오조작이 쉽다"고 안 만들었던 제스처인데, 확인 대화상자가
+            // 반드시 한 번 뜨고(바로 저장되지 않고) 해제 수단이 설정에 있어 되돌릴 수 있다.
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(vertical = 3.dp, horizontal = 2.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(1.dp),
@@ -716,6 +820,9 @@ private fun DayDetailContent(
 ) {
     val duty = LocalDutyColors.current
     var memo by remember(day.date) { mutableStateOf(day.memo) }
+    // 메모칸을 떠날 때 커서를 치운다(v1.6.69). 이 화면 안에서 가져오므로 접힘(시트 창)과
+    // 펼침(본창)이 각자 자기 창의 포커스를 놓는다 — 시트는 별도 윈도우라 바깥 것으로는 안 풀린다.
+    val focus = LocalFocusManager.current
     val row = Bundled.timeRowFor(day.duty, day.date)
     val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
 
@@ -952,10 +1059,13 @@ private fun DayDetailContent(
                 // 날짜 줄 오른쪽 `근무변경` 칩과 앱바 `근무선택` 버튼이 각각 그 자리를 대신한다.
                 if (!compact) OutlinedButton(onClick = onChangeDuty) { Text("근무변경") }
                 Spacer(Modifier.weight(1f))
+                // 세 버튼 모두 **포커스를 먼저 놓는다**(v1.6.69) — 안 그러면 시트가 닫혀도
+                // 메모칸의 커서와 초록 물방울 손잡이가 남는다(사용자: *"메모 저장했는데 커서가
+                // 계속 남아있는듯?"*). 키보드는 창이 사라지면서 같이 내려간다.
                 Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    TextButton(onClick = { onSaveMemo(""); onClose() }) { Text("삭제") }
-                    TextButton(onClick = onClose) { Text("취소") }
-                    Button(onClick = { onSaveMemo(memo); onClose() }) { Text("저장") }
+                    TextButton(onClick = { focus.clearFocus(); onSaveMemo(""); onClose() }) { Text("삭제") }
+                    TextButton(onClick = { focus.clearFocus(); onClose() }) { Text("취소") }
+                    Button(onClick = { focus.clearFocus(); onSaveMemo(memo); onClose() }) { Text("저장") }
                 }
             }
     }
@@ -1296,12 +1406,15 @@ internal fun DutyPickerSheet(
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
                 ApplyFromRow(picker, currentGroup, currentOffset, onScheduledChange)
+                // 시작일이 오늘이 아니면(예약 · 근무 저장) **어느 날 기준인지**가 이 화면에서
+                // 제일 틀리기 쉬운 자리라 굵은 강조색으로 못 박는다.
+                val ahead = picker.applyFrom != null
                 Text(
-                    if (picker.scheduled) "$dateLabel 내 근무를 고르세요. 새 교번표에서 그 날 다이아를 보고 고르면 됩니다."
+                    if (ahead) "$dateLabel 내 근무를 고르세요. 새 교번표에서 그 날 다이아를 보고 고르면 됩니다."
                     else "$dateLabel 내 근무를 고르세요. 앞뒤 모든 날짜가 교번 순서대로 자동 입력됩니다.",
                     style = MaterialTheme.typography.bodySmall,
-                    fontWeight = if (picker.scheduled) FontWeight.Bold else FontWeight.Normal,
-                    color = if (picker.scheduled) MaterialTheme.colorScheme.primary
+                    fontWeight = if (ahead) FontWeight.Bold else FontWeight.Normal,
+                    color = if (ahead) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 DutySequenceGrid(pattern.sequence, currentIndex) { i -> onPick(group, i) }
@@ -1320,8 +1433,14 @@ internal fun DutyPickerSheet(
  * 적용 시작일 (v1.6.63) — 근무선택 2단계 맨 위 버튼 두 개.
  *
  * 기관사는 신정지선 2개월 / 본선 4~6개월 주기로 교번이 바뀌고 그 시점이 **언제나 달 경계**라
- * 선택지를 딱 둘로 좁혔다. `길게 누르기` 같은 새 제스처는 만들지 않는다(사용자가 새로 배워야 하고
- * 달력 칸 롱프레스는 오조작이 쉽다 — 사용자와 확인된 판단).
+ * 선택지를 딱 둘로 좁혔다.
+ *
+ * **v1.6.69 — `근무 저장`이 바닥을 올린다.** 저장해 둔 날이 있으면 그 다음 날보다 앞선 시작일은
+ * 고를 수 없다. 보통은 달 말일까지 저장하므로 두 선택지가 `9월 1일` 하나로 붙고
+ * ([DutyPickerState.applyChoiceFixed]) 그때는 버튼 줄 대신 **안내문 한 줄**만 남는다.
+ * 저장이 달 중간에 걸렸거나 이미 지난 경우에만 버튼이 둘 다 살아 있고, 그때 왼쪽 버튼은
+ * `바로 적용`이 아니라 **`8월 11일부터`** 처럼 실제 날짜를 말한다 — 저장해 둔 구간은 못 건드리므로
+ * `바로 적용`이라는 라벨이 거짓말이 되기 때문이다.
  *
  * ⚠ 경계 사례 안내: 시작일 **전날**이 야간이면 그 다음날은 원래 비번인데, 시작일부터는 새 교번이라
  * 두 교번표가 이어 붙는다. 자동으로 비번을 끼워 넣지 않는다 — 사용자가 새 교번표에서 읽은 값을
@@ -1336,36 +1455,54 @@ private fun ApplyFromRow(
 ) {
     if (onScheduledChange == null) return
     val start = picker.nextMonthFirst
+    val thaw = picker.thawFrom
+    val from = picker.applyFrom
     Text(
         "적용 시작일", style = MaterialTheme.typography.labelLarge,
         fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(top = 2.dp),
     )
-    SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-        SegmentedButton(
-            selected = !picker.scheduled,
-            onClick = { onScheduledChange(false) },
-            shape = SegmentedButtonDefaults.itemShape(0, 2),
-        ) { Text("바로 적용", fontSize = 12.sp, maxLines = 1) }
-        SegmentedButton(
-            selected = picker.scheduled,
-            onClick = { onScheduledChange(true) },
-            shape = SegmentedButtonDefaults.itemShape(1, 2),
-        ) { Text("${start.monthValue}월 1일부터", fontSize = 12.sp, maxLines = 1) }
+    if (picker.applyChoiceFixed && thaw != null) {
+        // 저장해 둔 날 다음 날이 `다음 달 1일`보다 뒤 → 고를 것이 없다. 버튼을 두면
+        // 두 개가 같은 날을 가리켜 오히려 헷갈린다.
+        Text(
+            "${picker.frozenUntil?.format(MD)}까지 근무가 저장돼 있어 ${thaw.format(MD)}부터 적용됩니다.",
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    } else {
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(
+                selected = !picker.scheduled,
+                onClick = { onScheduledChange(false) },
+                shape = SegmentedButtonDefaults.itemShape(0, 2),
+            ) { Text(thaw?.let { "${it.monthValue}월 ${it.dayOfMonth}일부터" } ?: "바로 적용", fontSize = 12.sp, maxLines = 1) }
+            SegmentedButton(
+                selected = picker.scheduled,
+                onClick = { onScheduledChange(true) },
+                shape = SegmentedButtonDefaults.itemShape(1, 2),
+            ) { Text("${start.monthValue}월 1일부터", fontSize = 12.sp, maxLines = 1) }
+        }
+        Text(
+            when {
+                picker.scheduled ->
+                    "${picker.today.monthValue}월 달력은 지금 교번 그대로 두고, ${start.monthValue}월 1일부터 새 교번으로 바뀝니다."
+                thaw != null -> "${picker.frozenUntil?.format(MD)}까지는 저장돼 있어 그대로 두고, ${thaw.format(MD)}부터 새 교번으로 바뀝니다."
+                else -> "지난 날짜까지 포함해 달력 전체가 이 교번으로 다시 계산됩니다."
+            },
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
-    Text(
-        if (picker.scheduled)
-            "${picker.today.monthValue}월 달력은 지금 교번 그대로 두고, ${start.monthValue}월 1일부터 새 교번으로 바뀝니다."
-        else "지난 날짜까지 포함해 달력 전체가 이 교번으로 다시 계산됩니다.",
-        style = MaterialTheme.typography.labelSmall,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-    )
     // 경계 전날이 야간이면 알린다. 하루 단위 `근무변경`은 무시하고 교번값만 본다 —
     // 안내문 하나 때문에 오버라이드까지 끌고 오는 건 과하다(못 띄워도 근무는 안 틀어진다).
-    val prevDuty = currentGroup?.let { Bundled.patternFor(it).dutyOn(start.minusDays(1), currentOffset) }
-    if (picker.scheduled && prevDuty?.isOvernight == true) {
+    val prevDuty = from?.let { f ->
+        currentGroup?.let { Bundled.patternFor(it).dutyOn(f.minusDays(1), currentOffset) }
+    }
+    if (from != null && prevDuty?.isOvernight == true) {
         Text(
-            "※ ${start.minusDays(1).monthValue}월 ${start.minusDays(1).dayOfMonth}일이 야간(${prevDuty.display})입니다. " +
-                "새 교번표에 ${start.monthValue}월 1일이 비번(~)으로 돼 있으면 그 날을 [근무변경]으로 비번 처리하세요.",
+            "※ ${from.minusDays(1).format(MD)}이 야간(${prevDuty.display})입니다. " +
+                "새 교번표에 ${from.format(MD)}이 비번(~)으로 돼 있으면 그 날을 [근무변경]으로 비번 처리하세요.",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.error,
         )
@@ -1597,6 +1734,10 @@ private fun DutyChangeSheet(
                 }
             }
             if (manualMode) {
+                // 메모칸과 같은 규칙(v1.6.69): 키보드가 내려가면 커서·손잡이도 같이 내린다.
+                val manualFocus = LocalFocusManager.current
+                val manualImeOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+                LaunchedEffect(manualImeOpen) { if (!manualImeOpen) manualFocus.clearFocus() }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
                         value = manualText, onValueChange = { manualText = it },
@@ -1604,7 +1745,10 @@ private fun DutyChangeSheet(
                         modifier = Modifier.weight(1f), singleLine = true,
                         colors = fieldColors(),
                     )
-                    Button(onClick = { if (manualText.isNotBlank()) onChange(manualText.trim()) }) { Text("적용") }
+                    Button(onClick = {
+                        manualFocus.clearFocus()
+                        if (manualText.isNotBlank()) onChange(manualText.trim())
+                    }) { Text("적용") }
                 }
             }
             OutlinedCard(onClick = onRevert) {

@@ -68,6 +68,9 @@ class LocalUserRepository @Inject constructor(
             patternId = prefs.getString("patternId", Bundled.BRANCH_PATTERN.id),
             patternOffset = prefs.getInt("patternOffset", 0),
             patternSegments = readSegments(prefs.getString("patternSegments", null)),
+            // 근무 저장(v1.6.69). 키가 없으면 null = 저장한 적 없음 = v1.6.68까지와 같은 동작
+            frozenUntil = prefs.getString("frozenUntil", null)
+                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
             visibleToOthers = prefs.getBoolean("visible", true),
         )
     }
@@ -92,6 +95,8 @@ class LocalUserRepository @Inject constructor(
             .putInt("patternOffset", user.patternOffset)
             // 구간이 없으면 키 자체를 지운다 — 저장 모양이 v1.6.62와 완전히 같아진다
             .putString("patternSegments", user.patternSegments.takeIf { it.isNotEmpty() }?.let(::writeSegments))
+            // null이면 키 자체를 지운다 — 저장 해제하면 모양이 v1.6.68과 완전히 같아진다
+            .putString("frozenUntil", user.frozenUntil?.toString())
             .putBoolean("visible", user.visibleToOthers)
             .apply()
         state.value = user

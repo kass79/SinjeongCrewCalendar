@@ -52,6 +52,23 @@ data class User(
      * 지난 구간을 지우지 않는 것이 기본이다 — 지우면 지난달 달력이 틀려진다.
      */
     val patternSegments: List<PatternSegment> = emptyList(),
+    /**
+     * **근무 저장**(v1.6.69) — 이 날짜까지의 근무를 지금 값으로 확정한다. `null`이면 저장한 적 없음
+     * (= v1.6.68까지와 완전히 같은 동작).
+     *
+     * 저장은 **값을 바꾸지 않는다.** 날짜별로 근무를 복사해 두는 것이 아니라
+     * "근무선택이 손댈 수 있는 가장 이른 날 = [frozenUntil] + 1일"이라는 **바닥 하나**만 기억한다.
+     * 그래서 282명 × 31일짜리 문서가 매달 쌓이지 않고, 저장 전후로 달력에 보이는 근무가
+     * 한 칸도 달라지지 않는다(바탕색만 연녹색이 된다).
+     *
+     * 하루짜리 `근무변경`(연차·충당)은 **날짜별 저장**이라 이 바닥과 무관하게 계속 걸린다 —
+     * 8월을 저장해 둔 뒤 8월 어느 날이 연차로 바뀌어도 고칠 수 있어야 한다(사용자 확인).
+     *
+     * 서버(`users` 미러)에는 **안 보낸다.** 미러는 동료근무 화면이 읽는 남의 근무일 뿐이고
+     * 저장은 내 근무선택만 제약한다 — 필드를 늘리면 `firestore.rules`의 `hasOnly`에 걸려
+     * 모든 publish가 거부된다(v1.6.63이 실제로 당한 사고).
+     */
+    val frozenUntil: LocalDate? = null,
     /** 동료 화면에 내 근무 공개 여부 */
     val visibleToOthers: Boolean = true,
     /** 구글 캘린더 동기화 대상 calendarId (null이면 비활성) */
@@ -96,9 +113,18 @@ fun User.withSegments(segments: List<PatternSegment>, today: LocalDate = LocalDa
     )
 }
 
-/** `다음 달 1일부터` — 지난·현재 구간은 그대로 두고, 예약돼 있던 구간만 이걸로 대체 */
+/**
+ * `다음 달 1일부터` — [from] **앞에서 시작하는 구간은 전부 그대로 두고**, [from] 이후만 이걸로 대체.
+ *
+ * ⚠ v1.6.68까지는 기준이 `it.from <= today`였다. `근무 저장`(v1.6.69)이 붙으면서
+ * *이미 시작한 구간*과 *아직 시작 안 한 구간*이 동시에 존재할 수 있게 됐다 —
+ * 8/31까지 저장 → 9월 교번 예약 → 9/30까지 저장 → 10월 교번 예약을 하면
+ * 옛 기준은 **아직 시작 안 한 9월 구간을 통째로 버려** 9월이 옛 교번으로 되돌아갔다.
+ * `it.from < from`은 "새 시작일보다 앞선 것은 건드리지 않는다"는 같은 뜻이면서 그 구멍이 없다
+ * (v1.6.63 시나리오에서는 `from`이 언제나 오늘 이후라 결과가 종전과 같다 — 테스트로 잠갔다).
+ */
 fun User.scheduleSegment(from: LocalDate, patternId: String?, offset: Int, role: CrewRole, today: LocalDate = LocalDate.now()): User {
-    val kept = (patternSegments.ifEmpty { listOf(segmentOn(today)) }).filter { it.from <= today }
+    val kept = (patternSegments.ifEmpty { listOf(segmentOn(today)) }).filter { it.from < from }
     return withSegments(kept + PatternSegment(from, patternId, offset, role), today)
 }
 

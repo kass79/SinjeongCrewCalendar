@@ -114,6 +114,15 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { userRepo.upsert(u.cancelPendingSegments()) }
     }
 
+    /**
+     * 근무 저장 해제 (v1.6.69). 저장은 날짜 하나만 기억하므로 지우면 끝이고 **근무는 안 바뀐다** —
+     * 이미 걸어 둔 교번 구간(예약)은 그대로 남는다(그건 위 `예약 취소`가 따로 맡는다).
+     */
+    fun clearFrozenDuties() {
+        val u = user.value ?: return
+        viewModelScope.launch { userRepo.upsert(u.copy(frozenUntil = null)) }
+    }
+
     fun logout() {
         viewModelScope.launch {
             when (val r = userRepo) {
@@ -176,6 +185,19 @@ fun SettingsScreen(
                         if (duty.isNotBlank()) " · ${seg.from.monthValue}/${seg.from.dayOfMonth} 근무 $duty" else "",
                     trailing = {
                         TextButton(onClick = { viewModel.cancelScheduledPattern() }) { Text("예약 취소") }
+                    },
+                )
+            }
+            // 근무 저장 (v1.6.69). 실수로 저장했을 때 푸는 유일한 자리 — 저장하면 달력 바탕만
+            // 연녹색이 될 뿐 근무는 그대로라, 여기가 없으면 "왜 근무선택이 다음 달부터만 되지?"를
+            // 풀 방법이 없다. 예약 안내 바로 아래에 둔 이유: 둘 다 "근무선택에 걸린 제약"이다.
+            user?.frozenUntil?.let { until ->
+                SettingRow(
+                    title = "${until.monthValue}월 ${until.dayOfMonth}일까지 근무 저장됨",
+                    sub = "[근무선택]은 ${until.plusDays(1).monthValue}월 ${until.plusDays(1).dayOfMonth}일부터만 적용됩니다" +
+                        " · 하루짜리 [근무변경]은 그대로 됩니다",
+                    trailing = {
+                        TextButton(onClick = { viewModel.clearFrozenDuties() }) { Text("저장 해제") }
                     },
                 )
             }
