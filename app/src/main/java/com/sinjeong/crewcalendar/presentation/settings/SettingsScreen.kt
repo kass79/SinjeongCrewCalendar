@@ -32,6 +32,7 @@ import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
+import com.sinjeong.crewcalendar.presentation.weather.WX_LOC_FIXED_KEY
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -179,6 +180,10 @@ fun SettingsScreen(
                 )
             }
 
+            // 아래 여러 절이 같이 쓰는 값이라 화면 맨 앞으로 끌어올렸다(v1.6.68) — 파일은 하나뿐이다.
+            val ctx = LocalContext.current
+            val settingsPrefs = remember { ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
+
             // 화면
             SectionTitle("화면")
             Row(
@@ -202,6 +207,39 @@ fun SettingsScreen(
                 }
             }
 
+            // 날씨 (v1.6.68). 달력 헤더 칩이 어디 날씨인지 고른다.
+            // 선택지는 **둘뿐이다** — "지도에서 임의 지점 고르기"는 만들지 마라. 이 앱 사용자는
+            // 한 사업소로 출퇴근하고, 그 외의 경우는 "현재 위치"가 이미 답이다.
+            // 컨트롤은 바로 위 테마 줄과 같은 세그먼트 — 둘 중 하나를 고르는 같은 성격이라 한 벌로 읽힌다.
+            // 스위치를 안 쓴 이유: "위치 고정 [켬/끔]"으로는 켰을 때 **어디** 날씨인지 이름이 안 보인다.
+            // 세그먼트를 한 줄 통째로 깔아 둔다 — 제목 옆에 붙이면 글자배율이 커질 때 라벨이 눌린다.
+            SectionTitle("날씨")
+            var wxFixed by remember { mutableStateOf(settingsPrefs.getBoolean(WX_LOC_FIXED_KEY, false)) }
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("날씨 기준 위치", fontWeight = FontWeight.Bold)
+                Text(
+                    if (wxFixed) "신정차량기지 날씨만 봅니다 — 위치 권한을 쓰지 않습니다"
+                    else "지금 있는 동네 날씨를 봅니다 (위치를 못 받으면 신정차량기지)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    // 저장만 하고 끝 — 달력을 깨우지 않는다. 탭을 옮기면 달력 목적지가 dispose 되고,
+                    // 돌아올 때 WeatherChip 이 격자를 다시 읽는다(Weather.kt LaunchedEffect 주석).
+                    listOf(false to "현재 위치", true to "신정차량기지").forEachIndexed { i, (v, label) ->
+                        SegmentedButton(
+                            selected = wxFixed == v,
+                            onClick = {
+                                wxFixed = v
+                                settingsPrefs.edit().putBoolean(WX_LOC_FIXED_KEY, v).apply()
+                            },
+                            shape = SegmentedButtonDefaults.itemShape(i, 2),
+                        ) { Text(label, fontSize = 11.sp) }
+                    }
+                }
+            }
+
             // 월별 근무기록 (동결 보존)
             SectionTitle("월별 근무기록")
             if (savedMonths.isEmpty()) {
@@ -215,11 +253,8 @@ fun SettingsScreen(
                 }
             }
 
-            val ctx = LocalContext.current
-
             // 알림
             SectionTitle("알림")
-            val settingsPrefs = remember { ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE) }
             var notifyOn by remember { mutableStateOf(settingsPrefs.getBoolean("notify_tomorrow", true)) }
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),

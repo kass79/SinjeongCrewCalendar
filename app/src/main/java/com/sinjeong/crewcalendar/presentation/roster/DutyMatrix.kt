@@ -205,6 +205,11 @@ data class MatrixMetrics(
          * 12dp를 통째로 회수해도 +3.0%다(v1.6.60의 여백 회수는 같은 노력으로 +9.7%였다).
          * 더 깎아 봐야 이름만 작아지므로 **56dp 밑으로는 내리지 말 것.**
          *
+         * ⚠ **여기 `nameW` 56dp는 "글자배율 1.0에서의" 값이다**(v1.6.68). 화면이 실제로 쓰는 값은
+         * [rememberMatrixMetrics]가 여기에 `fontScale`을 곱해 만든다 — 이 열의 내용(이름·배지·★)이
+         * 전부 sp라 칸만 dp로 묶어 두면 배율 1.5부터 이름이 말줄임된다. 근거·실측은 그쪽 KDoc에 있다.
+         * **[MatrixMetrics.Roomy]를 화면에서 직접 쓰지 말 것** — 그러면 그 버그가 그대로 돌아온다.
+         *
          * ⚠ **`codeSp`는 v1.6.51~64에는 닿지 않는 상한이었지만 v1.6.65부터는 실제로 무는 값이다.**
          * 진짜 크기는 [DutyChip]이 `min(codeSp, 가용폭 ÷ UNIFORM_UNITS)`로 정하고, 46.5dp 칸에서는
          * 왼쪽 항(13sp)이 배율 1.0 이하에서 이긴다(v1.6.52 7.36 → v1.6.60 9.97 → v1.6.61 10.26 →
@@ -243,6 +248,65 @@ data class MatrixMetrics(
             codeSp = 13.sp, nameSp = 12.sp, daySp = 10.5.sp, dowSp = 8.5.sp,
             cellH = 30.dp, rowPadV = 2.dp,
         )
+    }
+}
+
+/**
+ * 화면에 실제로 쓰는 크기 한 벌 — **[MatrixMetrics.Roomy]에서 이름 열만 글자배율을 태운다**(v1.6.68).
+ *
+ * ### 왜 (v1.6.66이 못 잡은 진짜 원인)
+ *
+ * 이름 열 안의 세 조각은 **전부 sp**다 — 이름([MatrixMetrics.nameSp] 12sp), 배지 `운A`/`관D`
+ * ([MatrixMetrics.dowSp] 8.5sp), ★(dowSp × 0.82). 그런데 그것들을 담는 칸([MatrixMetrics.nameW])만
+ * **dp 고정 56**이었다. 배율이 오르면 배지·★은 커지는데 칸은 그대로라 **이름 몫이 급격히 줄어든다.**
+ * 실측(emulator-5554, 411dp/420dpi, `4조2교대` 필터, 이름 노드 폭 ÷ 배지 폭, 단위 px):
+ *
+ * | fontScale | 1.0 | 1.15 | 1.3 | 1.4 | **1.5** | 2.0 |
+ * |---|---|---|---|---|---|---|
+ * | 이름 몫 | 94 | 89 | 83 | 79 | **77** | **58** |
+ * | 배지 `관A` | 38 | 43 | 49 | 53 | **55** | **74** |
+ * | 세 글자 결과 | 온전 | 온전 | 온전 | 온전 | **`김영…`** | **`…`** |
+ *
+ * 배율 1.0에서 이름 몫 94px는 세 글자가 겨우 들어가는 값이고(그래서 [AutoFitText]가 이미 한 단
+ * 줄여 그린다), 배율이 오를수록 **배지가 그 몫을 먹어** 1.5에서 말줄임이 시작되고 2.0에서는
+ * 이름이 통째로 사라진다. 사용자 신고(*"동료탭에 4조2교대에 이름들이 짤려있는데?"*)의 정체다.
+ *
+ * > ⚠ **v1.6.66이 이걸 왜 놓쳤는지** — 그때는 "네 글자 `남궁용권`이 배지에 붙어 보인다"로 좁혀
+ * > 읽고 [Arrangement.spacedBy] 2dp만 넣었다. 간격은 붙어 보이는 것만 고쳤을 뿐 **몫 자체가
+ * > 줄어드는 것**은 손대지 못했고, 배율 표에는 "세 글자 + 배지는 배율 2.0에서도 말줄임 0"이라고
+ * > 적혀 있는데 **그게 틀렸다.** 글자배율을 바꾸면 액티비티가 새로 뜨면서 **소속 칩 필터가
+ * > `전체`로 되돌아간다** — 이번에 검증하다 나도 똑같이 걸렸다. `전체` 목록의 첫 화면은
+ * > 본선(배지 없는 줄)이라, 필터를 다시 안 누르고 찍은 화면은 **배지 있는 줄이 아예 없다.**
+ * > 배율을 바꾼 뒤에는 `4조2교대`를 다시 누르고 `김영백`이 보이는지 확인한 다음 찍을 것.
+ *
+ * ### 고친 방법 — 칸도 같이 배율을 탄다
+ *
+ * `nameW = 56dp × fontScale`. 칸과 내용이 **같은 비율로** 커지므로 이름 몫의 비율이 배율과
+ * 무관해진다(= 어느 배율에서나 배율 1.0과 같은 모양). dp 고정인 좌우 여백 2dp·간격 2dp는 안 크므로
+ * 배율이 높을수록 오히려 **비례보다 더 넉넉해진다** — 그래서 `네 글자 + 배지 + ★`처럼
+ * v1.6.66이 배율 1.15에서 포기했던 조합도 이제 전 배율에서 말줄임이 없다.
+ *
+ * **치르는 값은 보이는 날짜뿐이고, 배율 1.0에서는 0이다**(`nameW`가 56dp 그대로라 픽셀 무변경).
+ * 보이는 날짜 = `floor((화면폭 − nameW) ÷ 46.5)`:
+ *
+ * | 화면폭 | 배율 1.0 | 1.3 | 1.5 | 2.0 |
+ * |---|---|---|---|---|
+ * | 360dp | 6일 | 6일 | 5일 | 5일 |
+ * | 393dp | 7일 | 6일 | 6일 | 6일 |
+ * | 411dp | 7일 | 7일 | 7일 | 6일 |
+ * | 660dp(폴더블 펼침) | 12일 | 12일 | 12일 | 11일 |
+ *
+ * 글자를 크게 쓰겠다고 고른 사용자에게 날짜 한 칸을 받는 거래다 — 이름을 못 읽는 것보다 낫고,
+ * 표는 어차피 가로로 스크롤된다(v1.6.65에 사용자가 승인한 그 근거 그대로).
+ *
+ * ⚠ **[MatrixMetrics.cellW]·[MatrixMetrics.codeSp]는 건드리지 않는다.** 격자 글자 13sp 단일 크기,
+ * 행 높이 34dp(한 화면 16명)는 사용자가 트레이드오프를 승인해 확정한 값이다(v1.6.65).
+ */
+@Composable
+fun rememberMatrixMetrics(): MatrixMetrics {
+    val fs = LocalDensity.current.fontScale
+    return remember(fs) {
+        MatrixMetrics.Roomy.copy(nameW = MatrixMetrics.Roomy.nameW * fs)
     }
 }
 
@@ -296,23 +360,34 @@ private fun columnTint(date: LocalDate, today: LocalDate, duty: DutyColors): Col
  * **경계는 글자가 아니라 선으로 긋는다.**
  * [columnTint]와 같은 자리(헤더 + 모든 데이터 행)에 그리므로 표가 세로로 8월/9월로 갈린다.
  *
- * **오늘 레일과 헷갈리지 않는 근거 — 셋이 전부 다르다.**
+ * ### v1.6.68 — 더 진하게 (사용자: *"9/1일 달이 넘어가는 구간 조금더 눈에 띄게 해주고"*)
+ *
+ * v1.6.64의 `onSurfaceVariant` **알파 0.5 · 1.5dp**는 실기기에서 약했다. 이 표는 칸마다 색 있는
+ * 알약이 꽉 차 있어서, 반투명 회색 실선 하나는 알약 사이 여백에서만 보이다 눈에서 미끄러진다.
+ * → **[MaterialTheme.colorScheme.onSurface] 알파 0.75 · 2.5dp**. 색을 한 단 어둡게(라이트에서
+ * 거의 검정, 다크에서 거의 흰색) 하고 굵기를 1.5 → 2.5dp로 올려 **면적 대비 약 2.5배**로 만든다.
+ *
+ * **오늘 레일과는 색으로 갈린다 — 이게 주된 구분 채널이다.**
  * | | 오늘 | 월 경계 |
  * |---|---|---|
- * | 색 | `primary` **초록 불투명** | `onSurfaceVariant` **회색 반투명(0.5)** |
- * | 굵기 | 2.5dp | **1.5dp** |
+ * | 색 | `primary` **초록 불투명** | `onSurface` **무채색 0.75**(라이트=검정 / 다크=흰색) |
+ * | 굵기 | 2.5dp | 2.5dp *(v1.6.64의 1.5dp에서 올림)* |
  * | 개수·위치 | 칸 **좌우 두 줄**(기둥으로 보인다) | **왼쪽 한 줄**(경계로 보인다) |
  *
- * 오늘이 마침 1일이면 둘이 같은 자리에 온다 → 월 경계선만 레일 **바로 안쪽**(x = 2.5dp)으로
- * 비켜 긋는다. 초록 2.5 + 회색 1.5이 나란히 서서 둘 다 읽힌다(실화면 확인, v1.6.64).
+ * 굵기가 같아져 구분 채널이 셋에서 **둘(색·개수)로 줄었다.** 그래도 되는 근거: 초록과 무채색은
+ * 색상환에서 가장 먼 축이고 이 표에 다른 초록 세로선이 없다. 굵기는 애초에 약한 단서였다
+ * (1dp 차이는 420dpi에서 2.6px다). **눈에 띄는 것이 이번 요청이므로 굵기를 도로 내리지 말 것.**
  *
- * 주말 틴트와도 안 부딪힌다 — 틴트는 칸을 덮는 면이고 이건 1.5dp 선이라 층이 다르다.
+ * 오늘이 마침 1일이면 둘이 같은 자리에 온다 → 월 경계선만 레일 **바로 안쪽**(x = 2.5dp)으로
+ * 비켜 긋는다. 초록 2.5 + 무채색 2.5가 나란히 서서 둘 다 읽힌다(v1.6.64에 이어 v1.6.68 재확인).
+ *
+ * 주말 틴트와도 안 부딪힌다 — 틴트는 칸을 덮는 **면**(알파 0.09)이고 이건 2.5dp **선**이라 층이 다르다.
  */
 @Composable
 private fun Modifier.columnBand(date: LocalDate, today: LocalDate, duty: DutyColors): Modifier {
     val tint = columnTint(date, today, duty)
     val rail = MaterialTheme.colorScheme.primary
-    val monthEdge = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+    val monthEdge = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.75f)
     val isToday = date == today
     val isMonthStart = date.dayOfMonth == 1
     return this.drawBehind {
@@ -322,7 +397,7 @@ private fun Modifier.columnBand(date: LocalDate, today: LocalDate, duty: DutyCol
         if (isMonthStart) drawRect(
             monthEdge,
             topLeft = Offset(if (isToday) w else 0f, 0f),
-            size = Size(1.5.dp.toPx(), size.height),
+            size = Size(w, size.height),
         )
         if (isToday) {
             drawRect(rail, topLeft = Offset(0f, 0f), size = Size(w, size.height))
@@ -417,7 +492,8 @@ fun MatrixDateHeader(
                     // 달이 바뀌는 칸은 `9/1`로 적는다 — 범위가 두 달에 걸치므로
                     // 날짜만 있으면 31 다음 1이 뭔지 알 수 없다(v1.6.39).
                     // ⚠ **이 글자만으론 부족했다**(v1.6.64) — 옆 날짜와 크기·굵기·색이 같아 묻힌다.
-                    // 경계는 [columnBand]의 회색 세로선이 긋고 이 글자는 "몇 월인지"만 말한다.
+                    // 경계는 [columnBand]의 무채색 세로선이 긋고 이 글자는 "몇 월인지"만 말한다
+                    // (v1.6.68에 그 선을 0.5→0.75 알파 · 1.5→2.5dp로 올렸다).
                     //
                     // ⚠ **`lineHeight`를 반드시 같이 준다**(v1.6.48). `fontSize`만 줄이면 줄 높이는
                     // M3 기본 스타일(`bodyLarge`)의 **24sp 그대로**라, 10.5sp 날짜도 8.5sp 요일도

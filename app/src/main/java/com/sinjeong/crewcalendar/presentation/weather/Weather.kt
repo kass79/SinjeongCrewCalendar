@@ -62,6 +62,9 @@ import kotlin.math.tan
  * v1.6.37: 격자를 상수로 박지 않고 **기기의 대략적 위치(COARSE)를 격자로 변환**해 조회한다.
  * 권한이 없거나 위치를 못 얻으면 신정차량기지 격자로 조용히 폴백한다 — 날씨는 늘 보인다.
  *
+ * v1.6.68: 설정 > 날씨 > **날씨 기준 위치**([WX_LOC_FIXED_KEY])로 이 동작을 끌 수 있다.
+ * "신정차량기지(고정)"을 고르면 위치를 아예 안 만진다 — 기본값은 종전 그대로(현재 위치 우선)다.
+ *
  * 기상청 공공데이터 단기예보 조회서비스 `VilageFcstInfoService_2.0` 의
  * **초단기예보(getUltraSrtFcst)** 한 번으로 기온·하늘상태·강수형태를 모두 받는다.
  * (초단기실황 getUltraSrtNcst 는 SKY 를 안 주고, 단기예보 getVilageFcst 는 T1H 대신 TMP 라
@@ -78,11 +81,28 @@ private const val SERVICE_KEY =
 /**
  * 위치를 못 쓸 때의 폴백 격자 — 신정차량기지(서울 양천구 신정동, 대략 N37.5145 / E126.8455).
  *
- * 권한 거부·위치서비스 꺼짐·좌표 획득 실패는 **전부 여기로 떨어진다.** 사업소가 고정이라
- * 최소한 출퇴근 동네 날씨는 늘 맞는다. v1.6.36 까지는 이 값이 유일한 격자였다.
+ * 권한 거부·위치서비스 꺼짐·좌표 획득 실패는 **전부 여기로 떨어진다**(v1.6.68 부터는 설정에서
+ * 고정을 고른 경우도). 사업소가 고정이라 최소한 출퇴근 동네 날씨는 늘 맞는다.
+ * v1.6.36 까지는 이 값이 유일한 격자였다.
  * 실호출로 확인된 값이다 — 58,126 이면 resultCode 00 에 T1H/SKY/PTY 가 정상으로 온다.
  */
 private val SINJEONG = 58 to 126
+
+/**
+ * 설정 > 날씨 > 날씨 기준 위치 = **신정차량기지 고정**인가(v1.6.68).
+ *
+ * 저장소는 기존 `settings` SharedPreferences 그대로다 — 값 하나 때문에 DataStore·Repository 를
+ * 새로 만들지 않는다(설정 화면이 알림 토글을 저장하는 방식과 같다).
+ * 선택지를 "현재 위치 / 신정 고정" 둘로 못 박았으니 enum 도 필요 없다. Boolean 하나면 끝이다 —
+ * **지도에서 임의 지점 고르기는 만들지 마라.** 이 앱 사용자는 한 사업소로 출퇴근한다.
+ *
+ * ⚠ **기본값 false = 현재 위치 우선.** 키가 없는 기존 사용자는 v1.6.37 이후 동작을 그대로 본다.
+ * 이 기본값을 뒤집으면 아무 조작도 안 한 사람들의 날씨가 하루아침에 바뀐다.
+ */
+internal const val WX_LOC_FIXED_KEY = "wx_loc_fixed"
+
+private fun wxLocFixed(ctx: Context): Boolean =
+    ctx.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean(WX_LOC_FIXED_KEY, false)
 
 /**
  * 기상청 동네예보 격자 변환(Lambert Conformal Conic, 기상청 공개 `dfs_xy_conv` 와 동일식).
@@ -167,15 +187,33 @@ private fun locate(lm: LocationManager): Location? {
 }
 
 /**
+ * 격자 결정의 순수 알맹이. **Context 를 안 타서 WeatherTest 가 그대로 잠근다** —
+ * 화면·권한·SharedPreferences 없이 검증할 수 있는 부분은 여기까지다.
+ *
+ * `fixed` 가 좌표보다 세다: 설정이 고정이면 좌표가 손에 들려 있어도 [SINJEONG] 이다.
+ * ([gridOf] 는 고정일 때 좌표를 아예 구해 오지도 않지만, 그 약속을 함수 계약으로도 못 박는다.)
+ */
+internal fun gridFor(fixed: Boolean, lat: Double?, lon: Double?): Pair<Int, Int> =
+    if (fixed || lat == null || lon == null) SINJEONG
+    // 해외 좌표면 [toGrid] 가 null → 폴백(기상청은 국내 격자만 답한다).
+    else toGrid(lat, lon) ?: SINJEONG
+
+/**
  * 지금 그릴 격자. **좌표는 여기서 격자로 바꾸고 곧바로 버린다** —
  * 저장하지도, 서버로 보내지도 않는다(기상청에 나가는 것도 5km 격자 번호뿐이다).
+ *
+ * v1.6.68: 설정이 **신정 고정**이면 `||` 가 왼쪽에서 끊겨 [hasCoarse] 도 [locate] 도 부르지 않는다.
+ * "권한을 안 쓴다"가 아니라 **위치 쪽으로 코드가 아예 안 내려간다**는 뜻이다 —
+ * 위치를 안 쓰겠다고 고른 사람의 기기에서 위치 API 를 두드릴 이유가 없다.
+ * 설정은 매 호출마다 다시 읽는다(SharedPreferences 는 메모리 캐시라 싸다). 그래야 설정을 바꾸고
+ * 달력으로 돌아왔을 때 별도 신호 없이 바뀐 격자가 나온다 — [WeatherChip] 의 LaunchedEffect 주석 참고.
  */
 private fun gridOf(ctx: Context): Pair<Int, Int> = runCatching {
-    if (!hasCoarse(ctx)) return SINJEONG
-    val lm = ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return SINJEONG
-    val loc = locate(lm) ?: return SINJEONG
-    // 해외 좌표면 [toGrid] 가 null → 폴백(기상청은 국내 격자만 답한다).
-    toGrid(loc.latitude, loc.longitude) ?: SINJEONG
+    val fixed = wxLocFixed(ctx)
+    val loc =
+        if (fixed || !hasCoarse(ctx)) null
+        else (ctx.getSystemService(Context.LOCATION_SERVICE) as? LocationManager)?.let { locate(it) }
+    gridFor(fixed, loc?.latitude, loc?.longitude)
 }.getOrDefault(SINJEONG)
 
 /**
@@ -345,6 +383,7 @@ private fun wxColors(wx: Wx, dark: Boolean): Pair<Color, Color> = when (wx) {
  * 앱을 켜자마자 묻지 않는 이유 — 팝업만 먼저 뜨면 무엇 때문에 위치를 달라는지 알 수가 없다.
  * 날씨(신정 폴백)가 이미 그려진 상태에서 물어야 "아 저것 때문이구나"가 된다.
  * 거부하면 `wx_loc_asked` 가 남아 **다시는 묻지 않는다** — 폴백으로 계속 잘 보이니 조를 이유가 없다.
+ * 설정에서 "신정차량기지(고정)"([WX_LOC_FIXED_KEY])을 고르면 이 물음 자체가 없다(v1.6.68).
  */
 @Composable
 fun WeatherChip(modifier: Modifier = Modifier) {
@@ -358,11 +397,24 @@ fun WeatherChip(modifier: Modifier = Modifier) {
     }
     // ⚠ 마지막 안전망. 날씨 때문에 달력이 죽는 일은 없어야 한다 —
     // v1.6.36 에뮬 확인에서 정규식 하나(ICU 문법)로 실제 FATAL 이 났다.
+    //
+    // **key 에 설정값을 넣지 마라(v1.6.68에서 일부러 뺐다).** 설정은 NavHost 의 다른 목적지고
+    // (MainActivity: 탭 이동이 `popUpTo(startDestination){saveState}` + `restoreState`),
+    // 달력 목적지는 탭을 옮기는 순간 백스택에서 빠지며 **dispose 된다** — restoreState 가 되살리는 건
+    // rememberSaveable/ViewModel 이지 composition 이 아니다. 그래서 달력으로 돌아오면 이 블록이
+    // 처음부터 다시 돌고, [gridOf] 가 설정을 새로 읽어 격자가 바뀌면 [WxCache] 가 알아서 값을 버린다.
+    // key 를 늘리면 매 컴포지션마다 SharedPreferences 를 읽으면서 얻는 건 하나도 없다.
     LaunchedEffect(granted) {
         weather = withContext(Dispatchers.IO) { runCatching { currentWeather(ctx) }.getOrNull() }
         // 날씨가 실제로 떴을 때만 묻는다. 오프라인이라 칩이 없으면 물을 맥락 자체가 없다.
         val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        if (weather != null && !granted && !prefs.getBoolean("wx_loc_asked", false)) {
+        // 신정 고정을 고른 사람에겐 **묻지 않는다**(v1.6.68). 위치를 안 쓰겠다고 방금 말한 사람에게
+        // 위치 권한 팝업을 띄우는 건 그 자체로 배신이다. 이때 `wx_loc_asked` 도 남기지 않는다 —
+        // 나중에 "현재 위치"로 되돌리면 그때 처음 한 번 물어야 하니까.
+        if (weather != null && !granted &&
+            !prefs.getBoolean(WX_LOC_FIXED_KEY, false) &&
+            !prefs.getBoolean("wx_loc_asked", false)
+        ) {
             prefs.edit().putBoolean("wx_loc_asked", true).apply()
             runCatching { ask.launch(Manifest.permission.ACCESS_COARSE_LOCATION) }
         }

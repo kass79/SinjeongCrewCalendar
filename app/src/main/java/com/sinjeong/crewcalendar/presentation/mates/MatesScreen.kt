@@ -299,7 +299,9 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     var editTarget by remember { mutableStateOf<Mate?>(null) }
 
     val duty = LocalDutyColors.current
-    val m = MatrixMetrics.Roomy
+    // ⚠ `MatrixMetrics.Roomy`를 직접 쓰지 말 것 — 이름 열이 dp 고정이라 글자배율 1.5부터
+    // 세 글자 이름이 말줄임된다(v1.6.68). 배율을 태운 값은 여기서만 나온다.
+    val m = rememberMatrixMetrics()
     val period by viewModel.period.collectAsStateWithLifecycle()
     // 한 구간 = 시작일부터 한 달. `plusMonths(1)`이라 2월이면 28일, 8월이면 31칸.
     // period 0이면 시작일이 오늘, 1이면 한 달 뒤(9/21~10/20) — 헤더 표기와 같은 값이다.

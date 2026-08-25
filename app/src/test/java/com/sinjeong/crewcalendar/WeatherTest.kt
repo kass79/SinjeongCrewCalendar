@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.presentation.weather.Wx
+import com.sinjeong.crewcalendar.presentation.weather.gridFor
 import com.sinjeong.crewcalendar.presentation.weather.parseUltraSrtFcst
 import com.sinjeong.crewcalendar.presentation.weather.toGrid
 import org.junit.Assert.assertEquals
@@ -106,5 +107,19 @@ class WeatherTest {
         assertNull(toGrid(37.421998, -122.084))   // 미국 마운틴뷰 = 안드로이드 에뮬 기본 좌표
         assertNull(toGrid(35.6895, 139.6917))     // 도쿄
         assertNull(toGrid(0.0, 0.0))              // 좌표를 못 받았을 때 흔한 쓰레기값
+    }
+
+    /**
+     * 설정 > 날씨 > **날씨 기준 위치**(v1.6.68)의 격자 분기.
+     *
+     * 여기까지가 Context 없이 잠글 수 있는 전부다 — SharedPreferences 읽기(`wx_loc_fixed` 기본값)와
+     * 권한 팝업 억제는 android.jar 스텁이라 이 실행 방식으로는 못 부른다(이 파일 KDoc 참고).
+     */
+    @Test
+    fun `신정 고정은 좌표를 무시하고 현재 위치는 그대로 쓴다`() {
+        assertEquals(58 to 126, gridFor(true, 35.1796, 129.0756))  // 부산에 있어도 고정이면 신정
+        assertEquals(98 to 76, gridFor(false, 35.1796, 129.0756))  // 기본값 — 종전 동작 그대로
+        assertEquals(58 to 126, gridFor(false, null, null))        // 권한 거부·위치 꺼짐 → 폴백
+        assertEquals(58 to 126, gridFor(false, 37.421998, -122.084)) // 해외 좌표 → 폴백
     }
 }
