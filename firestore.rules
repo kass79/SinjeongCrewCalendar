@@ -7,11 +7,20 @@ rules_version = '2';
 //   → 그래서 "본인 문서만 쓰기" 같은 규칙은 원리적으로 불가능하다(익명 uid 는 매번 랜덤).
 //
 // 목표는 완벽한 접근제어가 아니라 **실수·장난에 의한 파괴 방지**다.
-//   막는 것: 스키마 밖 쓰레기 데이터 / 남의 행 이름 바꿔치기(주인 교체) / 일반 사용자 문서 삭제 /
-//            문서ID와 내용 불일치 / 앱이 안 쓰는 컬렉션 전부
+//   막는 것: 스키마 밖 쓰레기 데이터 / 남의 행 이름 바꿔치기(주인 교체) /
+//            **남의 행에 addedBy:'admin' 을 심어 삭제 권한을 만드는 연쇄**(2026-08-25 규칙 수정) /
+//            본인 가입 문서 삭제 / 문서ID와 내용 불일치 / 앱이 안 쓰는 컬렉션 전부
 //   못 막는 것: 명단 전체 읽기(동료근무 화면이 필요로 함), 남의 근무위치 덮어쓰기,
-//               남의 근무변경 삭제, 가짜 사번 문서 생성.
+//               남의 근무변경 덮어쓰기·삭제, 가짜 사번 문서 생성,
+//               관리자 대리등록 행(addedBy:'admin')의 삭제 — adminDelete 와 서버가 구분 못 한다.
 //   → 진짜 해결은 사번 기반 계정(커스텀 토큰). 앱 구조 변경이 필요해 이번 범위 밖.
+//
+// ⚠ **데이터 모델을 바꾸면 이 파일과 firestore/rules.test.mjs 를 같은 커밋에서 고쳐라.**
+//    v1.6.63 이 publish() 페이로드에 patternSegments 를 넣었는데 이 파일은 v1.6.25 에 멈춰
+//    있었다 → hasOnly 위반으로 **41개 버전 동안 모든 publish() 가 서버에서 거부됐다**
+//    (2026-08-25 규칙만 수정해 복구. 앱 버전은 안 올렸다 — 앱 코드는 멀쩡했다).
+//    앱은 runCatching + await 없음이라 실패가 UI 에 안 뜬다 —
+//    신규 가입자가 동료 탭에 안 나타나는 증상으로만 새어나온다. **테스트가 유일한 경보다.**
 //
 // 앱이 쓰는 컬렉션은 users / rosterOverrides **둘 뿐**이다(FirestoreRepositories.kt 전수 확인).
 // 메모는 서버에 안 올린다(폰에만 저장).
@@ -23,19 +32,51 @@ service cloud.firestore {
 
     // ── users/{사번} — 공용 명단 (동료근무 화면의 원본) ──────────────────
     //  쓰기 주체 2곳:
-    //   1) FirestoreUserRepository.publish()      : name/role/patternId/patternOffset/updatedAt (5키)
-    //   2) FirestoreRosterRepository.adminUpsert(): 위 5키 + addedBy:"admin" (6키)
+    //   1) FirestoreUserRepository.publish()      : name/role/patternId/patternOffset/
+    //                                               patternSegments/updatedAt (6키)
+    //   2) FirestoreRosterRepository.adminUpsert(): 위에서 patternSegments 빼고 addedBy:"admin" (6키)
     //  둘 다 set() = 통째 덮어쓰기라 create/update 양쪽에 같은 스키마를 건다.
+    //  → patternSegments 는 **선택** 필드다(adminUpsert 가 안 보낸다). hasAll 에 넣지 마라.
     match /users/{empNo} {
+
+      // 교번 변경 구간 한 칸 (v1.6.63 `PatternSegment`).
+      //  from      : LocalDate.toString(). **첫 구간은 LocalDate.MIN = "-999999999-01-01"**(16자)이라
+      //              yyyy-MM-dd 로 조이면 정상 쓰기가 통째로 막힌다. 길이만 본다.
+      //  patternId : String? — **null 이 정상값**이다("다이아 없이 저장" 경로). 그래서 타입을 안 건다.
+      //
+      // ⚠ **이 함수는 12번 평가된다. 검사를 늘리기 전에 반드시 테스트를 돌려라.**
+      //    Firestore 는 요청당 1000 expression 이 상한이고 그걸 넘으면 **정상 쓰기가 거부된다**.
+      //    처음엔 여기에 정규식·범위검사를 넣었다가 12칸 publish 가 실제로 막혔다(테스트가 잡음).
+      function seg(s) {
+        return s.keys().hasAll(['from', 'patternOffset', 'role'])
+            && s.keys().hasOnly(['from', 'patternId', 'patternOffset', 'role'])
+            && s.from is string && s.from.size() <= 20
+            && s.patternOffset is int
+            && s.role is string && s.role.size() <= 40;
+      }
+
+      // 앱이 12칸(User.MAX_SEGMENTS)에서 자른다. 규칙 언어엔 반복문이 없어 12칸을 손으로 편다.
+      // size() 검사가 먼저라 실제로는 있는 칸만 평가된다(&& 는 단축평가).
+      function segsOk(ss) {
+        return ss is list && ss.size() <= 12
+            && (ss.size() <  1 || seg(ss[0]))  && (ss.size() <  2 || seg(ss[1]))
+            && (ss.size() <  3 || seg(ss[2]))  && (ss.size() <  4 || seg(ss[3]))
+            && (ss.size() <  5 || seg(ss[4]))  && (ss.size() <  6 || seg(ss[5]))
+            && (ss.size() <  7 || seg(ss[6]))  && (ss.size() <  8 || seg(ss[7]))
+            && (ss.size() <  9 || seg(ss[8]))  && (ss.size() < 10 || seg(ss[9]))
+            && (ss.size() < 11 || seg(ss[10])) && (ss.size() < 12 || seg(ss[11]));
+      }
 
       function shape(d) {
         return d.keys().hasAll(['name', 'role', 'patternId', 'patternOffset', 'updatedAt'])
-            && d.keys().hasOnly(['name', 'role', 'patternId', 'patternOffset', 'updatedAt', 'addedBy'])
+            && d.keys().hasOnly(['name', 'role', 'patternId', 'patternOffset',
+                                 'patternSegments', 'updatedAt', 'addedBy'])
             && d.name is string && d.name.size() > 0 && d.name.size() <= 20
             && d.role is string && d.role.size() > 0 && d.role.size() <= 40
             && d.patternId is string && d.patternId.size() > 0 && d.patternId.size() <= 40
             && d.patternOffset is int && d.patternOffset >= 0 && d.patternOffset <= 200
             && d.updatedAt is timestamp
+            && segsOk(d.get('patternSegments', []))
             // addedBy 는 있으면 반드시 "admin" (관리자 대리등록 표식)
             && d.get('addedBy', 'admin') == 'admin';
       }
@@ -50,14 +91,28 @@ service cloud.firestore {
       // 이름 불변: 남의 사번 문서를 통째로 덮어써 "주인"을 바꿔치기하는 것을 막는다.
       // 정상 흐름은 안 깨진다 — 로그인·관리자등록 모두 BundledStaff.validate 로
       // 사번 하나당 이름이 한 개로 고정되므로 재로그인/재등록해도 같은 문자열이 온다.
-      // (관리자가 올린 행에 본인이 나중에 로그인하면 addedBy 만 빠진다 = 본인 소유 승격, 허용)
+      //
+      // addedBy 는 **뗄 수만 있고 새로 붙일 수는 없다**. 이게 삭제 연쇄를 끊는 핵심이다:
+      //   옛 규칙은 ① 남의 행에 addedBy:'admin' 주입(update) → ② delete 허용 → ③ 같은 사번에
+      //   다른 이름으로 create, 로 아무 직원 행이나 지우고 주인을 갈아치울 수 있었다.
+      //   이제 ①이 막혀 ②로 갈 수가 없다. 아래 두 정상 경로는 그대로 산다:
+      //     · publish 가 관리자 행을 덮어씀(admin→'') = 본인 소유 승격  ✔
+      //     · adminUpsert 가 자기 행을 다시 씀(admin→admin)            ✔
+      //   대신 **이미 본인 가입한 행 위에 adminUpsert 는 이제 실패한다**(''→admin). 의도한 것이다 —
+      //   그게 곧 "남의 행을 삭제 가능한 행으로 바꾸기"이고, 관리자 화면은 어차피
+      //   addedBy != null 인 행만 목록에 올린다(AdminViewModel.members).
       allow update: if signedIn()
                     && shape(request.resource.data)
-                    && request.resource.data.name == resource.data.name;
+                    && request.resource.data.name == resource.data.name
+                    && (resource.data.get('addedBy', '') == 'admin'
+                        || request.resource.data.get('addedBy', '') == '');
 
       // 삭제는 관리자가 대리등록한 행만. 실제 사용자가 직접 만든 행은 앱에서 못 지운다.
       // 앱도 정확히 이 범위만 지운다 — AdminViewModel.members 가 addedBy != null 만 목록에 올린다.
       // (Firebase 콘솔에서는 규칙과 무관하게 지울 수 있다. Tester/test 정리는 콘솔에서.)
+      // ⚠ 남은 한계: 관리자 대리등록 행은 **누구나** 지울 수 있다 — 서버가 adminDelete 와
+      //    장난을 구분할 방법이 없다(익명 인증). 본인이 한 번이라도 로그인하면 addedBy 가
+      //    떨어져 나가 보호된다. 실사용 282명 중 노출 구간은 "아직 앱 안 깐 사람"뿐이다.
       // ponytail: publish() 안의 visibleToOthers=false → delete 경로는 현재 UI에 토글이 없어
       //           도달 불가(dead). 나중에 "동료화면 숨기기"를 살리면 이 규칙을 풀어야 한다.
       allow delete: if signedIn() && resource.data.get('addedBy', '') == 'admin';
@@ -89,8 +144,13 @@ service cloud.firestore {
 
       // 삭제는 열어 둘 수밖에 없다: "변경없음(원래 근무)"으로 되돌리기가 곧 삭제라
       // 앱의 정상 동작이고, 익명 인증으로는 주인을 판별할 수 없다.
-      // 피해는 제한적 — 원본은 각자 폰(로컬)에 남아 있고 다음 수정 때 다시 올라간다.
-      allow delete: if signedIn();
+      // 규칙만으로 걸 수 있는 유일한 조건이 **문서ID↔내용 정합성**이라 create/update 와 같은
+      // 검사를 건다 — 자기 ID 와 안 맞는 문서(콘솔·수기 주입분)는 앱에서 못 지운다.
+      // ⚠ 남은 한계는 그대로다: 사번만 알면 남의 근무변경을 덮어쓰고 지울 수 있다.
+      //    소유권 검증은 사번 기반 계정(커스텀 토큰) 없이는 원리적으로 불가능하다.
+      //    피해는 제한적 — 원본은 각자 폰(로컬)에 남아 있고 다음 수정 때 다시 올라간다.
+      allow delete: if signedIn()
+        && docId == resource.data.get('uid', '') + '_' + resource.data.get('date', '');
     }
 
     // 앱이 안 쓰는 나머지 전부 차단 (schedules/patterns/dias/holidays 등은 미사용)

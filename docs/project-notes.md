@@ -715,6 +715,132 @@ UTF-8 24바이트라 16이면 막힌다(`size()`가 바이트든 문자든 32면
 - 실화면 확인: 달력 `교체38` 칩이 노란 대기색 + 야간 초승달 + 출근시각 `19:08`, 상세시트에
   `교체 38 다이아 대행 (평평)` + 38번 행로표, 익일 자동 비번, 되돌리기 정상.
 
+## Firestore 규칙 감사 — 실서비스 파손 1건 + 권한상승 연쇄 1건 (2026-08-25, 앱 코드 무변경)
+
+**`firestore.rules` 와 `firestore/rules.test.mjs` 두 파일만 고쳤다.** 앱 소스·버전·산출물 무변경,
+**배포도 안 했다**(`firebase deploy`는 사용자 몫 — 규칙을 올리기 전까지 A는 계속 깨져 있다).
+
+### ⚠ 가장 중요한 교훈 — 규칙이 41개 버전 뒤처져 실서비스가 조용히 깨져 있었다
+
+`firestore.rules` 최종 수정은 **v1.6.25**(`6ef4705`), `patternSegments` 도입은 **v1.6.63**(`a277d65`).
+그 사이 41개 버전 동안 **모든 `publish()` 가 서버에서 거부되고 있었다.** 아무도 몰랐던 이유:
+
+- `publish()`가 `runCatching` + **`await` 안 함** → 실패가 UI에 안 뜨고 logcat에만 남는다.
+- 증상이 "신규 로그인 사용자가 동료 탭에 안 나타난다"로만 새어나온다. 기존 행은
+  v1.6.63 이전 값으로 **동결**된다(옛 값이 남아 있어 화면이 멀쩡해 보인다).
+- 테스트 38건이 **전부 통과하고 있었다** — `publishDoc()`이 v1.6.25 페이로드였기 때문이다.
+  즉 **테스트가 앱이 아니라 옛 규칙을 검사하고 있었다.**
+
+> **데이터 모델을 바꾸면 `firestore.rules`와 `rules.test.mjs`를 같은 커밋에서 고쳐라.**
+> 특히 `publish()`/`adminUpsert()`의 **키가 하나라도 바뀌면** `hasOnly`가 즉시 전부를 막는다.
+> 앱은 그 실패를 삼키므로 **테스트가 유일한 경보 장치다.**
+
+증거(에뮬레이터 실측): 옛 규칙 + 새 테스트 = **44 OK / 9 FAIL**, 깨지는 항목이 정확히
+`publish` 계열 전부(새 문서 생성 · 재로그인 덮어쓰기 · 본인 소유 승격 · 구간 3종).
+`adminUpsert`/`adminDelete`는 옛 규칙에서도 통과 — **파손은 `publish()` 한쪽뿐이었다.**
+
+### A. `patternSegments` 누락 (치명·기능 파손)
+
+`shape()`의 `hasOnly`에 `patternSegments`를 넣고, 그 필드 형태도 검증한다.
+**`hasAll`에는 안 넣었다** — `adminUpsert()`는 이 키를 안 보내므로 넣으면 관리자 대리등록이 죽는다.
+
+앱 실제 값에 맞춘 판단 3가지(어긋나면 정상 쓰기가 막힌다):
+
+- **`from`은 날짜 정규식으로 조이면 안 된다.** 첫 구간이 `LocalDate.MIN`이라 문자열이
+  `-999999999-01-01`(16자)이다. `^\d{4}-\d{2}-\d{2}$`로 걸면 **구간 있는 사용자 전원이 막힌다.**
+- **구간의 `patternId`는 `null`이 정상값**이다(`PatternSegment.patternId: String?`,
+  "다이아 없이 저장" 경로). `is string`을 걸면 그 사용자들이 막힌다.
+- **상한은 12칸**(`User.MAX_SEGMENTS`, `withSegments`가 `takeLast`로 자른다).
+
+#### 검증을 과하게 걸었다가 실제로 막혔다 — expression 상한 1000
+
+처음엔 `seg()`에 `from` 정규식 + `patternOffset` 범위 + `patternId` 널체크까지 넣었다.
+규칙 언어엔 반복문이 없어 12칸을 손으로 폈는데, **12칸 publish 가 실패했다**:
+
+```
+Unable to evaluate the expression as the maximum of 1000 expressions to evaluate has been reached.
+```
+
+Firestore는 요청당 1000 expression이 상한이고, 넘으면 규칙이 **거짓이 아니라 오류로 거부**한다.
+즉 **구간을 12칸까지 모은 사용자만 조용히 막히는** 새 버전의 같은 버그를 만들 뻔했다.
+`seg()`를 키 검사 + 기본 타입/길이까지로 줄여 해결(경고 0건). 지금 남긴 검사:
+
+- 원소 키가 `from`·`patternId`·`patternOffset`·`role` **뿐**인지(`hasOnly`) — 임의 필드 주입 차단
+- `from`·`patternOffset`·`role` 존재(`hasAll`), `from` 문자열 20자 이하, `patternOffset` 정수,
+  `role` 문자열 40자 이하
+
+**남은 한계**: 원소 값의 의미(날짜 형식·offset 범위)는 검사하지 않는다. `patternSegments`는
+서버에 기록만 되고 **앱이 되읽지 않으므로**(`FirestoreRepositories.kt:88`) 달력이 틀어질 위험은
+없다. 검사를 되살리려면 반드시 12칸 테스트를 돌려라 — 규칙 파일과 테스트 양쪽에 경고를 박아 뒀다.
+
+### B. `addedBy` 주입 → 삭제 연쇄 (치명·보안)
+
+옛 규칙의 구멍: update가 `name` 동일성만 봤고, 그 `name`은 열린 read로 그냥 읽혔다.
+
+1. 남의 행에 `addedBy:'admin'` 주입(update) — `shape()`가 `addedBy`를 허용하고 이름은 그대로라 통과
+2. `delete`(`addedBy == 'admin'`) 열림 → **임의 직원 행 삭제**
+3. 같은 사번에 다른 이름으로 `create`(create엔 이름 검사가 없다) → **주인 교체**
+
+**끊은 방법 — `addedBy`는 뗄 수만 있고 붙일 수는 없다** (①에서 차단):
+
+```
+&& (resource.data.get('addedBy', '') == 'admin'
+    || request.resource.data.get('addedBy', '') == '')
+```
+
+`addedBy` 완전 불변(`old == new`)으로 하면 **본인 소유 승격이 죽는다**(관리자 행 위에 본인이
+로그인하면 `admin` → 없음). 그래서 **비대칭**으로 걸었다. 4가지 경우 전부 테스트로 잠갔다:
+
+| 경우 | old → new | 결과 |
+|---|---|---|
+| publish (일반) | `''` → `''` | 통과 |
+| **본인 소유 승격** | `admin` → `''` | 통과 |
+| **adminUpsert 재등록** | `admin` → `admin` | 통과 |
+| **공격 ① 주입** | `''` → `admin` | **차단** |
+
+`adminUpsert`/`adminDelete`가 사는 것을 테스트 3건으로 확인했다 — 신규 대리등록(create),
+**기존 관리자 행 재등록(update, `admin`→`admin`)**, adminDelete.
+
+**의도한 동작 변경 1건**: 이미 본인 가입한 행 위의 `adminUpsert`는 이제 실패한다(`''`→`admin`).
+그게 곧 공격 ①이라 막을 수밖에 없고, 관리자 화면은 어차피 `addedBy != null` 인 행만 목록에
+올린다(`AdminViewModel.members`). 다만 관리자가 그런 사번을 직접 입력하면 앱이
+*"저장 실패 — 인터넷 연결을 확인하세요"*라는 **엉뚱한 메시지**를 낸다(앱 코드라 이번엔 안 고침).
+
+**남은 한계**: 관리자 대리등록 행(`addedBy:'admin'`)은 **여전히 누구나 지울 수 있다.** 서버가
+`adminDelete`와 장난을 구분할 방법이 없다(익명 인증). 본인이 한 번이라도 로그인하면 `addedBy`가
+떨어져 나가 보호되므로, 노출 구간은 **"아직 앱을 안 깐 사람"의 행**뿐이다.
+
+### C. `rosterOverrides` 덮어쓰기·삭제 (중) — 규칙만으로는 거의 못 조인다
+
+`allow delete: if signedIn();`에 create/update와 같은 **문서ID↔내용 정합성** 검사를 붙였다.
+자기 ID와 안 맞는 문서(콘솔·수기 주입분)는 이제 앱에서 못 지운다.
+
+**솔직히 보안 효과는 미미하다.** 앱이 만든 문서는 전부 정합성을 만족하므로 실질적으로
+막히는 건 콘솔 주입분뿐이다. **소유권 검증은 원리적으로 불가능**하다 — 익명 인증이라 서버가
+요청자의 사번을 모른다. 그래서 사번만 알면 남의 근무변경을 **여전히 덮어쓰고 지울 수 있다.**
+
+더 조이려다 **그만둔 것**: "과거 N개월 이전 날짜는 삭제 금지" 같은 시간 창 제한을 검토했으나,
+사용자가 지난달 근무를 정정하는 정상 흐름을 막고 그 실패마저 `runCatching`에 삼켜져
+**로컬과 서버가 조용히 갈라진다.** 투기적 방어가 실제 파손을 만드는 쪽이라 넣지 않았다.
+`delete`를 아예 닫을 수도 없다 — **"변경없음으로 되돌리기"가 곧 삭제**라 앱의 정상 동작이다.
+
+피해는 제한적이다: 원본은 각자 폰(로컬)에 남아 있고 다음 수정 때 다시 올라간다.
+진짜 해결은 사번 기반 계정(커스텀 토큰)뿐이고, 앱 구조 변경이라 이번 범위 밖이다.
+
+### 테스트 — 38 → **53건** (허용 18 / 차단 35), 에뮬레이터 실행 확인
+
+`publishDoc()`을 **실제 `publish()` 페이로드로 갱신**(`patternSegments` 포함)한 것이 이번 작업의
+핵심이다. 신규 15건: 구간 정상 3종(2칸 · **12칸 create+update** · `patternId` null),
+adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리오**(①주입→②삭제→③이름교체 전 단계),
+`addedBy` 부분 update 주입, 본인가입 행 adminUpsert, rosterOverrides 정합성 삭제.
+
+실행: `emulators:exec` (Node 22 + **JDK 21은 Android Studio 번들 사용** —
+`C:\Program Files\Android\Android Studio\jbr`, PATH의 JDK 17로는 firebase-tools가 거부한다).
+**53 OK / 0 FAIL**, `1000 expressions` 경고 0건. 기존 38건 전부 유지.
+
+> `12칸 create+update` 테스트가 **expression 상한 자물쇠**다. `seg()`에 검사를 늘리면
+> 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
+
 ## v1.6.66 — 동료 탭 이름 열: 이름과 배지 사이 최소 간격 2dp
 
 versionCode 78. 사용자 신고 1건: *"동료탭에 4조2교대에 보면 이름이 짤렸는데?"*
