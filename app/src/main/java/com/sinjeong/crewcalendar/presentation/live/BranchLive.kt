@@ -42,7 +42,10 @@ internal object BranchLine {
 
     /**
      * 역 [at]의 상행 도착까지 남은 초(x)를 0~[at] 위치로 역변환.
-     * (v1.6.70에서 양천구청 전용이던 것을 역 인덱스로 일반화 — 신정네거리도 같은 식을 탄다)
+     *
+     * v1.6.70에서 양천구청 전용이던 것을 역 인덱스로 일반화했다. **일반형을 그대로 둔다** —
+     * 지금 호출되는 [at]은 2(양천구청)뿐이지만, 신정네거리(1) 호출을 되살리는 게 두 줄이다
+     * (껐다 켜는 이유는 `BranchLive.loadFromSeoulApi` 주석).
      */
     fun posFromStationSec(x: Float, at: Int, toSindorim: Boolean): Float {
         val seg = if (toSindorim) SEG_UP else SEG_DN
@@ -347,12 +350,13 @@ internal object BranchLive {
     /**
      * 위치 API(역 단위) + 도착 API(초 단위)를 융합해 **역 [at] 접근 상행 열차**를 정밀화.
      *
-     * [at] = 2 양천구청(편승 보드 지점) · 1 신정네거리(그 바로 앞 역, v1.6.70).
-     * 신정네거리를 더한 이유: 승무원은 양천구청에서 편승 열차를 탄다. 한 정거장 앞부터
-     * 초 단위로 보이면 승강장에서 "지금 오는 그 열차"가 눈으로 잡힌다.
+     * [at] = 2 양천구청(편승 보드 지점) · 1 신정네거리(그 바로 앞 역).
      *
-     * ⚠ 두 역이 같은 열차를 말하면 **나중에 부른 쪽이 이긴다.** [loadFromSeoulApi]가
-     * 신정네거리 → 양천구청 순으로 걸어 **양천구청을 신뢰**한다(보드 지점이라 더 중요).
+     * ⚠ **지금 실제로 도는 건 `at = 2`(양천구청) 하나뿐이다.** `at = 1`(신정네거리)은 호출을
+     * v1.6.71에서 껐다 — 이유와 되살리는 법은 [loadFromSeoulApi] 주석에 있다. 역 번호를
+     * 인자로 받는 이 형태는 **그대로 남긴다**(되살리기가 두 줄이고, 테스트도 이 형태를 건다).
+     * 두 역을 같이 걸면 같은 열차에 대해 **나중에 부른 쪽이 이긴다** — 양천구청을 나중에
+     * 걸어 **양천구청을 신뢰**한다(보드 지점이라 더 중요).
      *
      * ⚠⚠ **`arvlCd` 0·1·2(진입·도착·출발) 행은 버린다**(v1.6.70 — 실호출로 잡은 오배치).
      * 도착 API는 열차가 그 역을 지난 뒤에도 **같은 행을 몇 분씩 되풀이해 준다.**
@@ -542,6 +546,9 @@ internal object BranchLive {
         while (attempts < API_KEYS.size + 1) {   // +1 = 일시 오류 재시도 여유
             attempts++
             val key = API_KEYS[keyIdx % API_KEYS.size]
+            // 한 줄 = 한 번의 한도 소모. 이 앱에서 가장 빡빡한 자원이라 실기기에서 셀 수 있어야 한다
+            // (v1.6.71에서 호출을 3 → 2회로 줄인 근거도 이 로그로 확인했다). 키 값은 안 찍는다.
+            Log.d(TAG, "API 호출: ${pathAfterKey.substringBefore("/")} · 키#${keyIdx % API_KEYS.size}")
             val r = runCatching {
                 val conn = URL("$BASE/$key/json/$pathAfterKey").openConnection() as HttpURLConnection
                 val body = conn.run {
@@ -585,7 +592,8 @@ internal object BranchLive {
         trains.any { it.toSindorim && it.position >= 0.85f && it.position < 2f }
 
     /**
-     * 스냅샷 1회 = **API 3회**(2호선 위치 1 + 양천구청 도착 1 + 신정네거리 도착 1).
+     * 스냅샷 1회 = **API 2회**(2호선 위치 1 + 양천구청 도착 1).
+     * v1.6.70이 더했던 신정네거리 도착(3번째)은 v1.6.71에서 껐다 — [loadFromSeoulApi] 주석.
      * 주기 내 재호출은 캐시 반환(한도 보호) — 주기는 [approachingYangcheon]에 따라 15초/5초.
      *
      * ⚠ 호출자는 반드시 **컴포지션에 묶인 코루틴**에서 부를 것 — 상세시트가 닫히면
@@ -629,25 +637,51 @@ internal object BranchLive {
         return lg.copy(error = "${snap.error} · 직전(${ageSec}초 전) 데이터 유지 중")
     }
 
+    /**
+     * 스냅샷 1회 = **API 2회**(위치 + 양천구청 도착).
+     *
+     * ### 신정네거리 도착(3번째 호출)은 v1.6.71에서 **껐다** — 왜
+     *
+     * v1.6.70이 한 정거장 앞(신정네거리)에서도 초 단위로 보이게 하려고 3번째 호출을 더했는데,
+     * 그 작업이 실호출로 확인해 스스로 적어 둔 대로 **실효가 거의 없었다.**
+     *
+     *  1. `barvlDt`에 **정차 시간이 섞인다**(실측: 신정네거리에 서 있는 `5653`의 양천구청 ETA가
+     *     180초 — 실주행 130초보다 50초 많다). 역변환한 좌표가 위치 API보다 **뒤**로 떨어져
+     *     [refineWithArrivals]의 전진 가드에 그대로 막힌다.
+     *  2. 접근 중 ETA도 `330 → 320 → 180 → 180 → 180`으로 **초 단위로 안 내려온다.**
+     *  3. 도착 API는 열차가 그 역을 지난 뒤에도 **같은 행을 3분씩 되풀이한다**(잡음만 늘린다).
+     *  4. "한 정거장 앞부터 초 단위"를 실제로 만들고 있는 건 **적응형 5초 갱신 + 등속 보간**이다.
+     *  5. 그런데 이 한 줄이 **일일 한도의 1/3을 쓴다**(키 6개 = 6000회/일을 282명이 나눠 쓴다.
+     *     하루 감당 278분 → 끄면 **417분**).
+     *
+     * ### 되살리는 법 — 두 줄
+     *
+     * API가 정확해지면(`barvlDt`에서 정차 시간이 빠지면) 아래를 되돌리면 그대로 산다.
+     * [posFromStationSec][BranchLine.posFromStationSec]·[refineWithArrivals]는 역 번호를
+     * 인자로 받는 **일반 함수 그대로 남겨 뒀다**(양천구청이 계속 쓴다). 테스트도 그대로 있다.
+     * ```
+     * val sinD = async { fetchArrivals("신정네거리") }          // ← 되살릴 줄 ①
+     * val sinRows = sinD.await().getOrDefault(emptyList())
+     * // 신정네거리(1) 먼저, 양천구청(2) 나중 — 겹치면 **양천구청이 이긴다**
+     * val strict = refineWithArrivals(                          // ← 되살릴 줄 ②
+     *     refineWithArrivals(branchTrains(posRows), sinRows, 1), yangRows, 2)
+     * ```
+     * (`error` 합치기에 `sin.exceptionOrNull()`도 같이 넣어야 한다.)
+     */
     private suspend fun loadFromSeoulApi(): Snapshot = try {
         coroutineScope {
             val posD = async { fetchPositions() }
             val yangD = async { fetchArrivals("양천구청") }
-            val sinD = async { fetchArrivals("신정네거리") }
             val pos = posD.await()
             val yang = yangD.await()
-            val sin = sinD.await()
             val posRows = pos.getOrDefault(emptyList())
             val yangRows = yang.getOrDefault(emptyList())
-            val sinRows = sin.getOrDefault(emptyList())
 
             Snapshot(
                 // 머리 전환은 여기서 하지 않는다 — [ensureFleet]가 **회차 전 열번**을 봐야 한다.
                 // [loadSnapshot]이 ensureFleet → applyTurnaround 순으로 이어 붙인다.
                 trains = run {
-                    // 신정네거리(1) 먼저, 양천구청(2) 나중 — 겹치면 **양천구청이 이긴다**.
-                    val strict = refineWithArrivals(
-                        refineWithArrivals(branchTrains(posRows), sinRows, 1), yangRows, 2)
+                    val strict = refineWithArrivals(branchTrains(posRows), yangRows, 2)
                     val merged = (strict + branchTrainsLoose(posRows, strict)).distinctBy { it.trainNo }
                     merged.ifEmpty { trainsFromArrivals(yangRows) }
                 },
@@ -655,8 +689,7 @@ internal object BranchLive {
                 fetchedAtMillis = System.currentTimeMillis(),
                 // 두 호출이 같은 이유로 죽으면 문구도 하나만 (`인터넷 연결 안 됨 · 인터넷 연결 안 됨` 방지).
                 // 원문은 logcat으로 — 진단은 그쪽에서 한다.
-                error = listOfNotNull(
-                    pos.exceptionOrNull(), yang.exceptionOrNull(), sin.exceptionOrNull())
+                error = listOfNotNull(pos.exceptionOrNull(), yang.exceptionOrNull())
                     .onEach { Log.w(TAG, "조회 실패", it) }
                     .map(::humanError).distinct().joinToString(" · ").ifBlank { null },
             )
