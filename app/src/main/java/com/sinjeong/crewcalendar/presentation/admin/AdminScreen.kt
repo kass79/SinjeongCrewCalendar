@@ -24,6 +24,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
+import com.sinjeong.crewcalendar.domain.repository.AdminWriteResult
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.presentation.calendar.DutyPickerSheet
@@ -74,14 +75,26 @@ class AdminViewModel @Inject constructor(
     val msg: StateFlow<String?> = _msg
     fun clearMsg() { _msg.value = null }
 
+    /**
+     * DENIED = 서버 규칙이 막은 것이지 통신 문제가 아니다. 대리등록에서 이 경우는 사실상
+     * 하나뿐 — **그 사번으로 이미 본인이 로그인한 적이 있다**(firestore.rules 가 ''→'admin'
+     * 승격을 막는다). 사번은 BundledStaff.validate 가 이름을 하나로 고정하므로 이름 불변
+     * 조건에는 걸릴 수 없다.
+     */
     fun save(entry: RosterEntry) = viewModelScope.launch {
-        _msg.value = if (repo.adminUpsert(entry)) "${entry.name} 등록됐습니다."
-        else "저장 실패 — 인터넷 연결을 확인하세요."
+        _msg.value = when (repo.adminUpsert(entry)) {
+            AdminWriteResult.OK -> "${entry.name} 등록됐습니다."
+            AdminWriteResult.DENIED -> "이미 본인이 가입한 사번입니다 — 대리등록이 필요 없습니다."
+            AdminWriteResult.FAILED -> "저장 실패 — 인터넷 연결을 확인하세요."
+        }
     }
 
     fun delete(entry: RosterEntry) = viewModelScope.launch {
-        _msg.value = if (repo.adminDelete(entry.uid)) "${entry.name} 삭제됐습니다."
-        else "삭제 실패 — 인터넷 연결을 확인하세요."
+        _msg.value = when (repo.adminDelete(entry.uid)) {
+            AdminWriteResult.OK -> "${entry.name} 삭제됐습니다."
+            AdminWriteResult.DENIED -> "본인이 직접 가입한 사번이라 지울 수 없습니다."
+            AdminWriteResult.FAILED -> "삭제 실패 — 인터넷 연결을 확인하세요."
+        }
     }
 }
 

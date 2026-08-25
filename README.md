@@ -24,9 +24,9 @@ SinjeongCrewCalendar/
 ├── settings.gradle.kts / build.gradle.kts / gradle.properties
 ├── gradle/libs.versions.toml            # 버전 카탈로그
 ├── firebase.json                        # hosting + firestore.rules 경로
-├── firestore.rules                      # ★ 배포되는 보안 규칙 (여기 하나뿐)
+├── firestore.rules                      # ★ 배포되는 보안 규칙 + 데이터 모델의 유일한 원본
 ├── firestore/
-│   └── schema.json                      # 초기 설계 문서 (현재 앱은 users·rosterOverrides만 사용)
+│   └── rules.test.mjs                   # 규칙 단위테스트 (에뮬레이터)
 └── app/src/main/
     ├── AndroidManifest.xml
     ├── res/                             # 테마, 위젯 정보, 아이콘

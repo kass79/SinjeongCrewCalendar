@@ -65,13 +65,20 @@ data class RosterEntry(
     val addedBy: String? = null,
 )
 
+/**
+ * 관리자 대리등록/삭제 결과. **[DENIED] 와 [FAILED] 를 합치면 안 된다** —
+ * 서버가 규칙으로 거부한 것("이미 본인이 가입한 사번")을 통신 실패로 안내하면 사용자가
+ * 인터넷을 확인하러 간다(v1.6.66 까지 실제로 그랬다). 문구는 AdminViewModel 참조.
+ */
+enum class AdminWriteResult { OK, DENIED, FAILED }
+
 interface RosterRepository {
     fun observeUsers(): Flow<List<RosterEntry>>
     /** 해당 월 근무변경 전체: uid → (날짜 → 변경 근무) */
     fun observeMonthOverrides(month: YearMonth): Flow<Map<String, Map<LocalDate, String>>>
 
-    /** 관리자 대리 등록/수정 — users/{사번}에 로그인 사용자와 같은 스키마로 write. 서버 미연동이면 false */
-    suspend fun adminUpsert(entry: RosterEntry): Boolean = false
-    suspend fun adminDelete(uid: String): Boolean = false
+    /** 관리자 대리 등록/수정 — users/{사번}에 로그인 사용자와 같은 스키마로 write. 서버 미연동이면 FAILED */
+    suspend fun adminUpsert(entry: RosterEntry): AdminWriteResult = AdminWriteResult.FAILED
+    suspend fun adminDelete(uid: String): AdminWriteResult = AdminWriteResult.FAILED
 }
 

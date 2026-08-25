@@ -841,6 +841,85 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 > `12칸 create+update` 테스트가 **expression 상한 자물쇠**다. `seg()`에 검사를 늘리면
 > 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
 
+## v1.6.67 — 배포 전 감사 잔여 3건 (날씨 GPS 죽은 가지 · 대리등록 오안내 · 낡은 schema.json)
+
+versionCode 79. `bf137bd`(firestore.rules 배포 완료)에 이어진 **앱 코드 쪽 잔여 수정**이다.
+규칙 파일(`firestore.rules`·`firestore/rules.test.mjs`)은 이미 배포돼 있어 **건드리지 않았다**.
+
+### ① 날씨 GPS 분기가 죽은 코드였다 (`presentation/weather/Weather.kt` `locate`)
+
+앱은 `ACCESS_COARSE_LOCATION`만 선언한다(v1.6.37 확정 — 격자 5km라 FINE 불필요, 데이터
+세이프티 부담만 늘어남). 그런데 플랫폼은 `gps`·`passive` 제공자에 **FINE을 요구**한다 —
+COARSE만으로 `getCurrentLocation(gps)`를 부르면 `SecurityException`이다. 옛 후보 리스트
+`[NETWORK, GPS]`는 `runCatching` 이중 방어라 크래시는 안 났지만, **NETWORK가 꺼지고 GPS만
+켠 기기에서는 늘 SecurityException을 삼키고 신정기지 격자로 폴백**했다 — GPS 가지는 **한 번도
+성공할 수 없는 죽은 코드**였다. 131-132행의 옛 주석("COARSE면 어차피 뭉갠 좌표가 온다")은
+**FINE을 선언한 앱이 '대략적' 승인만 받은 경우**의 얘기라 우리 상황엔 틀렸다.
+
+**수정**: 후보를 **NETWORK 하나로** 고정하고 `getLastKnownLocation`도 NETWORK만 돌게 정리했다
+(옛 코드는 `getProviders(true)` 전체를 돌아 gps의 마지막 위치까지 긁었다 — 그것도 FINE 없이는
+못 읽어 무의미). COARSE로도 되는 제공자는 `network`와 API 31+ `fused`뿐이라 NETWORK로 충분하다.
+틀린 주석은 **왜 gps를 빼는지(FINE 요구)**를 못 박는 새 주석으로 교체했다 — 다음 세션이
+"gps가 빠졌네" 하고 되살리면 정반대(FINE 선언)로 가게 되므로. **FINE 권한은 추가하지 않았다.**
+
+동작 관찰(emulator-5554, NETWORK 꺼짐·GPS만 켬 = 이 케이스 그대로): 로그 `Weather: 격자
+58,126`(SINJEONG 폴백) + 헤더 날씨 칩 `32°` 정상 표시, `SecurityException`·FATAL 0건.
+가시 결과는 옛 코드와 같다(둘 다 폴백) — 차이는 **매번 던지고 삼키던 예외 왕복을 없앤 것**과,
+NETWORK가 살아 있을 때 실제로 그걸 쓰게 된 것. 에뮬레이터에서 network test-provider 주입은
+mock-location app-ops가 shell에 없어 못 했고(`allowed=false`), 코드 경로 확인으로 갈음했다.
+
+### ② 관리자 대리등록 실패 시 오안내 (네트워크 오류로 표시) (`AdminScreen.kt`·`FirestoreRepositories.kt`)
+
+`bf137bd` 규칙이 **이미 본인이 로그인한 사번(addedBy 없음) 위의 adminUpsert를 거부**한다
+(''→'admin' 승격이 곧 삭제 권한 연쇄의 첫 고리라 막음, 의도된 동작). 그런데 앱은 그 거부를
+`Boolean` 하나로 뭉개 `"저장 실패 — 인터넷 연결을 확인하세요"`로 띄웠다 — 사용자가 인터넷을
+확인하러 간다.
+
+**수정**: `RosterRepository`에 `enum AdminWriteResult { OK, DENIED, FAILED }`를 두고,
+`adminUpsert`/`adminDelete`가 `FirebaseFirestoreException.code == PERMISSION_DENIED`를
+**DENIED로 구분**한다(그 밖은 FAILED). 화면 문구:
+- DENIED(등록) → `"이미 본인이 가입한 사번입니다 — 대리등록이 필요 없습니다"`
+- DENIED(삭제) → `"본인이 직접 가입한 사번이라 지울 수 없습니다"`
+- FAILED → 종전 네트워크 문구 유지.
+
+**오류 구분의 근거**: ⓐ 규칙 거부는 Task가 `PERMISSION_DENIED`로 **실패 완료**돼 `await`가
+그 예외를 던진다 → catch에서 코드로 판별. ⓑ **진짜 오프라인은 이 catch로 오지 않는다** —
+authed 상태의 오프라인 `set()`는 로컬 캐시만 갱신하고 Task를 미완료로 둬 `await`가 매달린다
+(옛 코드도 이 경우엔 아무 문구도 못 냈다, 무변경). ⓒ **오프라인의 유일한 정상 네트워크 경로는
+`ensureAuth()`**(익명 로그인은 네트워크 필수, 오프라인에서 빠르게 실패) → 여기서 FAILED로
+빠져 종전 네트워크 문구가 그대로 맞다. 즉 대리등록에서 DENIED는 사실상 "이미 본인 가입" 하나뿐.
+
+규칙이 이 분기를 실제로 그렇게 가른다는 근거는 배포된 `rules.test.mjs`:
+`users/1003` 신규 대리등록 = **assertSucceeds**(create), `users/2022` 본인 가입 행 위 adminUpsert
+= **assertFails**(PERMISSION_DENIED). **실화면 시험은 하지 않았다** — 유일한 DENIED 재현 대상이
+현재 로그인 사번(강민성/21715160)의 서버 문서인데, `adb input tap`이 분류기에 막혔고 블라인드
+탭이 근무선택·근무변경(Firestore 기록)에 닿을 위험이 있어 코드 경로+규칙 테스트로 갈음했다.
+
+### ③ `firestore/schema.json` 삭제 (실제와 무관한 낡은 설계 문서)
+
+`schema.json`은 **존재하지 않는 컬렉션 4종**(`patterns`/`dias`/`schedules`/`holidays`)과
+없는 필드(`isAdmin`·`email`·`googleCalendarId`·`fcmToken`…)를 적고 있었다. 실제 앱이 쓰는 건
+`users`/`rosterOverrides` 둘뿐이고(`firestore.rules` 주석이 전수 확인), 이 파일은 어느 코드도
+읽지 않는다(참조는 README·이 문서의 서술뿐).
+
+**갱신이 아니라 삭제**를 택했다: 실제 데이터 모델의 유일한 원본은 이미 `firestore.rules`(스키마
+검증식을 그대로 담고 rules.test.mjs가 잠근다)이고, `schema.json`은 **이중 진실**이 되어 다음
+세션이 이걸 근거로 규칙을 고칠 위험만 남긴다(감사에서 지적된 그대로). 살릴 가치가 없다.
+`README.md`의 폴더 트리에서 `schema.json` 줄을 `rules.test.mjs`로 교체하고 `firestore.rules`를
+"데이터 모델의 유일한 원본"으로 표기했다.
+
+### 검증
+
+- 단위 테스트 **78 tests OK**(PatternTest·BranchLiveTest·WeatherTest, PowerShell JUnitCore 직접 실행).
+- `assembleDebug`·`assembleRelease`·`bundleRelease` 전부 BUILD SUCCESSFUL. release APK 27.6MB /
+  AAB 27.2MB, `aapt2 dump badging` = versionCode 79 / 1.6.67 / targetSdk 36.
+- emulator-5554(1080x2400/420) 디버그 설치 후 실행: 달력·헤더 날씨 칩(`32°`) 정상, logcat
+  SecurityException/FATAL 0건. 로그인 계정(강민성/지선) 무변경, 근무선택·근무변경 미터치.
+  release APK는 서명이 달라 debug 위에 못 덮으므로 재설치 안 함(uninstall=local_user 소실=재로그인
+  금지). 에뮬 설정(location_mode 3·font_scale 1.0·night no) 원복 확인, test-provider 제거 확인.
+- 산출물: `신정승무캘린더_체험판.apk`(27.6MB, release universal) · `신정승무캘린더_v1.6.67.aab` ·
+  `신정승무캘린더_v1.6.67.zip`(체험판 apk 단일 엔트리). 이전 버전 산출물은 남겨 뒀다.
+
 ## v1.6.66 — 동료 탭 이름 열: 이름과 배지 사이 최소 간격 2dp
 
 versionCode 78. 사용자 신고 1건: *"동료탭에 4조2교대에 보면 이름이 짤렸는데?"*

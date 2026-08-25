@@ -3,6 +3,7 @@ package com.sinjeong.crewcalendar.data.remote
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.sinjeong.crewcalendar.data.local.LocalScheduleRepository
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.model.Bundled
@@ -10,6 +11,7 @@ import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.Schedule
 import com.sinjeong.crewcalendar.domain.model.User
+import com.sinjeong.crewcalendar.domain.repository.AdminWriteResult
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
@@ -199,28 +201,42 @@ class FirestoreRosterRepository @Inject constructor() : RosterRepository {
      * 관리자 대리 등록 — 앱을 아직 안 깐 동료의 근무를 대신 올린다.
      * 문서 스키마는 FirestoreUserRepository.publish 와 동일 + addedBy.
      * 본인이 나중에 직접 가입하면 publish 가 같은 문서를 통째로 set 해 addedBy 가 사라진다(=본인 소유로 승격).
+     *
+     * **이미 본인이 가입한 사번(addedBy 없음) 위에는 실패한다** — firestore.rules 가 ''→'admin'
+     * 승격을 막는다(삭제 권한 연쇄 차단, 의도된 동작). 그 거부는 [AdminWriteResult.DENIED] 다.
      */
-    override suspend fun adminUpsert(entry: RosterEntry): Boolean = runCatching {
-        if (!ensureAuth()) return false
-        db.collection("users").document(entry.uid).set(
-            mapOf(
-                "name" to entry.name,
-                "role" to entry.group.role.name,
-                "patternId" to Bundled.patternFor(entry.group).id,
-                "patternOffset" to entry.patternOffset,
-                "addedBy" to "admin",
-                "updatedAt" to FieldValue.serverTimestamp(),
-            )
-        ).await()
-        true
-    }.getOrDefault(false)
+    override suspend fun adminUpsert(entry: RosterEntry): AdminWriteResult {
+        if (!ensureAuth()) return AdminWriteResult.FAILED
+        return runCatching {
+            db.collection("users").document(entry.uid).set(
+                mapOf(
+                    "name" to entry.name,
+                    "role" to entry.group.role.name,
+                    "patternId" to Bundled.patternFor(entry.group).id,
+                    "patternOffset" to entry.patternOffset,
+                    "addedBy" to "admin",
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+            ).await()
+        }.fold({ AdminWriteResult.OK }, Throwable::asWriteResult)
+    }
 
-    override suspend fun adminDelete(uid: String): Boolean = runCatching {
-        if (!ensureAuth()) return false
-        db.collection("users").document(uid).delete().await()
-        true
-    }.getOrDefault(false)
+    /** 규칙상 addedBy=='admin' 인 행만 지워진다 — 본인 가입 행은 DENIED. */
+    override suspend fun adminDelete(uid: String): AdminWriteResult {
+        if (!ensureAuth()) return AdminWriteResult.FAILED
+        return runCatching { db.collection("users").document(uid).delete().await() }
+            .fold({ AdminWriteResult.OK }, Throwable::asWriteResult)
+    }
 }
+
+/**
+ * 규칙 거부(PERMISSION_DENIED)와 그 밖의 실패를 가른다.
+ * 오프라인은 여기로 안 온다 — Firestore 는 로컬에 쌓고 Task 를 미완료로 두기 때문에 await 가 매달린다.
+ */
+private fun Throwable.asWriteResult(): AdminWriteResult =
+    if ((this as? FirebaseFirestoreException)?.code ==
+        FirebaseFirestoreException.Code.PERMISSION_DENIED
+    ) AdminWriteResult.DENIED else AdminWriteResult.FAILED
 
 /** 오프라인(로컬) 모드용 — 공유 데이터 없음 */
 @Singleton
