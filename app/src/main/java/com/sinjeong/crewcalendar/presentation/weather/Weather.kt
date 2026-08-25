@@ -127,31 +127,38 @@ private fun hasCoarse(ctx: Context) =
 /**
  * 기기 위치 한 번 읽기. **GPS 를 켜 둔 채 기다리지 않는다** — 배터리 때문이다.
  *
- * **NETWORK 제공자 하나만 쓴다. `gps`·`passive` 를 되살리지 마라(v1.6.67 에서 뺐다).**
- * 이 앱은 [Manifest.permission.ACCESS_COARSE_LOCATION] 만 선언한다(v1.6.37 확정 — 격자가
- * 5km 라 FINE 이 필요 없고 데이터 세이프티 부담만 는다). 그런데 플랫폼은 `gps`·`passive`
- * 제공자에 **FINE 을 요구**한다 — COARSE 만으로 부르면 `SecurityException` 이다.
- * 그래서 후보에 넣어 봐야 `runCatching` 이 삼키는 **죽은 가지**였고, 실제로 v1.6.37~66 동안
- * "NETWORK 꺼짐 + GPS 만 켬" 기기는 늘 [SINJEONG] 폴백만 봤다.
- * 되살리려면 FINE 선언이 선행돼야 하는데 그건 위 결정의 정반대다.
- * (COARSE 로도 되는 제공자는 `network` 와 API 31+ `fused` 둘뿐이다.)
+ * **`gps`·`passive` 는 되살리지 마라(v1.6.67 에서 뺐다).** 이 앱은
+ * [Manifest.permission.ACCESS_COARSE_LOCATION] 만 선언한다(v1.6.37 확정 — 격자가 5km 라 FINE 이
+ * 필요 없고 데이터 세이프티 부담만 는다). 그런데 플랫폼은 `gps`·`passive` 제공자에 **FINE 을
+ * 요구**한다 — COARSE 만으로 부르면 `SecurityException` 이다. 그래서 후보에 넣어 봐야
+ * `runCatching` 이 삼키는 **죽은 가지**였고(v1.6.37~66 동안 "NETWORK 꺼짐 + GPS 만 켬" 기기는
+ * 늘 [SINJEONG] 폴백만 봤다), 되살리려면 FINE 선언이 선행돼야 하는데 그건 위 결정의 정반대다.
  *
- * 1) NETWORK 의 **마지막 알려진 위치**. 배터리 소모 0.
+ * **COARSE 로도 되는 제공자는 `network` 와 API 31+ `fused` 둘뿐**이라 이 둘만 쓴다.
+ * (`fused` 를 남긴 이유: 요즘 기기는 여기에 가장 신선한 좌표가 있고, network 가 null 이어도
+ *  fused 가 값을 줄 때가 있다. `getProviders(true)` 로 켜진 것만 걸러 없는 기기에선 자연히 빠진다.)
+ *
+ * 1) 두 제공자의 **마지막 알려진 위치** 중 가장 최근 것. 배터리 소모 0.
  * 2) 그게 없거나 6시간보다 오래됐으면 **딱 한 번** 갱신 요청(2초 제한, 넘으면 취소).
  * 3) 그래도 없으면 null → 폴백.
  */
 private fun locate(lm: LocationManager): Location? {
-    val net = LocationManager.NETWORK_PROVIDER
-    val known = runCatching { lm.getLastKnownLocation(net) }.getOrNull()
+    val coarseOk = buildList {
+        add(LocationManager.NETWORK_PROVIDER)
+        if (android.os.Build.VERSION.SDK_INT >= 31) add(LocationManager.FUSED_PROVIDER)
+    }
+    val on = runCatching { lm.getProviders(true) }.getOrDefault(emptyList())
+    val usable = coarseOk.filter { it in on }
+    val known = usable.mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }
+        .maxByOrNull { it.time }
     if (known != null && System.currentTimeMillis() - known.time < 6 * 3600_000L) return known
 
-    val on = runCatching { lm.getProviders(true) }.getOrDefault(emptyList())
-    if (net !in on) return known
+    val provider = usable.firstOrNull() ?: return known
     return runCatching {
         val got = AtomicReference<Location?>()
         val done = CountDownLatch(1)
         val cancel = CancellationSignal()
-        LocationManagerCompat.getCurrentLocation(lm, net, cancel, { it.run() }) {
+        LocationManagerCompat.getCurrentLocation(lm, provider, cancel, { it.run() }) {
             got.set(it); done.countDown()
         }
         if (!done.await(2, TimeUnit.SECONDS)) cancel.cancel()

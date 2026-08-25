@@ -856,9 +856,12 @@ COARSE만으로 `getCurrentLocation(gps)`를 부르면 `SecurityException`이다
 성공할 수 없는 죽은 코드**였다. 131-132행의 옛 주석("COARSE면 어차피 뭉갠 좌표가 온다")은
 **FINE을 선언한 앱이 '대략적' 승인만 받은 경우**의 얘기라 우리 상황엔 틀렸다.
 
-**수정**: 후보를 **NETWORK 하나로** 고정하고 `getLastKnownLocation`도 NETWORK만 돌게 정리했다
-(옛 코드는 `getProviders(true)` 전체를 돌아 gps의 마지막 위치까지 긁었다 — 그것도 FINE 없이는
-못 읽어 무의미). COARSE로도 되는 제공자는 `network`와 API 31+ `fused`뿐이라 NETWORK로 충분하다.
+**수정**: 후보를 **COARSE로 읽히는 것(`network` + API 31+ `fused`)만**으로 좁혔다 —
+`getLastKnownLocation` 스캔과 `getCurrentLocation` 둘 다. 옛 코드는 `getProviders(true)` 전체를
+돌아 gps의 마지막 위치까지 긁고, getCurrentLocation 후보에 GPS를 뒀다 — 둘 다 FINE 없이는
+SecurityException이라 무의미했다. **`fused`는 남겼다**: 요즘 기기는 여기에 가장 신선한 좌표가
+있고 network가 null이어도 fused가 줄 때가 있어, 그것까지 버리면 폴백 빈도가 는다(FUSED_PROVIDER
+상수는 컴파일타임 String이라 API 26에서도 안전, 게다가 `SDK_INT>=31`로 감쌌다).
 틀린 주석은 **왜 gps를 빼는지(FINE 요구)**를 못 박는 새 주석으로 교체했다 — 다음 세션이
 "gps가 빠졌네" 하고 되살리면 정반대(FINE 선언)로 가게 되므로. **FINE 권한은 추가하지 않았다.**
 
