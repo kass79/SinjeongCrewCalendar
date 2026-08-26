@@ -541,7 +541,11 @@ class PatternTest {
      *
      * v1.6.27(창 19분)에서 "알람 없음"이던 야간 7조합이 **전부 살아난다** —
      * 6조합은 v1.6.28(20분)에서, 마지막 `46 휴평`(21:41 출발 / 앞 열차 21:20)이 이번 21분에서.
-     * 이제 "편승 창이 비어 알람 없음"인 야간 조합은 **0건**이다.
+     * 이제 "편승 창이 비어 알람 없음"인 야간 **전반** 조합은 **0건**이다.
+     *
+     * ⚠ 여기 적힌 21분은 **이 7조합이 살아난 시점의 값**이고 현재 창은 아니다 —
+     * v1.6.75에서 **10~23분**으로 넓혔다([widenedWindow_upper_bound_is_23]). 이 7조합의
+     * 고른 열차는 그때도 한 건도 안 바뀌었다(창을 넓히면 `maxOrNull`이 같은 편을 고른다).
      */
     @Test fun widenedWindow_revives_all_seven_night_combos() {
         val pp = LocalDate.of(2026, 8, 19)   // 수 → 목  : 평평
@@ -625,6 +629,70 @@ class PatternTest {
             listOf("37 PP", "42 PP", "37 PH", "42 PH", "50 HH", "46 HP", "50 HP").sorted(),
             added.sorted(),
         )
+    }
+
+    /**
+     * **편승 창 상한이 23분이다** (v1.6.75 — 사용자: *"23분까지 더 넓혀봐"*).
+     *
+     * 하한 10분·"가장 늦은 편"·"그 5분 전"은 **그대로**고 상한만 21 → 23으로 넓혔다.
+     * 넓힌 목적은 v1.6.73이 켜다 만 **야간 후반 6조합**인데, 전수 덤프로 재 보니
+     * **실제로 살아나는 건 둘뿐**이다(v1.6.73 노트의 "6조합이 살아난다"는 오기).
+     * 남은 넷은 뒤 열차가 하한 10분에 1~2분 모자라 걸린 것이라 상한을 넓혀도 안 산다.
+     *
+     * 이 테스트가 잠그는 것 셋:
+     *  ① 새로 켜진 두 조합의 값 (손계산 — 신도림 7:00 / 익일 평일표 6:37 = 23분 전 / 알람 6:32)
+     *  ② 상한이 정확히 23 — 전 조합에서 `신도림출발 − 편승출발`의 **최댓값이 23**이고
+     *     23인 것이 실재한다. 21로 되돌리면 ①이, 24 이상으로 넓히면 여기가 깨진다.
+     *  ③ 여전히 안 켜지는 넷 — "고쳤다"고 착각해 근거 없이 켜지 않도록 사유째 고정한다.
+     */
+    @Test fun widenedWindow_upper_bound_is_23() {
+        val pp = LocalDate.of(2026, 8, 19) // 수 → 목 : 평평 (익일 평일)
+        val ph = LocalDate.of(2026, 8, 21) // 금 → 토 : 평휴 (익일 휴일)
+        val hh = LocalDate.of(2026, 8, 22) // 토 → 일 : 휴휴 (익일 휴일)
+        val hp = LocalDate.of(2026, 8, 23) // 일 → 월 : 휴평 (익일 평일)
+        fun at(dia: String, d: LocalDate) = BundledTimetable.advise(DutyCode.parse(dia), d, second = true)
+
+        // ── ① v1.6.75에서 새로 켜진 둘. 후반 첫 열번이 둘 다 2038(영업 = 신도림 교대)이라
+        //      갈래 판정은 v1.6.30 신호 그대로고, 창만 넓혀서 탈 열차가 생겼다.
+        listOf("45" to pp, "42" to hp).forEach { (dia, d) ->
+            assertEquals("$dia / ${Bundled.comboOf(d)}", LocalTime.of(6, 32), at(dia, d).at)
+            assertTrue(at(dia, d).text, at(dia, d).text.contains("양천구청역 6:37 편승 (신도림 7:00 출발)"))
+            assertTrue("$dia 는 익일 예약", at(dia, d).nextDay)
+            assertTrue("$dia 는 출고가 아니다", !at(dia, d).depot)
+            // 고른 6:37은 익일(평일) 시각표에 실재하는 열차다
+            assertTrue("6:37이 평일표에 없다", 37 in BundledTimetable.ROWS.first { it.hour == 6 }.weekday)
+        }
+
+        // ── ② 상한 23분이 실제로 걸린다 — 전 조합에서 최대 간격이 23이고 23이 존재한다
+        val gap = Regex("양천구청역 (\\d+):(\\d+) 편승 \\(신도림 (\\d+):(\\d+) 출발\\)")
+        val gaps = mutableListOf<Int>()
+        listOf(pp, ph, hh, hp).forEach { d ->
+            (1..51).forEach { n ->
+                listOf(false, true).forEach { second ->
+                    val m = gap.find(BundledTimetable.advise(DutyCode.parse("$n"), d, second).text)
+                        ?: return@forEach
+                    val (bh, bm, sh, sm) = m.destructured.toList().map { it.toInt() }
+                    gaps += (sh * 60 + sm) - (bh * 60 + bm)
+                }
+            }
+        }
+        assertTrue("표본이 비었다", gaps.size > 100)
+        assertEquals("창 하한은 10분 그대로여야 한다", 10, gaps.min())
+        assertEquals("창 상한은 23분이어야 한다", 23, gaps.max())
+
+        // ── ③ 창을 넓혀도 안 켜지는 넷 — 뒤 열차가 하한 10분에 1~2분 모자라 걸린 것이라
+        //      상한을 넓혀도 안 산다. 근거 없이 켜지 말 것(틀린 시각이 최악이다).
+        listOf(
+            Triple("46", pp, "7:02"), // 앞 6:37 = 25분 전 / 뒤 6:54 = 8분 전
+            Triple("45", hp, "7:02"), // 〃
+            Triple("41", ph, "6:46"), // 앞 6:19 = 27분 전 / 뒤 6:37 = 9분 전 (휴일표)
+            Triple("36", hh, "6:46"), // 〃
+        ).forEach { (dia, d, start) ->
+            val a = at(dia, d)
+            assertNull("$dia / ${Bundled.comboOf(d)} 는 아직 켜지면 안 된다", a.at)
+            assertTrue(a.text, a.text.contains("신도림 $start 출발"))
+            assertTrue(a.text, a.text.contains("10~23분 전 구간에 없습니다"))
+        }
     }
 
     /**
@@ -912,7 +980,7 @@ class PatternTest {
 
         fun at(n: Int, date: LocalDate) = BundledTimetable.advise(DutyCode.parse("$n"), date, second = true)
 
-        // ── 손계산 대조 (신도림 출발 → 창 10~21분 전 마지막 편 → 그 5분 전) ──
+        // ── 손계산 대조 (신도림 출발 → 창 10~23분 전 마지막 편 → 그 5분 전) ──
         // 평일 12: 신도림 16:50 → 16:29~16:40 → 16:40 → 알람 16:35
         assertEquals(LocalTime.of(16, 35), at(12, weekday).at)
         // 평일 29: 신도림 19:10 → 18:49~19:00 → 19:00 → 알람 18:55
@@ -1062,7 +1130,7 @@ class PatternTest {
         val hp = LocalDate.of(2026, 8, 23) // 일 → 월 : 휴평
         fun at(dia: String, d: LocalDate) = BundledTimetable.advise(DutyCode.parse(dia), d, second = true)
 
-        // ── ① 편승 (신도림 교대) — 익일 시각표에서 신도림 출발 10~21분 전 마지막 편의 5분 전 ──
+        // ── ① 편승 (신도림 교대) — 익일 시각표에서 신도림 출발 10~23분 전 마지막 편의 5분 전 ──
         // 37 평평: 후반 6:48 신도림, 익일(목) 평일 → 창 6:27~6:38 → 6:37 → 알람 6:32
         assertEquals(LocalTime.of(6, 32), at("37", pp).at)
         assertTrue(at("37", pp).text, at("37", pp).text.contains("양천구청역 6:37 편승 (신도림 6:48 출발)"))
@@ -1137,7 +1205,11 @@ class PatternTest {
                 if (at("$n", date).at != null) on[date] = (on[date] ?: 0) + 1
             }
         }
-        assertEquals("본선 야간 후반 알람이 켜진 조합 수", listOf(10, 11, 11, 11), listOf(pp, ph, hh, hp).map { on[it] })
+        // v1.6.73은 10/11/11/11 = 43건이었다. v1.6.75에서 창 상한을 21 → 23분으로 넓혀
+        // **평평 45번**(+1)과 **휴평 42번**(+1) 둘만 켜졌다 → 11/11/11/12 = **45건**.
+        // 나머지 넷(평평 46·휴평 45·평휴 41·휴휴 36)은 그대로 꺼져 있다
+        // ([widenedWindow_upper_bound_is_23]이 사유째 잠근다).
+        assertEquals("본선 야간 후반 알람이 켜진 조합 수", listOf(11, 11, 11, 12), listOf(pp, ph, hh, hp).map { on[it] })
 
         // ── ⑥ "익일 시각표를 봐야 한다"는 규칙이 값으로 드러나지 않는 이유를 함께 잠근다 ──
         // 야간 후반이 쓰는 5~7시대 편승시각표는 평일·휴일이 **6:20↔6:19 한 편만** 다르다.
