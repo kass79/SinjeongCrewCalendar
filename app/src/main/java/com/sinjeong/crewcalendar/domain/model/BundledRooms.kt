@@ -67,8 +67,14 @@ object BundledRooms {
 
     /** 침실 한 칸. [wake]는 표기 그대로 `H:mm`. */
     data class Room(val no: Int, val wake: String) {
-        /** 상세시트 칩 문구 — `7호실 · 기상 4:50` */
-        val label: String get() = "${no}호실 · 기상 $wake"
+        /**
+         * 상세시트 칩 문구 — `7호실 기상 4:50`.
+         *
+         * v1.6.79에서 가운뎃점 `· `만 뺐다(칩 줄이 배율 1.5에서 접혀 메모칸이 밀린다는 사용자 지적).
+         * **`기상`은 남긴다** — `7호실 4:50`이면 그 시각이 기상인지 입실인지 알 수 없고,
+         * 이 칩엔 아이콘도 없다([R.drawable.ic_tt_room]의 채움색이 칩 바탕과 같아 13dp에서 뭉갠다).
+         */
+        val label: String get() = "${no}호실 기상 $wake"
     }
 
     /**

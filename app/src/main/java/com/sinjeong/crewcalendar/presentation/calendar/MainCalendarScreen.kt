@@ -1185,10 +1185,20 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     val on = booked != null
     val disabled = at == null || past
     val half = if (second) "후반" else "전반"
-    // 기지 출고 알람(v1.6.34)은 편승과 계산 규칙이 다르다 — 칩에도 "출고"를 적어 구분한다.
-    // 아이콘·색은 전반 민트 / 후반 라벤더 그대로 둔다(구분은 글자 하나면 충분하고, 색을 더 쪼개면
-    // 네 상태 색 표가 여덟 줄이 된다).
-    val tag = if (advice.depot) "$half 출고" else half
+    // **`전반`·`후반` 글자는 못 뺀다** (v1.6.79에서 다시 확인) — 두 아이콘은 [ic_deadhead_first]
+    // 주석 그대로 **형태가 완전히 같고 색만 다르다**(민트/라벤더). 색만으로 가르면 색각 이상에게는
+    // 두 칩이 구분되지 않는다. 아이콘을 새로 그리기 전까지 이 두 글자가 유일한 비색상 신호다.
+    //
+    // ⚠ v1.6.79에서 칩에서 뺀 것 셋 — 전부 **다른 비색상 신호나 다이얼로그로 옮겼지 없애지 않았다**
+    // (사용자: *"전반알람, 후반알람, 호실 기상시간 일자로 아이콘을 형성해주면 좋겠어..
+    //  그래야 밑에 메모 공간이 침투를 안받지"*. 배율 1.5에서 칩 줄이 접혀 메모가 밀렸다):
+    //   · `출고` → **다이얼로그**가 제목(`전반사업 기지 출고 알람`)과 본문(`신정기지 8:02 출고 · 알림 7:12`)
+    //     양쪽에 그대로 적는다. 편승/출고는 계산 규칙이 다르므로(v1.6.34) 사라지면 안 되는 정보다.
+    //   · `지남` → **취소선**(`TextDecoration.LineThrough`). 무채색 흐림은 `알람없음`과 겹치지만
+    //     취소선은 안 겹치고 색에 기대지도 않는다 — `알람없음`은 낱말 그대로 두어 둘이 갈린다.
+    //   · `예약` → **`✓`**. 채움(예약됨) 대 테두리(예약 가능)가 이미 명암 신호라 글자는 보조인데,
+    //     보조를 아예 없애지는 않고 한 글자로 줄였다.
+    // 최악 조합이 `전반 17:05 지남`+`후반 출고 5:02 지남`+`7호실 · 기상 4:50` = 39자 → 26자.
     // **칩 글자에는 "(익일)"을 안 붙인다** (v1.6.77. 사용자: *"알람, 과 침실은 한줄에 해줘야지..
     // 그러기 위해서는 익일 ← 이 텍스트는 빼도 돼"*). 야간 근무일엔 칩이 셋(전반·후반·침실)인데
     // 다섯 글자가 더 붙으면 줄이 접혀 침실 칩이 둘째 줄로 내려갔다.
@@ -1198,7 +1208,7 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     //   ① 칩을 누르면 뜨는 다이얼로그 **제목** `후반사업 편승 알람 (익일)`
     //   ② 그 **본문** `익일 8/29 아침 · 양천구청역 6:45 도착`
     // **예약은 이 다이얼로그를 거치지 않고는 못 한다** — 날짜를 오해한 채로 알람을 걸 길이 없다.
-    // 야간엔 침실 칩(`20호실 · 기상 5:40`)이 같은 줄에 있어 "자고 다음날 아침에 나간다"는
+    // 야간엔 침실 칩(`20호실 기상 5:40`)이 같은 줄에 있어 "자고 다음날 아침에 나간다"는
     // 맥락도 칩 줄 자체가 준다.
     //
     // ⚠ 상세시트 `후반사업 … (익일)` 줄은 **야간엔 안 뜬다**(v1.6.77 실측 — 행로표 그림이 그 자리를
@@ -1249,11 +1259,11 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
             Text(
                 when {
                     at == null -> "$half 알람없음"
-                    past -> "$tag ${hm(at)} 지남"
-                    on -> "$tag ${hm(at)} 예약"
-                    else -> "$tag ${hm(at)}"
+                    on -> "$half ${hm(at)} ✓"
+                    else -> "$half ${hm(at)}"
                 },
                 fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
+                textDecoration = if (past) TextDecoration.LineThrough else null,
             )
         }
     }
@@ -1303,7 +1313,7 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
 }
 
 /**
- * 침실 칩 — `7호실 · 기상 4:50` (v1.6.76). 야간 근무일에만, 편승 알람 칩과 **같은 줄**에 붙는다.
+ * 침실 칩 — `7호실 기상 4:50` (v1.6.76 · 가운뎃점은 v1.6.79에서 뺐다). 야간 근무일에만, 편승 알람 칩과 **같은 줄**에 붙는다.
  *
  * 값은 [BundledRooms] (침실배정표 2023.10.04. `신정` 칸). 표에 없는 다이아면 호출부가
  * 아예 안 그린다 — **잘못된 호실을 보여주는 것이 최악**이다.
@@ -1556,10 +1566,14 @@ internal fun DutyPickerSheet(
                     color = if (ahead) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                DutySequenceGrid(pattern.sequence, currentIndex) { i -> onPick(group, i) }
+                DutySequenceGrid(pattern.sequence, currentIndex, postNight = true) { i -> onPick(group, i) }
                 Text(
+                    // v1.6.79 — 비번을 목록에 되살리면서(`44~`) 종전 안내문
+                    // *"비번(~)은 목록에 없습니다 — 야간 다이아를 고르면 다음날 자동으로 붙습니다"*가
+                    // **틀린 말이 됐다.** 지우고 새 표기 읽는 법으로 바꿨다.
+                    // ⚠ 이 `Text`는 마크다운을 안 읽는다 — 백틱·별표를 쓰면 글자 그대로 보인다.
                     "※ 언제든 다시 선택 가능 — 근무가 밀렸을 때 그 날짜 기준으로 다시 찍으면 됩니다.\n" +
-                        "※ 비번(~)은 목록에 없습니다 — 야간 다이아를 고르면 다음날 자동으로 붙습니다.",
+                        "※ 44~ 는 44 야간 다음날 비번입니다. 달력에는 ~ 로만 표시됩니다.",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -1655,11 +1669,25 @@ private fun ApplyFromRow(
  * 칸은 **다이아 번호순으로 보여주되**(v1.6.35 — 교번 순환 그대로면 번호가 뒤죽박죽이라 못 찾는다),
  * 각 칸이 들고 다니는 인덱스는 **원래 시퀀스 인덱스** 그대로다. `onPick`으로 나가는 값이
  * 곧 `Pattern.offsetFor`의 입력이라 여기서 인덱스를 바꾸면 근무표가 통째로 어긋난다.
+ *
+ * [postNight] — 익일 비번(`44~`) 칸을 넣을지. **근무선택 2단계만 true**다.
+ * 충당 계열은 "비번을 대신 뛴다"가 성립하지 않는다([DutyCode.displayOrder] 주석).
  */
 @Composable
-private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: (Int) -> Unit) {
+private fun DutySequenceGrid(
+    sequence: List<String>,
+    currentIndex: Int,
+    postNight: Boolean = false,
+    onPick: (Int) -> Unit,
+) {
     val duty = LocalDutyColors.current
-    val order = remember(sequence) { DutyCode.displayOrder(sequence) }
+    val order = remember(sequence, postNight) { DutyCode.displayOrder(sequence, postNight) }
+    // 글자 자동 축소 — v1.6.79에서 비번 칸(`대11~` 5글자)이 **360dp · 배율 1.5에서 `대`로 잘렸다**
+    // (칸 폭 약 49dp에 18sp 다섯 글자). 달력 칩·요약 카드와 같은 방식으로 줄인다.
+    // ⚠ 크기 상태는 **격자 전체가 하나를 공유**한다 — 칸마다 따로 줄이면 글자 크기가 들쭉날쭉해져
+    // v1.6.49·50이 거부당한 그 지적("크기가 다르다")이 그대로 재현된다.
+    val base = MaterialTheme.typography.labelMedium.fontSize
+    var fit by remember(sequence, postNight, base) { mutableStateOf(base) }
     LazyVerticalGrid(
         columns = GridCells.Fixed(6),
         verticalArrangement = Arrangement.spacedBy(5.dp),
@@ -1677,12 +1705,15 @@ private fun DutySequenceGrid(sequence: List<String>, currentIndex: Int, onPick: 
                 border = if (i == currentIndex) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
             ) {
                 Text(
-                    code.display,
+                    // 익일 비번은 `44~`로 **어느 야간의 비번인지** 보인다(v1.6.79).
+                    // 달력 칸은 그대로 `~` 한 글자다 — [DutyCode.pickerLabel] 주석 참고.
+                    code.pickerLabel,
                     modifier = Modifier.padding(vertical = 8.dp).fillMaxWidth(),
                     textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.labelMedium,
+                    fontSize = fit, lineHeight = fit * 1.28,
                     fontWeight = FontWeight.ExtraBold,
-                    maxLines = 1,
+                    maxLines = 1, softWrap = false,
+                    onTextLayout = { if (it.hasVisualOverflow && fit > 7.sp) fit *= 0.92f },
                 )
             }
         }

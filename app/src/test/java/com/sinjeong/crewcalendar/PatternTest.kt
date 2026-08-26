@@ -545,7 +545,8 @@ class PatternTest {
      * 이제 "편승 창이 비어 알람 없음"인 야간 **전반** 조합은 **0건**이다.
      *
      * ⚠ 여기 적힌 21분은 **이 7조합이 살아난 시점의 값**이고 현재 창은 아니다 —
-     * v1.6.75에서 23분, v1.6.78에서 **10~24분**으로 넓혔다([widenedWindow_upper_bound_is_24]).
+     * v1.6.75에서 23분, v1.6.78에서 24분, v1.6.79에서 **10~27분**으로 넓혔다
+     * ([widenedWindow_upper_bound_is_27]).
      * 이 7조합의 고른 열차는 그때도 한 건도 안 바뀌었다(창을 넓히면 `maxOrNull`이 같은 편을 고른다).
      */
     @Test fun widenedWindow_revives_all_seven_night_combos() {
@@ -633,22 +634,23 @@ class PatternTest {
     }
 
     /**
-     * **편승 창 상한이 24분이다** (v1.6.78 — 사용자: *"5시 36분 편승이니까 ..5시31분 알람"*).
+     * **편승 창 상한이 27분이다** (v1.6.79 사용자 확정 — 앞 열차를 고른다).
      *
-     * 하한 10분·"가장 늦은 편"·"그 5분 전"은 **그대로**고 상한만 21 → 23(v1.6.75) → **24**로 넓혔다.
-     * 24로 살아나는 건 후반 **신도림 6:00**인 둘(`39 평평`·`37 휴평`)이다 — 양천구청 5:52는
-     * 8분 전이라 하한에 걸리고, 그 앞 **5:36이 24분 전**이라 23분 창에서 한 끗 차이로 잘려 있었다.
-     * 남은 넷은 뒤 열차가 하한 10분에 1~2분 모자라 걸린 것이라 상한을 넓혀도 안 산다.
+     * 하한 10분·"가장 늦은 편"·"그 5분 전"은 **그대로**고 상한만
+     * 21 → 23(v1.6.75) → 24(v1.6.78) → **27**(v1.6.79)로 넓혔다.
+     * 27로 살아나는 마지막 넷의 값은 [lastFourCells_use_the_front_train_userConfirmed]가 잠근다.
      *
      * 이 테스트가 잠그는 것 셋:
      *  ① v1.6.75에서 켜진 둘의 값 (신도림 7:00 / 익일 평일표 6:37 = 23분 전 / 알람 6:32) —
-     *     창을 24로 넓혀도 **안 바뀐다**(`maxOrNull`이 같은 편을 고른다)
-     *  ② 상한이 정확히 24 — 전 조합에서 `신도림출발 − 편승출발`의 **최댓값이 24**이고
-     *     24인 것이 실재한다(사용자 확정 5:36 → 6:00). 23으로 되돌리면 그 둘이,
-     *     25 이상으로 넓히면 여기가 깨진다.
-     *  ③ 여전히 안 켜지는 넷 — "고쳤다"고 착각해 근거 없이 켜지 않도록 사유째 고정한다.
+     *     창을 24로도 27로도 넓혔지만 **안 바뀐다**(`maxOrNull`이 같은 편을 고른다)
+     *  ①-2 v1.6.78에서 켜진 둘의 값 (신도림 6:00 / 5:36 = 24분 전 / 알람 5:31) — 마찬가지로 무변동
+     *  ② 상한이 정확히 27 — 전 조합에서 `신도림출발 − 편승출발`의 **최댓값이 27**이고
+     *     27인 것이 실재한다(사용자 확정 6:19 → 6:46). 26 이하로 되돌리면 넷이,
+     *     28 이상으로 넓히면 여기가 깨진다.
+     *  ③ **하한 10분은 그대로다** — 사용자가 뒤 열차(8~9분 전)를 거부하고 앞 열차를 골랐다.
+     *     하한을 9로 낮추면 넷이 뒤 열차로 옮겨가 ③과 위 두 테스트가 함께 깨진다.
      */
-    @Test fun widenedWindow_upper_bound_is_24() {
+    @Test fun widenedWindow_upper_bound_is_27() {
         val pp = LocalDate.of(2026, 8, 19) // 수 → 목 : 평평 (익일 평일)
         val ph = LocalDate.of(2026, 8, 21) // 금 → 토 : 평휴 (익일 휴일)
         val hh = LocalDate.of(2026, 8, 22) // 토 → 일 : 휴휴 (익일 휴일)
@@ -679,7 +681,7 @@ class PatternTest {
             assertTrue("5:52도 실재한다", 52 in BundledTimetable.ROWS.first { it.hour == 5 }.weekday)
         }
 
-        // ── ② 상한 24분이 실제로 걸린다 — 전 조합에서 최대 간격이 24이고 24가 존재한다
+        // ── ② 상한 27분이 실제로 걸린다 — 전 조합에서 최대 간격이 27이고 27이 존재한다
         val gap = Regex("양천구청역 (\\d+):(\\d+) 편승 \\(신도림 (\\d+):(\\d+) 출발\\)")
         val gaps = mutableListOf<Int>()
         listOf(pp, ph, hh, hp).forEach { d ->
@@ -694,20 +696,78 @@ class PatternTest {
         }
         assertTrue("표본이 비었다", gaps.size > 100)
         assertEquals("창 하한은 10분 그대로여야 한다", 10, gaps.min())
-        assertEquals("창 상한은 24분이어야 한다", 24, gaps.max())
+        assertEquals("창 상한은 27분이어야 한다", 27, gaps.max())
 
-        // ── ③ 창을 넓혀도 안 켜지는 넷 — 뒤 열차가 하한 10분에 1~2분 모자라 걸린 것이라
-        //      상한을 넓혀도 안 산다. 근거 없이 켜지 말 것(틀린 시각이 최악이다).
+        // ── ③ 하한 10분이 그대로다 — 사용자가 거부한 뒤 열차(8·9분 전)가 한 건도 안 뽑혀야 한다.
+        //      9로 낮추면 최소 간격이 9가 돼 여기서 깨진다.
+        assertTrue("하한 미만(<10분)이 뽑혔다 — 하한 10을 건드렸다", gaps.none { it < 10 })
+
+        // 창이 비어 알람이 없는 칸은 이제 전반·후반 통틀어 0건이다
+        listOf(pp, ph, hh, hp).forEach { d ->
+            (1..51).forEach { n ->
+                listOf(false, true).forEach { second ->
+                    val t = BundledTimetable.advise(DutyCode.parse("$n"), d, second).text
+                    assertTrue("$n / ${Bundled.comboOf(d)} / $second : $t", !t.contains("구간에 없습니다"))
+                }
+            }
+        }
+    }
+
+    /**
+     * **마지막 4칸은 앞 열차를 탄다 — 사용자 확정값** (v1.6.79).
+     *
+     * v1.6.78이 넷을 켜지 않고 남기며 *"앞 열차(25~27분 전)냐 뒤 열차(8~9분 전)냐"* 를 물었고,
+     * 사용자가 **앞 열차**로 답했다. 원문:
+     * *"평평 46은, 휴평45는 6시37분 편승이니 6시32분 알람이지 /
+     *   평휴 41.휴휴36 은, 6시19분 차니까 6시14분 알람이지"*
+     *
+     * | 조합 | 신도림 | 편승 | 알람 | 출고 대비 | 거부된 뒤 열차 |
+     * |---|---|---|---|---|---|
+     * | `46 평평` · `45 휴평` | 7:02 | 6:37 | **6:32** | 25분 전 | 6:54 = 8분 전 |
+     * | `41 평휴` · `36 휴휴` | 6:46 | 6:19 | **6:14** | 27분 전 | 6:37 = 9분 전 |
+     *
+     * ⚠ **하한을 9분으로 낮추면 넷이 뒤 열차로 옮겨가 이 테스트가 깨진다 — 그게 목적이다.**
+     * 신도림 대기가 22분이라 "길다"는 이유로 되돌리고 싶어지지만, 사용자가 알고 감수한 값이다.
+     */
+    @Test fun lastFourCells_use_the_front_train_userConfirmed() {
+        val pp = LocalDate.of(2026, 8, 19) // 수 → 목 : 평평 (익일 평일)
+        val ph = LocalDate.of(2026, 8, 21) // 금 → 토 : 평휴 (익일 휴일)
+        val hh = LocalDate.of(2026, 8, 22) // 토 → 일 : 휴휴 (익일 휴일)
+        val hp = LocalDate.of(2026, 8, 23) // 일 → 월 : 휴평 (익일 평일)
+
+        // 다이아, 날짜, 신도림 출발, 편승(앞 열차), 알람, 익일 표가 휴일인가, 거부된 뒤 열차(분 전)
         listOf(
-            Triple("46", pp, "7:02"), // 앞 6:37 = 25분 전 / 뒤 6:54 = 8분 전
-            Triple("45", hp, "7:02"), // 〃
-            Triple("41", ph, "6:46"), // 앞 6:19 = 27분 전 / 뒤 6:37 = 9분 전 (휴일표)
-            Triple("36", hh, "6:46"), // 〃
-        ).forEach { (dia, d, start) ->
-            val a = at(dia, d)
-            assertNull("$dia / ${Bundled.comboOf(d)} 는 아직 켜지면 안 된다", a.at)
-            assertTrue(a.text, a.text.contains("신도림 $start 출발"))
-            assertTrue(a.text, a.text.contains("10~24분 전 구간에 없습니다"))
+            listOf("46", pp, "7:02", "6:37", "6:32", false, "6:54", 8),
+            listOf("45", hp, "7:02", "6:37", "6:32", false, "6:54", 8),
+            listOf("41", ph, "6:46", "6:19", "6:14", true, "6:37", 9),
+            listOf("36", hh, "6:46", "6:19", "6:14", true, "6:37", 9),
+        ).forEach { row ->
+            val dia = row[0] as String
+            val d = row[1] as LocalDate
+            val (start, board, alarm) = Triple(row[2] as String, row[3] as String, row[4] as String)
+            val holidayTable = row[5] as Boolean
+            val rear = row[6] as String
+            val rearGap = row[7] as Int
+            val tag = "$dia / ${Bundled.comboOf(d)}"
+            val a = BundledTimetable.advise(DutyCode.parse(dia), d, second = true)
+
+            fun t(s: String) = s.split(':').let { LocalTime.of(it[0].toInt(), it[1].toInt()) }
+            assertEquals(tag, t(alarm), a.at)
+            assertEquals(tag, "양천구청역 $board 편승 (신도림 $start 출발) · 알림 $alarm", a.text)
+            assertTrue("$tag 는 익일 예약", a.nextDay)
+            assertTrue("$tag 는 출고가 아니다", !a.depot)
+
+            // 고른 앞 열차·거부한 뒤 열차 둘 다 익일 시각표에 실재한다
+            val hour = BundledTimetable.ROWS.first { it.hour == 6 }
+            val table = if (holidayTable) hour.holiday else hour.weekday
+            assertTrue("$tag: 편승 $board 이 익일 표에 없다", t(board).minute in table)
+            assertTrue("$tag: 뒤 열차 $rear 가 익일 표에 없다", t(rear).minute in table)
+            // 뒤 열차는 하한 10분에 1~2분 모자라 창 밖이다 — 사용자가 이쪽을 거부했다
+            assertEquals(
+                "$tag: 뒤 열차는 ${rearGap}분 전이어야 한다",
+                rearGap.toLong(), java.time.Duration.between(t(rear), t(start)).toMinutes(),
+            )
+            assertTrue("$tag: 뒤 열차가 하한 10분 안이면 그쪽이 뽑힌다", rearGap < 10)
         }
     }
 
@@ -1057,7 +1117,7 @@ class PatternTest {
 
         fun at(n: Int, date: LocalDate) = BundledTimetable.advise(DutyCode.parse("$n"), date, second = true)
 
-        // ── 손계산 대조 (신도림 출발 → 창 10~24분 전 마지막 편 → 그 5분 전) ──
+        // ── 손계산 대조 (신도림 출발 → 창 10~27분 전 마지막 편 → 그 5분 전) ──
         // 평일 12: 신도림 16:50 → 16:29~16:40 → 16:40 → 알람 16:35
         assertEquals(LocalTime.of(16, 35), at(12, weekday).at)
         // 평일 29: 신도림 19:10 → 18:49~19:00 → 19:00 → 알람 18:55
@@ -1207,7 +1267,7 @@ class PatternTest {
         val hp = LocalDate.of(2026, 8, 23) // 일 → 월 : 휴평
         fun at(dia: String, d: LocalDate) = BundledTimetable.advise(DutyCode.parse(dia), d, second = true)
 
-        // ── ① 편승 (신도림 교대) — 익일 시각표에서 신도림 출발 10~24분 전 마지막 편의 5분 전 ──
+        // ── ① 편승 (신도림 교대) — 익일 시각표에서 신도림 출발 10~27분 전 마지막 편의 5분 전 ──
         // 37 평평: 후반 6:48 신도림, 익일(목) 평일 → 창 6:27~6:38 → 6:37 → 알람 6:32
         assertEquals(LocalTime.of(6, 32), at("37", pp).at)
         assertTrue(at("37", pp).text, at("37", pp).text.contains("양천구청역 6:37 편승 (신도림 6:48 출발)"))
@@ -1283,10 +1343,11 @@ class PatternTest {
         }
         // v1.6.73은 10/11/11/11 = 43건, v1.6.75에서 창 23분으로 +2 = 11/11/11/12 = 45건.
         // v1.6.78에서 **설명 텍스트 뒤의 열번을 읽어** 7칸(평평 33·35·39 / 평휴 35·36·40 / 휴평 33),
-        // **창 24분**으로 1칸(휴평 37)이 더 켜졌다 → 14/14/11/14 = **53건**.
-        // 남은 넷(평평 46·휴평 45·평휴 41·휴휴 36)은 뒤 열차가 하한 10분에 1~2분 모자라 여전히 꺼져 있다
-        // ([widenedWindow_upper_bound_is_24]가 사유째 잠근다).
-        assertEquals("본선 야간 후반 알람이 켜진 조합 수", listOf(14, 14, 11, 14), listOf(pp, ph, hh, hp).map { on[it] })
+        // **창 24분**으로 1칸(휴평 37)이 더 켜졌다 → 14/14/11/14 = 53건.
+        // v1.6.79에서 **창 27분**으로 마지막 넷(평평 46·휴평 45·평휴 41·휴휴 36)이 켜져
+        // → 15/15/12/15 = **57건**([lastFourCells_use_the_front_train_userConfirmed]가 값을 잠근다).
+        // 이제 "편승 창이 비어 알람 없음"인 칸은 전반·후반 통틀어 **0건**이다.
+        assertEquals("본선 야간 후반 알람이 켜진 조합 수", listOf(15, 15, 12, 15), listOf(pp, ph, hh, hp).map { on[it] })
 
         // ── ⑥ "익일 시각표를 봐야 한다"는 규칙이 값으로 드러나지 않는 이유를 함께 잠근다 ──
         // 야간 후반이 쓰는 5~7시대 편승시각표는 평일·휴일이 **6:20↔6:19 한 편만** 다르다.
@@ -1344,16 +1405,22 @@ class PatternTest {
         var cells = 0
 
         listOf(Bundled.MAIN_PATTERN, Bundled.BRANCH_PATTERN).forEach { p ->
-            val order = DutyCode.displayOrder(p.sequence)
+            val order = DutyCode.displayOrder(p.sequence, postNight = true)
             val shown = order.toSet()
-            // 겹친 칸 없이, 빠진 칸은 **익일 비번뿐** (v1.6.36에서 그리드에서 뺐다)
+            // v1.6.79 — 근무선택 2단계는 겹친 칸도 **빠진 칸도 없다.** 익일 비번은 v1.6.36에서
+            // 뺐다가 `44~` 표기가 생겨 되살렸다([DutyCode.pickerLabel]).
             assertEquals(p.name, order.size, shown.size)
+            assertEquals(p.name, emptyList<Int>(), (p.sequence.indices - shown).sorted())
+            // 격자 글자는 한 칸도 `~` 한 글자가 아니다 — 비번은 전부 `<야간>~`꼴이다
+            assertTrue(p.name, order.none { DutyCode.parse(p.sequence[it]).pickerLabel == "~" })
+            // **충당 계열 격자는 종전 그대로 비번을 뺀다** — `비번을 대신 뛴다`가 성립하지 않고
+            // 동료 탭 라벨 폭(`DutyMatrix.UNIFORM_UNITS`)도 넘긴다
+            val fillOrder = DutyCode.displayOrder(p.sequence)
             assertEquals(
                 p.name,
                 p.sequence.indices.filter { DutyCode.parse(p.sequence[it]).type == DutyType.POST_NIGHT },
-                (p.sequence.indices - shown).sorted(),
+                (p.sequence.indices - fillOrder.toSet()).sorted(),
             )
-            assertTrue(p.name, order.none { DutyCode.parse(p.sequence[it]).display == "~" })
 
             // ★ 전수 대조는 **숨긴 칸까지 137칸 전부** 돈다 — 안 보인다고 offset이 달라지면 안 된다
             p.sequence.indices.forEach { i ->
@@ -1373,9 +1440,9 @@ class PatternTest {
                 }
             }
 
-            // 숨긴 비번의 offset은 **사라지지 않는다** — 전날 칸에서 짝 야간을 고르면 완전히 같다.
-            // "비번을 골라야만 되는 사람"이 없다는 근거이자, 숨김을 되돌릴지 판단하는 기준.
-            (p.sequence.indices - shown).forEach { i ->
+            // 비번을 **직접 고른 결과 = 전날 짝 야간을 고른 결과**. v1.6.36~78엔 이게
+            // "숨겨도 되는 근거"였고 v1.6.79부터는 "되살려도 안 어긋난다는 근거"다.
+            p.sequence.indices.filter { DutyCode.parse(p.sequence[it]).type == DutyType.POST_NIGHT }.forEach { i ->
                 val night = p.sequence[Math.floorMod(i - 1, p.length)]
                 assertEquals("${p.sequence[i]} 짝", p.sequence[i], "${night}비")
                 val viaNight = p.offsetFor(pick.minusDays(1), p.sequence.indexOf(night))
@@ -1385,24 +1452,63 @@ class PatternTest {
         }
         assertEquals(137, cells)                      // 본선 108 + 지선 29
 
-        // 사용자 요구 순서 그대로인지 — 주간 1~29 → 야간 33~51 → 대기 → 운휴 (비번 없음)
-        val main = DutyCode.displayOrder(Bundled.MAIN_PATTERN.sequence).map { Bundled.MAIN_PATTERN.sequence[it] }
-        assertEquals(86, main.size)                   // 108 − 비번 22
+        // 사용자 요구 순서 그대로인지 — 주간 1~29 → 야간 33~51(각 뒤에 그 비번) → 대기 → 운휴
+        val main = DutyCode.displayOrder(Bundled.MAIN_PATTERN.sequence, postNight = true)
+            .map { Bundled.MAIN_PATTERN.sequence[it] }
+        assertEquals(108, main.size)                  // v1.6.79 — 비번 22칸이 돌아와 전건
         assertEquals((1..29).map { "$it" }, main.take(29))
-        assertEquals((33..51).map { "$it" }, main.subList(29, 48))
+        assertEquals((33..51).flatMap { listOf("$it", "${it}비") }, main.subList(29, 67))
         assertEquals(
-            listOf("대1", "대2", "대3", "대4", "대5", "대6", "대11", "대12", "대13"),
-            main.subList(48, 57),
+            listOf("대1", "대2", "대3", "대4", "대5", "대6", "대11", "대11비", "대12", "대12비", "대13", "대13비"),
+            main.subList(67, 79),
         )
-        assertEquals((1..29).map { "휴$it" }, main.drop(57))
+        assertEquals((1..29).map { "휴$it" }, main.drop(79))
 
-        // 지선: 지1~지8 → 지10~지14 → 지대 → 지휴
-        val br = DutyCode.displayOrder(Bundled.BRANCH_PATTERN.sequence).map { Bundled.BRANCH_PATTERN.sequence[it] }
-        assertEquals(23, br.size)                     // 29 − 비번 6
+        // 지선: 지1~지8 → 지10~지14(각 뒤에 그 비번) → 지대 → 지휴
+        val br = DutyCode.displayOrder(Bundled.BRANCH_PATTERN.sequence, postNight = true)
+            .map { Bundled.BRANCH_PATTERN.sequence[it] }
+        assertEquals(29, br.size)
         assertEquals((1..8).map { "지$it" }, br.take(8))
-        assertEquals((10..14).map { "지$it" }, br.subList(8, 13))
-        assertEquals(listOf("지대1", "지대2", "지대11"), br.subList(13, 16))
-        assertEquals((1..7).map { "지휴$it" }, br.drop(16))
+        assertEquals((10..14).flatMap { listOf("지$it", "지${it}비") }, br.subList(8, 18))
+        assertEquals(listOf("지대1", "지대2", "지대11", "지대11비"), br.subList(18, 22))
+        assertEquals((1..7).map { "지휴$it" }, br.drop(22))
+    }
+
+    /**
+     * **근무선택 격자에서만 비번에 번호를 붙인다** (v1.6.79 — 사용자: *"평평 44 다이아라면 그 다음날은 44~"*).
+     *
+     * v1.6.36이 비번을 목록에서 뺀 진짜 이유는 *"[DutyCode.display]가 전부 `~` 한 글자라 어느
+     * 야간의 비번인지 보이지도 않는다"*였다. [DutyCode.pickerLabel]이 그 전제를 없애 되살렸다.
+     *
+     * 이 테스트가 잠그는 것 둘:
+     *  ① 격자 글자만 `44~`이고 **[DutyCode.display]는 여전히 `~` 한 글자** —
+     *     달력 칸·동료근무·공유 이미지가 좁아 그렇게 정한 값이다. 여기가 깨지면 달력이 넓어진다.
+     *  ② 저장값([DutyCode.raw])·타입([DutyType.POST_NIGHT])은 **한 글자도 안 바뀐다**.
+     */
+    @Test fun postNightShowsItsDiaNumberInThePickerOnly() {
+        listOf(
+            // 저장값, 격자 글자, 달력 글자
+            Triple("44비", "44~", "~"),      // 본선 야간
+            Triple("33비", "33~", "~"),
+            Triple("51비", "51~", "~"),
+            Triple("대11비", "대11~", "~"),   // 본선 야간대기
+            Triple("지11비", "11~", "~"),     // 지선 야간 — 격자도 야간이 `11`이라 `11~`
+            Triple("지14비", "14~", "~"),
+            Triple("지대11비", "지대11~", "~"), // 지선 야간대기 — `지대`는 본선 `대`와 겹쳐 안 뗀다
+        ).forEach { (raw, picker, cell) ->
+            val c = DutyCode.parse(raw)
+            assertEquals("$raw 타입", DutyType.POST_NIGHT, c.type)
+            assertEquals("$raw 저장값", raw, c.raw)
+            assertEquals("$raw 격자", picker, c.pickerLabel)
+            assertEquals("$raw 달력", cell, c.display)
+        }
+        // 비번이 아닌 근무는 격자 글자 = 달력 글자 그대로 (전 시퀀스 전수)
+        listOf(Bundled.MAIN_PATTERN, Bundled.BRANCH_PATTERN).forEach { p ->
+            p.sequence.map { DutyCode.parse(it) }.filter { it.type != DutyType.POST_NIGHT }
+                .forEach { assertEquals(it.raw, it.display, it.pickerLabel) }
+        }
+        // 낱말 코드 `비번`(근무변경 저장값)은 번호가 없으니 그대로 `~`
+        assertEquals("~", DutyCode.parse("비번").pickerLabel)
     }
 
     /**
@@ -1847,22 +1953,22 @@ class PatternTest {
      */
     @Test fun bedrooms_match_the_2023_sheet() {
         fun at(c: NightCombo, dia: String) = BundledRooms.of(c, dia)?.label
-        assertEquals("7호실 · 기상 4:50", at(NightCombo.PP, "33"))
-        assertEquals("30호실 · 기상 6:30", at(NightCombo.PP, "44"))
-        assertEquals("13호실 · 기상 5:00", at(NightCombo.PH, "35"))
-        assertEquals("37호실 · 기상 6:40", at(NightCombo.PH, "47"))
-        assertEquals("6호실 · 기상 4:40", at(NightCombo.HP, "35"))
-        assertEquals("32호실 · 기상 6:30", at(NightCombo.HP, "47"))
-        assertEquals("4호실 · 기상 4:30", at(NightCombo.HH, "38"))
-        assertEquals("20호실 · 기상 5:50", at(NightCombo.HH, "43"))
+        assertEquals("7호실 기상 4:50", at(NightCombo.PP, "33"))
+        assertEquals("30호실 기상 6:30", at(NightCombo.PP, "44"))
+        assertEquals("13호실 기상 5:00", at(NightCombo.PH, "35"))
+        assertEquals("37호실 기상 6:40", at(NightCombo.PH, "47"))
+        assertEquals("6호실 기상 4:40", at(NightCombo.HP, "35"))
+        assertEquals("32호실 기상 6:30", at(NightCombo.HP, "47"))
+        assertEquals("4호실 기상 4:30", at(NightCombo.HH, "38"))
+        assertEquals("20호실 기상 5:50", at(NightCombo.HH, "43"))
         // 지선 — 지10·지11은 늘 1호실, 지13·지14는 조합마다 한 호실을 같이 쓴다
         for (c in NightCombo.entries) {
-            assertEquals("1호실 · 기상 4:10", at(c, "지10"))
+            assertEquals("1호실 기상 4:10", at(c, "지10"))
             assertEquals(at(c, "지10"), at(c, "지11"))
             assertEquals(at(c, "지13"), at(c, "지14"))
         }
-        assertEquals("27호실 · 기상 6:10", at(NightCombo.PP, "지13"))
-        assertEquals("21호실 · 기상 5:40", at(NightCombo.PH, "지12"))
+        assertEquals("27호실 기상 6:10", at(NightCombo.PP, "지13"))
+        assertEquals("21호실 기상 5:40", at(NightCombo.PH, "지12"))
     }
 
     /**
