@@ -979,9 +979,15 @@ dumpsys window:  Requested w=1969 h=2185   <->   frame=[0,124][1968,2094]
 
 | 파일 | 자리 |
 |---|---|
-| `MainCalendarScreen.kt` | 근무선택 1단계 소속 카드 · 2단계 헤더(`근무선택 2/2 · 본선 기관사`) · 사업소 안내 |
+| `MainCalendarScreen.kt` | 근무선택 1단계 소속 카드 · 2단계 헤더(`근무선택 2/2 · 본선 기관사`) · 사업소 안내(`SITE_GROUPS`) |
+| `MainCalendarViewModel.kt` | 패턴 변경 안내(`…부터 본선 기관사로 바뀝니다`) |
 | `AdminScreen.kt` | 관리자 명단(`사번 … · 본선 기관사 · 오늘 …`) · 소속 선택 |
+| `DutyMatrix.kt` | **동료 탭 안**의 사람 상세 시트 한 줄(`본선 기관사`, 4조2교대면 `4조2교대 운용 A`) |
 | `Bundled.kt` · `BundledRoster.kt` | `CrewGroup.label` 원본과 주석 |
+
+> `DutyMatrix.kt`만 **같은 동료 탭 안**이라 애매한데, 거기는 폭이 남는 한 줄짜리 설명이라
+> 줄일 이유가 없고 사용자가 지목한 것도 칩이다. 바꾸려면 `chipLabel`을 `MatesScreen` 밖으로
+> 빼서 같이 쓰면 된다(값은 그대로 화면 글자일 뿐, `CrewGroup`은 여전히 안 건드린다).
 
 #### 글자 크기는 **15dp 그대로 뒀다** (키울 수 있는지 계산한 결과)
 
