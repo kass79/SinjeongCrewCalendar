@@ -7,8 +7,10 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -53,9 +55,18 @@ import androidx.compose.ui.window.DialogProperties
  * v1.6.9에서 넣은 세로화면 자동 90도 회전은 **v1.6.16에서 기본 꺼짐**으로 바꿨다
  * (사용자: "세로로 하면 보기 불편해"). 기본은 원본 방향 + 화면 폭 맞춤이고,
  * 제목줄 오른쪽 회전 버튼으로 필요할 때만 돌린다. 가로형 이미지일 때만 버튼이 뜬다.
+ *
+ * @param header 제목 바로 아래 칸. 비워 두면 아무것도 안 그린다(행로표·시각표는 그대로).
+ *   침실배정표(v1.6.74)가 평평/평휴/휴휴/휴평 전환 칩을 여기에 끼운다 — 4종을 각각 다른
+ *   다이얼로그로 만드는 대신 `asset`만 갈아 끼우면 되도록.
  */
 @Composable
-fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
+fun RouteImageDialog(
+    asset: String,
+    title: String,
+    onDismiss: () -> Unit,
+    header: @Composable () -> Unit = {},
+) {
     val context = LocalContext.current
     val src = remember(asset) {
         runCatching {
@@ -106,11 +117,15 @@ fun RouteImageDialog(asset: String, title: String, onDismiss: () -> Unit) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Text(
-                    title,
-                    fontWeight = FontWeight.ExtraBold,
-                    modifier = Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 18.dp),
-                )
+                Column(
+                    Modifier.align(Alignment.TopStart).padding(start = 20.dp, top = 18.dp, end = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    // 제목만 오른쪽 버튼(회전·닫기) 자리를 비켜준다. 아래 header는 버튼보다 낮은 줄이라
+                    // 폭을 다 써도 된다 — 글자배율 1.5 · 360dp에서 칩 넉 장이 들어가려면 이 폭이 필요하다.
+                    Text(title, fontWeight = FontWeight.ExtraBold, modifier = Modifier.padding(end = 84.dp))
+                    header()
+                }
                 Row(Modifier.align(Alignment.TopEnd).padding(6.dp)) {
                     // 가로형 표만 돌릴 값어치가 있다 — 세로형(근무시각표 등)은 버튼을 숨긴다
                     if (landscapeImage) IconButton(onClick = {

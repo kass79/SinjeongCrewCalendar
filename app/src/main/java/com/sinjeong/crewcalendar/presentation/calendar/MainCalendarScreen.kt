@@ -82,7 +82,7 @@ import java.util.Locale
  * 앱바: ‹월› · 휴N개 칩 · 근무선택 칩 · 테마 토글 · 오늘
  * 셀: 근무 칩 + 출근시각 + 메모 (근무변경 시 원래근무/새근무 2줄)
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainCalendarScreen(
     onOpenTimetable: () -> Unit = {},
@@ -100,6 +100,8 @@ fun MainCalendarScreen(
     val snackbar = remember { SnackbarHostState() }
     val context = LocalContext.current
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
+    // 침실배정표(v1.6.74) — 열려 있는 조합. null이면 닫힘. 처음엔 오늘 조합으로 열고 칩으로 갈아탄다.
+    var roomCombo by remember { mutableStateOf<NightCombo?>(null) }
     // 근무 저장 확인 대화상자가 걸린 날짜(길게 누른 날). ⚠ `rememberSaveable`은 이 파일에서
     // 초기값이 조용히 깨진다(CLAUDE.md) — `remember`를 쓴다(회전 시 대화상자는 닫힌다).
     var freezeAsk by remember { mutableStateOf<LocalDate?>(null) }
@@ -219,6 +221,7 @@ fun MainCalendarScreen(
                         onSwipeMonth = viewModel::moveMonth,
                         onOpenTimetable = { fullTimetable = "tt_work" to "근무시각표" },
                         onOpenDeadhead = { fullTimetable = "tt_deadhead" to "편승시각표" },
+                        onOpenRooms = { roomCombo = Bundled.comboOf(LocalDate.now()) },
                         frozenUntil = state.user?.frozenUntil,
                         onLongPress = { freezeAsk = it },
                         modifier = Modifier.weight(1f),
@@ -340,6 +343,32 @@ fun MainCalendarScreen(
 
     fullTimetable?.let { (asset, title) ->
         RouteImageDialog(asset = asset, title = title, onDismiss = { fullTimetable = null })
+    }
+
+    // 침실배정표 (v1.6.74) — 야간 근무자가 전반 사업을 마치고 잘 침실. 표는 당일·익일의
+    // 평일/휴일 조합에 따라 4종이라 `Bundled.comboOf(오늘)`로 열고, 칩으로 나머지 셋도 본다
+    // (달력 카드는 특정 날짜가 아니라 달 전체의 바로가기라 "다음 주 금요일 야간"도 미리 봐야 한다).
+    roomCombo?.let { combo ->
+        RouteImageDialog(
+            asset = "room_${combo.name.lowercase()}",
+            title = "침실배정표 [${combo.label}]",
+            onDismiss = { roomCombo = null },
+            header = {
+                // FlowRow — 글자배율을 키우면 칩 넉 장이 한 줄에 안 들어간다. Row면 잘리고 여긴 접힌다.
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    NightCombo.entries.forEach { c ->
+                        FilterChip(
+                            selected = c == combo,
+                            onClick = { roomCombo = c },
+                            label = { Text(c.label, fontWeight = FontWeight.Bold) },
+                        )
+                    }
+                }
+            },
+        )
     }
 
     // 근무 저장 (v1.6.69) — 길게 누른 날짜까지 확정
@@ -465,6 +494,7 @@ private fun CalendarGrid(
     onSwipeMonth: (Long) -> Unit,
     onOpenTimetable: () -> Unit,
     onOpenDeadhead: () -> Unit,
+    onOpenRooms: () -> Unit,
     /** 근무 저장(v1.6.69)으로 확정한 마지막 날. 이 날 이하 칸은 연녹색 바탕 */
     frozenUntil: LocalDate?,
     onLongPress: (LocalDate) -> Unit,
@@ -474,13 +504,21 @@ private fun CalendarGrid(
     val cells0: List<DaySchedule?> = List(leading) { null } + days
     val trailing = (7 - (cells0.size % 7)) % 7
     val cells: List<DaySchedule?> = cells0 + List(trailing) { null }
-    // 빈 칸(null) 처음 2개 = 근무시각표 / 편승시각표 카드.
-    // 세 번째 빈 칸의 날씨는 v1.6.59에서 헤더 칩(`WeatherChip`)으로 옮겼다 — 여기선 두 칸만 쓴다.
-    // ⚠ 카드는 **이미 비어 있는 칸을 채울 뿐** 자리를 예약하지 않는다(leading은 1일의 요일에서만 나온다).
-    //   그래서 세 번째를 뺐다고 1일 위치가 밀리지 않는다.
-    val nullIdx = cells.indices.filter { cells[it] == null }
-    val card1 = nullIdx.getOrNull(0)
-    val card2 = nullIdx.getOrNull(1)
+    // 빈 칸(null) 3개 = 근무시각표 / 편승시각표 / 침실배정표 카드.
+    // v1.6.59에서 날씨를 헤더 칩(`WeatherChip`)으로 옮겨 두 칸만 쓰다가, v1.6.74에 그 빈자리를
+    // 침실배정표가 받았다.
+    // ⚠ 카드는 **이미 비어 있는 칸을 채울 뿐** 자리를 예약하지 않는다(leading은 1일의 요일에서만
+    //   나온다). 그래서 카드를 늘리든 줄이든 1일이 앉는 요일 칸은 그대로다.
+    // 셋은 **한 덩어리로** 놓는다: 앞 빈칸(1일 앞)이 3개 이상이면 거기(첫 줄), 아니면 뒷 빈칸으로
+    // 통째로 옮긴다 — 2026년 9월처럼 앞이 2칸인 달에서 앞에 둘·뒤에 하나로 갈라지면 한 벌로 안 읽힌다.
+    // 어느 쪽도 3개가 안 되는 달(1일 화요일 + 31일 달 등)만 갈라지더라도 셋 다 보여주고,
+    // 빈 칸 자체가 모자라면 `getOrNull`이 남는 카드를 조용히 뺀다(2월 1일이 일요일인 해).
+    val lead = cells.indices.filter { cells[it] == null && it < leading }
+    val trail = cells.indices.filter { cells[it] == null && it >= leading }
+    val slots = listOf(lead, trail).firstOrNull { it.size >= 3 } ?: (lead + trail)
+    val card1 = slots.getOrNull(0)
+    val card2 = slots.getOrNull(1)
+    val card3 = slots.getOrNull(2)
     val duty = LocalDutyColors.current
     var dragX by remember { mutableFloatStateOf(0f) }
     val rows = (cells.size + 6) / 7
@@ -520,11 +558,12 @@ private fun CalendarGrid(
             items(cells.size, key = { it }) { i ->
                 val day = cells[i]
                 when (i) {
-                    // 두 카드는 **같은 바탕색**(v1.6.59 사용자 요청 "같은 바탕화면으로 해줘야지").
-                    // 나란히 붙어 있는 한 쌍이라 색이 갈리면 서로 다른 종류의 것처럼 읽힌다.
-                    // 구분은 아이콘(시계 vs 열차)과 글자가 맡는다.
+                    // 세 카드는 **같은 바탕색**(v1.6.59 사용자 요청 "같은 바탕화면으로 해줘야지").
+                    // 나란히 붙어 있는 한 벌이라 색이 갈리면 서로 다른 종류의 것처럼 읽힌다.
+                    // 구분은 아이콘(시계 vs 열차 vs 침대)과 글자가 맡는다.
                     card1 -> TimetableCard("근무시각표", R.drawable.ic_tt_work, onOpenTimetable, cellHeight, duty.main, duty.onMain)
                     card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.main, duty.onMain)
+                    card3 -> TimetableCard("침실배정표", R.drawable.ic_tt_room, onOpenRooms, cellHeight, duty.main, duty.onMain)
                     else -> if (day == null) Spacer(Modifier.height(cellHeight))
                     else DayCell(
                         day, isSelected = day.date == selected, height = cellHeight,
