@@ -203,19 +203,12 @@ private val CATEGORY_GRID: List<List<CrewGroup?>> = listOf(
 /**
  * 격자 칩 라벨 — `null`은 소속이 아니라 ★즐겨찾기 보기다.
  *
- * ⚠ **여기는 화면 글자일 뿐 데이터가 아니다.** v1.6.77에서 사용자가
- * *"동료탭에 본선기관사→ 기관사, 본선 차장→ 차장 으로 해줘!"* 라고 해서 이 두 칩만 줄였는데,
- * [CrewGroup]의 `label`·enum 이름·저장값은 **한 글자도 안 건드렸다.** 동료 저장 키가
- * `이름|enum이름`이라 데이터를 손대면 저장해 둔 동료가 통째로 유령이 된다(v1.6.60 사고).
- * 근무선택 소속 단계·관리자 화면은 `CrewGroup.label`을 그대로 써서 `본선 기관사`로 남는다 —
- * 거기선 지선·통상근무와 나란히 놓이는 자리라 `본선`이 붙는 편이 맞다.
+ * 소속 글자는 [CrewGroup.shortLabel]이 준다. v1.6.77엔 `기관사`/`차장` 매핑이 **여기 안에**
+ * 있었는데, v1.6.78에서 근무선택 화면도 같은 글자를 쓰게 되면서 enum 옆으로 옮겼다 —
+ * 같은 매핑이 두 군데 있으면 한쪽만 고쳐 어긋난다. 여기 남는 건 ★즐겨찾기 한 줄뿐이다.
+ * (`label`·enum 이름·저장값은 여전히 무변경 — [CrewGroup.shortLabel] 주석)
  */
-private fun chipLabel(g: CrewGroup?) = when (g) {
-    null -> "★즐겨찾기"
-    CrewGroup.MAIN_DRIVER -> "기관사"
-    CrewGroup.MAIN_CONDUCTOR -> "차장"
-    else -> g.label
-}
+private fun chipLabel(g: CrewGroup?) = g?.shortLabel ?: "★즐겨찾기"
 
 /**
  * 격자 **열 폭**은 그 열의 두 라벨 중 넓은 쪽이 정한다 — 두 행의 칸이 세로로 어긋나면 격자가 아니다.

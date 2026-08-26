@@ -1370,6 +1370,21 @@ private fun KvRow(key: String, value: String, sub: Boolean = false) {
  */
 private val SITE_GROUPS = listOf(CrewGroup.OFFICE_DAY, CrewGroup.SHIFT_4_2)
 
+/**
+ * 승무 3종을 **화면에 나열하는 순서** — 사용자 지정 `기관사 · 차장 · 신정지선`(v1.6.78).
+ *
+ * 원문: *"순서가 기관사, 차장, 신정지선, 통상근무/4조2교대 이게 좋지"*.
+ * 뒤 둘은 [SITE_GROUPS]가 이미 `통상근무 / 4조2교대` 순이라 그대로다.
+ * 이러면 동료 탭 칩 격자(`기관사 차장 ★ / 신정지선 통상근무 4조2교대`)와 읽는 순서가 같아진다.
+ *
+ * ⚠ **[CrewGroup] 선언 순서로 하지 않는 이유** — enum 순서(`ordinal`)는 화면용이 아니라
+ * 데이터 규칙이다. `BundledRoster.DUP_SUFFIX`가 동명이인의 `A`/`B`를 `ordinal`로 가르고
+ * (기관사 1 < 차장 2 → 기관사가 A), 동료 명단 정렬도 `group.ordinal`을 쓴다.
+ * 선언 순서를 건드리면 **저장된 동료의 표시 이름이 서로 바뀐다** — 그래서 표시 순서만 여기 둔다.
+ * (새 소속을 [CrewGroup]에 추가하면 여기에도 넣어야 근무선택에 나온다 — 5종은 2026-08 확정값)
+ */
+private val CREW_GROUPS = listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH)
+
 /* ── 근무선택 시트: ① 소속 → (사업소면 근무형태) → ② 근무 그리드 ───────────────
    관리자 화면(동료 대리등록)도 이 시트를 그대로 재사용한다 — patternOffset 계산 경로를 하나로 유지. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -1422,7 +1437,7 @@ internal fun DutyPickerSheet(
                 if (siteStep) TextButton(onClick = { siteStep = false }, contentPadding = PaddingValues(0.dp)) {
                     Text("‹ 소속 다시 선택")
                 }
-                val shown = if (siteStep) SITE_GROUPS else CrewGroup.entries.filter { it !in SITE_GROUPS }
+                val shown = if (siteStep) SITE_GROUPS else CREW_GROUPS
                 shown.forEach { g ->
                     val isCurrent = g == currentGroup
                     val pattern = Bundled.patternFor(g)
@@ -1433,7 +1448,7 @@ internal fun DutyPickerSheet(
                         else CardDefaults.outlinedCardBorder(),
                     ) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            Text(g.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                            Text(g.shortLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text(
                                 when (g) {
                                     CrewGroup.SHIFT_4_2 -> "운용조·기지관제 · 주간→야간→비번→휴무 · A~D조"
@@ -1455,12 +1470,12 @@ internal fun DutyPickerSheet(
                     ) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
                             Text(
-                                SITE_GROUPS.joinToString(" / ") { it.label },
+                                SITE_GROUPS.joinToString(" / ") { it.shortLabel },
                                 style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold,
                             )
                             Text(
                                 "사무실·지도과·관리과 · 운용조·기지관제(4조2교대)" +
-                                    if (isCurrent) " · 현재 ${currentGroup?.label}" else "",
+                                    if (isCurrent) " · 현재 ${currentGroup?.shortLabel}" else "",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -1473,7 +1488,7 @@ internal fun DutyPickerSheet(
                 val pattern = Bundled.patternFor(picker.group)
                 val days = ChronoUnit.DAYS.between(pattern.anchorDate, picker.date).toInt()
                 Text(
-                    "근무선택  2/2 · ${picker.group.label}",
+                    "근무선택  2/2 · ${picker.group.shortLabel}",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 근무형태 다시 선택") }
@@ -1525,7 +1540,7 @@ internal fun DutyPickerSheet(
                     Math.floorMod(days + currentOffset, pattern.length) else -1
 
                 Text(
-                    "근무선택  2/2 · ${group.label}",
+                    "근무선택  2/2 · ${group.shortLabel}",
                     style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
                 )
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("‹ 소속 다시 선택") }
@@ -1808,11 +1823,13 @@ private fun DutyChangeSheet(
             }
             val g = fillGroup
             if (g == null) {
-                // 사업소 근무형태(통상·4조2교대)는 다이아가 없어 뺀다 — 승무 3종만 대행 대상이다
-                CrewGroup.entries.filter { it !in SITE_GROUPS }.forEach { grp ->
+                // 사업소 근무형태(통상·4조2교대)는 다이아가 없어 뺀다 — 승무 3종만 대행 대상이다.
+                // 근무선택 1단계와 **같은 [CREW_GROUPS]**를 본다 — 같은 파일 안에서 소속 카드 줄이
+                // 둘로 갈리면 순서도 글자도 어긋난다(둘 다 `‹ 소속 다시 선택`으로 돌아오는 자리다).
+                CREW_GROUPS.forEach { grp ->
                     OutlinedCard(onClick = { fillGroup = grp }) {
                         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
-                            Text(grp.label, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
+                            Text(grp.shortLabel, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.ExtraBold)
                             Text("${Bundled.patternFor(grp).length}칸 교번 순환",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)

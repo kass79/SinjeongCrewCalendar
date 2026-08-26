@@ -31,7 +31,24 @@ enum class CrewGroup(val label: String, val role: CrewRole) {
     MAIN_CONDUCTOR("본선 차장", CrewRole.CONDUCTOR),
     /** 운용 + 기지관제 29명. 부서는 [teamBadge]가 이름으로 갈라 배지에만 붙인다(v1.6.60). */
     SHIFT_4_2("4조2교대", CrewRole.OPERATION),
-    OFFICE_DAY("통상근무", CrewRole.OFFICE_STAFF),
+    OFFICE_DAY("통상근무", CrewRole.OFFICE_STAFF);
+
+    /**
+     * 화면에 그리는 짧은 이름 — 동료 탭 칩과 근무선택 소속 카드가 **같이** 쓴다(v1.6.78).
+     *
+     * 사용자: *"근무선택에 탭에도 본선기관사 → 기관사, 본선 차장 → 차장으로 해줘야지"*.
+     * v1.6.77은 이 매핑을 `MatesScreen.chipLabel` 안에만 두어 두 화면 글자가 갈라져 있었다.
+     * 같은 매핑을 두 군데 적으면 다음에 또 어긋나므로 [label] 바로 옆에 **한 번만** 둔다.
+     *
+     * ⚠ **[label]·enum 이름·저장값은 여전히 한 글자도 안 건드렸다.** 동료 저장 키가
+     * `이름|enum이름`(`mateKey`)이고 되읽기가 `CrewGroup.valueOf`라, 데이터를 손대면 저장해 둔
+     * 동료가 통째로 유령이 된다(v1.6.60 사고). 이건 **화면 글자일 뿐**이다.
+     */
+    val shortLabel: String get() = when (this) {
+        MAIN_DRIVER -> "기관사"
+        MAIN_CONDUCTOR -> "차장"
+        else -> label
+    }
 }
 
 /**
