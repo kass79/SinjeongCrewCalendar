@@ -1009,7 +1009,17 @@ private fun DayDetailContent(
                             branchLegs != null -> {
                                 KvRow("전반사업", fmtLeg(branchLegs.first))
                                 KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
-                                KvRow("후반사업", fmtLeg(branchLegs.second))
+                                // 지선 야간(지10~14)의 후반도 **익일 아침**이다(v1.6.73). 본선 줄(위)은
+                                // 처음부터 `(익일)`을 달고 있었는데 여기만 빠져 있어 맞췄다.
+                                // 위 `isNight`는 본선 전용(`MAIN_NIGHT`)이라 duty 쪽 값을 본다.
+                                //
+                                // ⚠ **이 블록은 야간 근무일엔 안 그려진다**(v1.6.77 실측). 바로 위
+                                // `if (routeAsset != null)`의 else 가지라, 행로표가 있는 근무는 이 줄 대신
+                                // 행로표 그림이 뜬다. 그리고 야간(본선 33~51 · 지선 지10~14)은 행로표가
+                                // 전건 있다 → 이 `(익일)`은 행로표 자산이 빠졌을 때만 보인다.
+                                // 야간의 `(익일)`을 실제로 보여 주는 곳은 **알람 칩 다이얼로그**
+                                // (제목 `후반사업 편승 알람 (익일)` + 본문 `익일 8/24 아침 · …`)다.
+                                KvRow("후반사업", fmtLeg(branchLegs.second) + if (day.duty.isNight) " (익일)" else "")
                                 KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
                                 trains?.let { KvRow("총근무시간", it.totalWorkTime) }
                             }
@@ -1179,8 +1189,23 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     // 아이콘·색은 전반 민트 / 후반 라벤더 그대로 둔다(구분은 글자 하나면 충분하고, 색을 더 쪼개면
     // 네 상태 색 표가 여덟 줄이 된다).
     val tag = if (advice.depot) "$half 출고" else half
-    // 야간 후반은 익일 아침이라는 것이 칩에서 바로 보여야 한다 — 상세시트 `후반사업` 줄이
-    // 이미 "(익일)"을 붙이고 있으니 같은 결. `후반 6:32 (익일) 예약` 처럼 읽힌다.
+    // **칩 글자에는 "(익일)"을 안 붙인다** (v1.6.77. 사용자: *"알람, 과 침실은 한줄에 해줘야지..
+    // 그러기 위해서는 익일 ← 이 텍스트는 빼도 돼"*). 야간 근무일엔 칩이 셋(전반·후반·침실)인데
+    // 다섯 글자가 더 붙으면 줄이 접혀 침실 칩이 둘째 줄로 내려갔다.
+    //
+    // ⚠ **표기만 뺐지 예약은 그대로 익일이다** — 아래 `fireDate`(= date + 1일)는 안 건드렸다.
+    // "익일"이 남아 있는 자리(아래 `nx`가 쓰이는 두 곳):
+    //   ① 칩을 누르면 뜨는 다이얼로그 **제목** `후반사업 편승 알람 (익일)`
+    //   ② 그 **본문** `익일 8/29 아침 · 양천구청역 6:45 도착`
+    // **예약은 이 다이얼로그를 거치지 않고는 못 한다** — 날짜를 오해한 채로 알람을 걸 길이 없다.
+    // 야간엔 침실 칩(`20호실 · 기상 5:40`)이 같은 줄에 있어 "자고 다음날 아침에 나간다"는
+    // 맥락도 칩 줄 자체가 준다.
+    //
+    // ⚠ 상세시트 `후반사업 … (익일)` 줄은 **야간엔 안 뜬다**(v1.6.77 실측 — 행로표 그림이 그 자리를
+    // 차지하고, 야간은 행로표가 전건 있다). 그 줄을 근거로 칩 표기를 빼도 된다고 판단하지 말 것.
+    //
+    // 실측(펼침 오른쪽 상세 패널 = 사용자가 접힌다고 한 그 화면): 뺀 뒤 칩 셋이 한 줄에 들어가고
+    // 남는 폭이 **약 31dp**다. `(익일)`이 약 32dp라 되돌리면 곧바로 다시 접힌다.
     val nx = if (advice.nextDay) " (익일)" else ""
 
     // 아이콘과 같은 계열. `ink`는 아이콘의 딥 톤(#12756A/#513F96)보다 한 단계 진하다 —
@@ -1224,9 +1249,9 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
             Text(
                 when {
                     at == null -> "$half 알람없음"
-                    past -> "$tag ${hm(at)}$nx 지남"
-                    on -> "$tag ${hm(at)}$nx 예약"
-                    else -> "$tag ${hm(at)}$nx"
+                    past -> "$tag ${hm(at)} 지남"
+                    on -> "$tag ${hm(at)} 예약"
+                    else -> "$tag ${hm(at)}"
                 },
                 fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
             )
