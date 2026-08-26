@@ -1106,7 +1106,11 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     val leg = if (second) DeadheadAlarm.LEG_SECOND else DeadheadAlarm.LEG_FIRST
     val advice = remember(date, duty, second) { BundledTimetable.advise(duty, date, second) }
     val at = advice.at
-    val past = at != null && !LocalDateTime.of(date, at).isAfter(LocalDateTime.now())
+    // **야간 근무의 후반사업은 익일 아침**이다(v1.6.73) — 예약·지남 판정·requestCode가 전부
+    // 이 날짜를 쓴다. 근무일로 걸면 이미 지나간 아침이라 조용히 안 울린다(그게 이 판의 버그였다).
+    // 야간 다음날은 항상 비번이라 익일의 후반 예약과 부딪힐 일이 없다.
+    val fireDate = if (advice.nextDay) date.plusDays(1) else date
+    val past = at != null && !LocalDateTime.of(fireDate, at).isAfter(LocalDateTime.now())
     var booked by remember(date, second) { mutableStateOf<java.time.LocalTime?>(null) }
     var ask by remember(date, second) { mutableStateOf(false) }
 
@@ -1114,10 +1118,10 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
         // 권한이 없으면 예약 자체가 성립하지 않는다. 시스템이 권한을 끄는 순간 이미 걸린 알람을
         // 지워 버리기 때문에(`exact_alarm_permission_revoked`) 저장된 값만 믿으면 칩이 거짓말을 한다.
         // 예약목록(prefs)은 지우지 않는다 — 권한을 켜면 [DeadheadAlarm.rearmAll]이 되살린다.
-        val cur = DeadheadAlarm.scheduledAt(ctx, date, leg).takeIf { AlarmPermission.canExact(ctx) }
+        val cur = DeadheadAlarm.scheduledAt(ctx, fireDate, leg).takeIf { AlarmPermission.canExact(ctx) }
         booked = when {
-            cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, date, leg); null }
-            cur != at -> if (DeadheadAlarm.schedule(ctx, date, leg, at, advice.text)) at else null
+            cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, fireDate, leg); null }
+            cur != at -> if (DeadheadAlarm.schedule(ctx, fireDate, leg, at, advice.text)) at else null
             else -> cur
         }
     }
@@ -1130,6 +1134,9 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     // 아이콘·색은 전반 민트 / 후반 라벤더 그대로 둔다(구분은 글자 하나면 충분하고, 색을 더 쪼개면
     // 네 상태 색 표가 여덟 줄이 된다).
     val tag = if (advice.depot) "$half 출고" else half
+    // 야간 후반은 익일 아침이라는 것이 칩에서 바로 보여야 한다 — 상세시트 `후반사업` 줄이
+    // 이미 "(익일)"을 붙이고 있으니 같은 결. `후반 6:32 (익일) 예약` 처럼 읽힌다.
+    val nx = if (advice.nextDay) " (익일)" else ""
 
     // 아이콘과 같은 계열. `ink`는 아이콘의 딥 톤(#12756A/#513F96)보다 한 단계 진하다 —
     // 파스텔 위 글자를 AA(4.5:1) 위로 올리려면 이만큼 필요하다(3.87 → 5.02).
@@ -1172,9 +1179,9 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
             Text(
                 when {
                     at == null -> "$half 알람없음"
-                    past -> "$tag ${hm(at)} 지남"
-                    on -> "$tag ${hm(at)} 예약"
-                    else -> "$tag ${hm(at)}"
+                    past -> "$tag ${hm(at)}$nx 지남"
+                    on -> "$tag ${hm(at)}$nx 예약"
+                    else -> "$tag ${hm(at)}$nx"
                 },
                 fontSize = 9.sp, fontWeight = FontWeight.ExtraBold,
             )
@@ -1184,25 +1191,29 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     // 권한 안내는 예약을 누르기 **전에** 같은 다이얼로그에서 한다 — "예약됨인데 안 울림"이 최악이라
     // 켜기 전엔 예약을 막는다(v1.6.32, 근거는 AlarmPermission 주석).
     val permWarn = if (ask) AlarmPermission.warning(ctx) else null
+    // 익일 알람은 **몇 월 며칠 아침인지**까지 적는다 — "6:32에 울린다"만 보고 오늘 아침으로
+    // 오해하면 야간 근무 자체를 놓친다.
+    val body = if (advice.nextDay)
+        "익일 ${fireDate.monthValue}/${fireDate.dayOfMonth} 아침 · ${advice.text}" else advice.text
     if (ask) AlertDialog(
         onDismissRequest = { ask = false },
         title = {
             Text(
                 when {
                     permWarn != null -> "알람 권한을 켜 주세요"
-                    advice.depot -> "${half}사업 기지 출고 알람"
-                    else -> "${half}사업 편승 알람"
+                    advice.depot -> "${half}사업 기지 출고 알람$nx"
+                    else -> "${half}사업 편승 알람$nx"
                 },
             )
         },
         text = {
             Text(
                 when {
-                    at == null -> advice.text
-                    past -> "${advice.text}\n\n이미 지난 시각이라 알림을 예약할 수 없어요."
-                    permWarn != null -> "${advice.text}\n\n$permWarn"
-                    on -> "${advice.text}\n\n이대로 예약돼 있습니다. 알림을 해제할까요?"
-                    else -> "${advice.text}\n\n이 시각에 알림을 받을까요?"
+                    at == null -> body
+                    past -> "$body\n\n이미 지난 시각이라 알림을 예약할 수 없어요."
+                    permWarn != null -> "$body\n\n$permWarn"
+                    on -> "$body\n\n이대로 예약돼 있습니다. 알림을 해제할까요?"
+                    else -> "$body\n\n이 시각에 알림을 받을까요?"
                 },
                 style = MaterialTheme.typography.bodyMedium,
             )
@@ -1211,8 +1222,8 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
             if (at != null && !past) TextButton(onClick = {
                 when {
                     permWarn != null -> AlarmPermission.openSettings(ctx)
-                    on -> { DeadheadAlarm.cancel(ctx, date, leg); booked = null }
-                    else -> booked = if (DeadheadAlarm.schedule(ctx, date, leg, at, advice.text)) at else null
+                    on -> { DeadheadAlarm.cancel(ctx, fireDate, leg); booked = null }
+                    else -> booked = if (DeadheadAlarm.schedule(ctx, fireDate, leg, at, advice.text)) at else null
                 }
                 ask = false
             }) { Text(if (permWarn != null) "설정 열기" else if (on) "예약 해제" else "알림 예약") }

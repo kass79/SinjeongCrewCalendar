@@ -802,7 +802,7 @@ class PatternTest {
      *    그래서 전반과 같은 "5분 전 도착" 규칙을 후반에도 쓸 수 있다. 깨지면 규칙 근거가 사라진다.
      * ② 본선 후반은 v1.6.30에서 신도림 교대인 다이아만 켜졌다
      *    (근거는 [mainSecondLeg_starts_are_handover_points] · [mainSecondLeg_alarm_table]).
-     * ③ 야간은 후반이 익일이라 이 날짜 알람으로 못 건다.
+     * ③ 야간 후반은 **익일**이다 — v1.6.73에서 익일 날짜로 켰다([nightSecondLeg_fires_the_next_morning]).
      */
     @Test fun secondLeg_alarm_only_for_branch_day_duties() {
         listOf(Bundled.BRANCH_WEEKDAY, Bundled.BRANCH_HOLIDAY).forEach { table ->
@@ -831,9 +831,10 @@ class PatternTest {
         assertEquals(LocalTime.of(16, 35), main.at)
         assertTrue(main.text, main.text.contains("신도림 16:50 출발"))
 
-        // 야간(지선·본선 모두) — 후반이 익일이라 못 건다
-        assertEquals(null, BundledTimetable.advise(DutyCode.parse("지10"), weekday, second = true).at)
-        assertEquals(null, BundledTimetable.advise(DutyCode.parse("38"), weekday, second = true).at)
+        // 야간(지선·본선 모두) — v1.6.73에서 켜졌다. 시각은 [nightSecondLeg_fires_the_next_morning]이
+        // 잠그고, 여기서는 **익일 표시가 반드시 붙는다**는 것만 본다(빠지면 근무일에 걸려 안 울린다).
+        assertTrue(BundledTimetable.advise(DutyCode.parse("지10"), weekday, second = true).nextDay)
+        assertTrue(BundledTimetable.advise(DutyCode.parse("38"), weekday, second = true).nextDay)
 
         // 전반은 종전 그대로 (후반 인자를 붙여도 기본값이 안 바뀐 것을 확인)
         assertEquals(LocalTime.of(8, 8), BundledTimetable.advise(DutyCode.parse("지1"), weekday).at)
@@ -955,10 +956,10 @@ class PatternTest {
         assertEquals("후반 기지 출고 알람 다이아 수 (v1.6.34)", 9, count(depot = true))
         assertEquals("본선 주간 조합 수", 54, MainLegs.WEEKDAY.size + MainLegs.HOLIDAY.size)
 
-        // 야간 후반은 그대로 익일이라 없다
-        MainLegs.NIGHT.keys.forEach { n ->
-            assertEquals("야간 $n", null, at(n, weekday).at)
-        }
+        // 야간 후반은 v1.6.73에서 켜졌다 — 다만 **전부 익일**이라 nextDay가 붙는다.
+        // 주간은 한 건도 nextDay가 아니다(= 이 표의 값이 여전히 근무일 알람이라는 뜻).
+        MainLegs.NIGHT.keys.forEach { n -> assertTrue("야간 $n", at(n, weekday).nextDay) }
+        MainLegs.WEEKDAY.keys.forEach { n -> assertTrue("주간 $n", !at(n, weekday).nextDay) }
     }
 
     /**
@@ -1026,12 +1027,10 @@ class PatternTest {
         assertEquals(listOf("평2", "평5", "평6", "평8", "평9", "휴4", "휴8", "휴12", "휴13", "휴14", "휴15"), first)
         assertEquals(listOf("평6", "평13", "평14", "평16", "평17", "평21", "휴3", "휴5", "휴20"), second)
 
-        // 야간은 전건 간격 45분(신도림 교대)이라 전반 출고가 없고, 후반은 익일이라 아예 안 건다
+        // 야간은 전건 간격 45분(신도림 교대)이라 **전반 출고는 여전히 0건**이다.
+        // 후반 출고는 v1.6.73에서 켜졌고 규칙은 같은 50분 — 다만 익일이다.
         MainLegs.NIGHT.keys.forEach { n ->
-            listOf(weekday, holiday).forEach { d ->
-                assertTrue("야간 $n / $d 전반", !adv(n, d).depot)
-                assertTrue("야간 $n / $d 후반", !adv(n, d, second = true).depot)
-            }
+            listOf(weekday, holiday).forEach { d -> assertTrue("야간 $n / $d 전반", !adv(n, d).depot) }
         }
 
         // 출고가 아닌 사유 셋은 그대로 알람 없음
@@ -1042,6 +1041,111 @@ class PatternTest {
         // 지선·대기는 출고 표시가 붙지 않는다
         assertTrue(!BundledTimetable.advise(DutyCode.parse("지1"), weekday).depot)
         assertTrue(!BundledTimetable.advise(DutyCode.parse("대3"), weekday).depot)
+    }
+
+    /**
+     * **야간 근무의 후반 알람은 익일 아침에 울린다** (v1.6.73 — 사용자: *"야간 근무 다음날때도
+     * 후반알람 되게 해줘야지.."*). 야간은 전반을 마치고 사업소에서 자고 다음날 후반을 나간다.
+     *
+     * v1.6.30~72는 이 구간을 통째로 껐다. 이제 [BundledTimetable.Advice.nextDay]가 붙고
+     * 호출부([DeadheadAlarmChip])가 **date + 1일**에 예약한다. 이 표시가 빠지면 근무일 아침
+     * (이미 지난 시각)에 걸려 **조용히 안 울린다** — 그게 이 판에서 고친 버그다.
+     *
+     * 규칙은 새로 짓지 않았다. 갈래는 주간과 같은 후반 첫 열번(영업 2xxx = 신도림 교대 /
+     * 5xxx·6xxx = 신정기지 / 19xx·29xx = 군자기지)이고, 시각은 편승 5분 전·출고 50분 전 그대로다.
+     * **읽을 수 없는 칸**(설명 텍스트가 섞인 열번·역 주박)은 여전히 안 건다.
+     */
+    @Test fun nightSecondLeg_fires_the_next_morning() {
+        val pp = LocalDate.of(2026, 8, 19) // 수 → 목 : 평평
+        val ph = LocalDate.of(2026, 8, 21) // 금 → 토 : 평휴
+        val hh = LocalDate.of(2026, 8, 22) // 토 → 일 : 휴휴
+        val hp = LocalDate.of(2026, 8, 23) // 일 → 월 : 휴평
+        fun at(dia: String, d: LocalDate) = BundledTimetable.advise(DutyCode.parse(dia), d, second = true)
+
+        // ── ① 편승 (신도림 교대) — 익일 시각표에서 신도림 출발 10~21분 전 마지막 편의 5분 전 ──
+        // 37 평평: 후반 6:48 신도림, 익일(목) 평일 → 창 6:27~6:38 → 6:37 → 알람 6:32
+        assertEquals(LocalTime.of(6, 32), at("37", pp).at)
+        assertTrue(at("37", pp).text, at("37", pp).text.contains("양천구청역 6:37 편승 (신도림 6:48 출발)"))
+        // 46 평휴: 후반 7:38, 익일(토) **휴일** → 창 7:17~7:28 → 7:24 → 알람 7:19
+        assertEquals(LocalTime.of(7, 19), at("46", ph).at)
+        // 47 휴평: 후반 7:27, 익일(월) 평일 → 창 7:06~7:17 → 7:15 → 알람 7:10
+        assertEquals(LocalTime.of(7, 10), at("47", hp).at)
+
+        // ── ② 기지 출고 — 출고시각 50분 전 (주간과 같은 규칙) ──
+        assertEquals(LocalTime.of(4, 50), at("34", pp).at) // 5923 회송 → 신정기지 5:40
+        assertEquals("신정기지 5:40 출고 · 알림 4:50", at("34", pp).text)
+        assertTrue(at("34", pp).depot)
+        assertEquals(LocalTime.of(6, 49), at("43", hp).at) // 1936 → 군자기지 7:39
+        assertEquals("군자기지 7:39 출고 · 알림 6:49", at("43", hp).text)
+
+        // ── ③ 지선 야간 — **다섯 중 셋이 양천구청이 아니라 신정기지 출고**다(행로표 스캔 판독).
+        //    후반 첫 열번 59xx(회송)가 신호이고, 열번 맞물림도 같은 답을 준다:
+        //    양천구청인 둘만 다른 다이아의 종료와 맞물린다(지13 6:50 = 지10 종료 / 지14 6:54 = 지11 종료).
+        //    ⚠ 이걸 안 가르면 출고 다이아에 "양천구청역 5:05 도착"을 줘 **장소도 시각도 틀린다.**
+        listOf(
+            Triple("지10", "5:10", LocalTime.of(4, 20)),
+            Triple("지11", "5:21", LocalTime.of(4, 31)),
+            Triple("지12", "6:45", LocalTime.of(5, 55)),
+        ).forEach { (d, out, alarm) ->
+            assertEquals(d, alarm, at(d, pp).at)
+            assertTrue("$d 는 기지 출고", at(d, pp).depot)
+            assertEquals("신정기지 $out 출고 · 알림 ${alarm.hour}:%02d".format(alarm.minute), at(d, pp).text)
+        }
+        assertEquals(LocalTime.of(6, 45), at("지13", pp).at) // 5512 영업 → 양천구청 6:50 출발
+        assertTrue(at("지13", pp).text, at("지13", pp).text.contains("양천구청역 6:45 도착"))
+        assertTrue("지13 은 출고가 아니다", !at("지13", pp).depot)
+        assertEquals(LocalTime.of(6, 49), at("지14", hp).at)
+        // 지선 야간 후반시각은 평/휴 표가 같다 — 네 조합에서 값이 한 건도 안 갈린다
+        listOf("지10", "지11", "지12", "지13", "지14").forEach { d ->
+            listOf(pp, ph, hh, hp).forEach { date ->
+                assertTrue("$d / $date", at(d, date).nextDay)
+                assertEquals("$d / $date", at(d, pp).at, at(d, date).at)
+            }
+        }
+        // 지선 **전반**과 지선 주간은 한 건도 안 바뀐다(익일 표시도 안 붙는다)
+        listOf("지10", "지14").forEach { d ->
+            val f = BundledTimetable.advise(DutyCode.parse(d), pp)
+            assertTrue(d, !f.nextDay && !f.depot)
+        }
+        (1..8).forEach { n ->
+            val a = BundledTimetable.advise(DutyCode.parse("지$n"), pp, second = true)
+            assertTrue("지$n", !a.nextDay && !a.depot)
+            assertNotNull("지$n", a.at)
+        }
+
+        // ── ④ 안 거는 것 — 사유가 구체적으로 보여야 한다 (틀린 시각보다 낫다) ──
+        listOf(48, 49, 50, 51).forEach { n ->
+            listOf(pp, ph, hh, hp).forEach { date ->
+                val a = at("$n", date)
+                assertEquals("$n / $date 는 역 주박이라 기준이 없다", null, a.at)
+                assertTrue(a.text, a.text.contains("주박"))
+                assertTrue("$n / $date", a.nextDay)
+            }
+        }
+        assertTrue(at("33", pp).text, at("33", pp).text.contains("6:00~6:30 회송")) // 열번이 아닌 칸
+        assertTrue(at("35", pp).text, at("35", pp).text.contains("군자편승"))
+        assertTrue(at("37", hp).text, at("37", hp).text.contains("출고열차#5925교대"))
+        assertEquals(null, at("33", hh).at) // 운휴대기(휴휴 33~35)
+        assertTrue(at("33", hh).text, at("33", hh).text.contains("운휴대기"))
+
+        // ── ⑤ 전수: 익일 표시는 야간 후반 전건에 붙고, 전반·주간엔 한 건도 안 붙는다 ──
+        val on = mutableMapOf<LocalDate, Int>()
+        listOf(pp, ph, hh, hp).forEach { date ->
+            MainLegs.NIGHT.keys.forEach { n ->
+                assertTrue("야간 $n / $date 후반", at("$n", date).nextDay)
+                assertTrue("야간 $n / $date 전반", !BundledTimetable.advise(DutyCode.parse("$n"), date).nextDay)
+                if (at("$n", date).at != null) on[date] = (on[date] ?: 0) + 1
+            }
+        }
+        assertEquals("본선 야간 후반 알람이 켜진 조합 수", listOf(10, 11, 11, 11), listOf(pp, ph, hh, hp).map { on[it] })
+
+        // ── ⑥ "익일 시각표를 봐야 한다"는 규칙이 값으로 드러나지 않는 이유를 함께 잠근다 ──
+        // 야간 후반이 쓰는 5~7시대 편승시각표는 평일·휴일이 **6:20↔6:19 한 편만** 다르다.
+        // 시각표가 바뀌어 차이가 커지면 여기서 먼저 깨져 익일 판정을 다시 보게 된다.
+        BundledTimetable.ROWS.filter { it.hour in 5..7 }.forEach { r ->
+            val diff = r.weekday.zip(r.holiday).filter { (w, h) -> w != h }
+            assertEquals("${r.hour}시대 평/휴 차이", if (r.hour == 6) listOf(20 to 19) else emptyList(), diff)
+        }
     }
 
     /**

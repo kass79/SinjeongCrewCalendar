@@ -35,8 +35,17 @@ object BundledTimetable {
      *
      * [depot]은 **기지 출고 알람**(v1.6.34)이라는 표시다 — 편승 알람과 계산 규칙도
      * 화면 문구도 갈리므로 호출부가 문자열을 헤집지 않게 여기서 알려 준다.
+     *
+     * [nextDay]는 **이 알람이 근무일이 아니라 익일에 울린다**는 표시다(v1.6.73) — 야간 근무의
+     * 후반사업은 사업소에서 자고 다음날 아침에 나가므로 예약 날짜가 하루 뒤여야 한다.
+     * 사유만 있는 (at = null) 경우에도 붙여 두어 칩이 "(익일)"을 일관되게 적을 수 있다.
      */
-    data class Advice(val at: LocalTime?, val text: String, val depot: Boolean = false)
+    data class Advice(
+        val at: LocalTime?,
+        val text: String,
+        val depot: Boolean = false,
+        val nextDay: Boolean = false,
+    )
 
     /**
      * 본선에서 "출근 → 전반시작" 간격이 이 값이면 **신도림역에서 교대**하는 근무다(= 편승 필요).
@@ -196,6 +205,102 @@ object BundledTimetable {
     }
 
     /**
+     * **본선 야간 후반사업 = 익일 아침** (v1.6.73 — 사용자: *"야간 근무 다음날때도 후반알람 되게 해줘야지"*).
+     *
+     * 야간 근무는 전반을 마치고 **사업소 침실에서 자고 다음날 아침에 후반을 나간다.** 그래서
+     * 알람은 근무일이 아니라 **익일** 날짜에 걸어야 하고, 편승시각표도 **익일**의 평일/휴일을
+     * 봐야 한다 — 야간 조합(`평평·평휴·휴평·휴휴`)의 **뒷글자가 곧 익일**이다.
+     *
+     * 갈래를 가르는 신호는 주간 후반과 **똑같이 [RouteTable]의 후반 첫 열번**이다
+     * (5xxx·6xxx = 신정기지 회송 / 19xx·29xx = 군자기지 입출고 회송 / 그 밖 2xxx = 영업열차 =
+     * 신도림 교대 — 근거는 이 파일 맨 아래 주석 1절). 계산 규칙도 새로 짓지 않고
+     * 주간에서 사용자가 확정한 둘을 그대로 쓴다: 편승은 [deadhead], 출고는 [depot].
+     *
+     * **읽지 못하는 칸은 걸지 않는다.** 야간표는 열번 칸에 설명 텍스트가 섞여 있어
+     * (`"출고열차#6927교대"`·`"2015열차교대"`·`"군자편승·군자출고"`·`"6:00~6:30 회송"`)
+     * **네 자리 숫자만 있는 칸**만 읽는다. `주박`(48~51 = 홍대입구역·신도림역에서 자는 다이아)도
+     * 제외한다 — 사업소가 아니라 역에서 자고 그 자리에서 시작하므로 양천구청 편승도 신정기지
+     * 출고도 아니다(덧붙여 이들의 후반시작은 전부 5:30인데 양천구청 신도림행 첫차가 5:36이라
+     * 편승 자체가 성립하지 않는다).
+     *
+     * ⚠ 애매하면 켜지 않고 사유를 보여 준다 — 틀린 시각으로 사람을 깨우는 것이 최악이다.
+     */
+    /**
+     * **지선 야간(지10~14)의 후반사업 = 익일 아침, 그리고 셋은 양천구청이 아니다** (v1.6.73).
+     *
+     * 지선은 "양천구청에서 바로 승무 시작 → 5분 전 도착"이 규칙이지만(v1.6.29),
+     * **야간 후반에는 그게 통하지 않는다.** 번들 행로표 스캔 직접 판독:
+     *
+     * | 다이아 | 후반시작 | 찍힌 열 | 후반 첫 열번 |
+     * |---|---|---|---|
+     * | 지10 | 5:10 | **신정기지 ○출고** | 5901 |
+     * | 지11 | 5:21 | 〃 (열번 같은 계열) | 5903 |
+     * | 지12 | 6:45 | **신정기지 ○출고** | 5905 |
+     * | 지13 | 6:50 | **양천구청** | 5512 |
+     * | 지14 | 6:54 | 〃 (열번 같은 계열) | 5511 |
+     *
+     * 신호는 본선과 같은 **첫 열번**이다 — `59xx` = 신정기지 회송(출고) / `55xx`·`56xx` = 영업열차.
+     * 열번 맞물림도 이 판정과 정확히 일치한다: **양천구청인 둘만** 다른 지선 다이아의 종료시각과
+     * 맞물린다(지13 6:50 = 지10 후반종료 6:50 / 지14 6:54 = 지11 후반종료 6:54).
+     * 출고인 셋은 그 날 지선의 **첫 열차**라 넘겨받을 상대가 없다.
+     *
+     * ⚠ 이걸 안 가르면 출고 다이아에 *"양천구청역 5:05 도착"* 을 주게 된다 —
+     * **장소도 시각도 틀린다**(기지 출고는 준비가 필요해 5분으로는 못 나간다).
+     */
+    private fun branchNightSecond(number: Int?, holiday: Boolean, start: LocalTime): Advice {
+        val head = number?.let { RouteTable.forBranch(it, holiday) }?.secondHalf
+            ?.split('·')?.first()?.trim()
+            ?: return Advice(null, "이 근무는 후반 열번을 알 수 없어 알람을 걸 수 없습니다.", nextDay = true)
+        if (!FOUR_DIGITS.matches(head)) return Advice(
+            null,
+            "후반사업이 \"$head\"(으)로 시작해 어디서 열차를 잡는지 표에 없습니다. 알람을 걸지 않습니다.",
+            nextDay = true,
+        )
+        if (head.startsWith("59")) return depot("신정기지", start).copy(nextDay = true)
+        val at = start.minusMinutes(5)
+        return Advice(at, "양천구청역 ${hm(at)} 도착 (${hm(start)} 출발 5분 전)", nextDay = true)
+    }
+
+    private fun mainNightSecond(num: Int, date: LocalDate): Advice {
+        val combo = Bundled.comboOf(date)
+        if (RouteTable.isStandbyOnly(num, combo))
+            return Advice(null, "운휴대기 근무라 맡은 열차가 없습니다.", nextDay = true)
+        val assign = RouteTable.forMainNight(num, combo)
+            ?: return Advice(null, "이 근무는 후반 열번을 알 수 없어 알람을 걸 수 없습니다.", nextDay = true)
+        if ("주박" in assign.firstHalf) return Advice(
+            null,
+            "역에서 주박하고 그 자리에서 후반을 시작하는 근무라 편승·출고 기준이 없습니다. 행로표를 확인하세요.",
+            nextDay = true,
+        )
+        val start = time(MainLegs.forNight(num, combo)?.getOrNull(2))
+            ?: return Advice(null, "이 근무는 후반 사업시각이 없어 알람을 걸 수 없습니다. 행로표를 확인하세요.", nextDay = true)
+        val head = assign.secondHalf.split('·').first().trim()
+        if (!FOUR_DIGITS.matches(head)) return Advice(
+            null,
+            "후반사업이 \"$head\"(으)로 시작해 어디서 열차를 잡는지 표에 없습니다. 알람을 걸지 않습니다.",
+            nextDay = true,
+        )
+        val base = when {
+            head.startsWith("19") || head.startsWith("29") -> "군자기지"
+            head.startsWith("5") || head.startsWith("6") -> "신정기지"
+            head.startsWith("2") -> null // 영업열차 = 신도림 교대
+            else -> return Advice(
+                null,
+                "후반 첫 열번 $head 이 어느 갈래인지 판단할 수 없어 알람을 걸지 않습니다.",
+                nextDay = true,
+            )
+        }
+        base?.let { return depot(it, start).copy(nextDay = true) }
+        // **익일**이 평일이냐 휴일이냐로 편승시각표를 고른다. 15분 보정은 하지 않는다 —
+        // 그 보정은 주간 **휴일 표**가 양천구청 편승 출발을 적는다는 관측인데(v1.6.30),
+        // 야간표는 평/휴가 아니라 조합으로 갈리는 한 벌이고 `46 휴평` 후반 7:48이 스캔상
+        // **신도림**으로 확인돼 있다(v1.6.29 주석) — 즉 야간표 값은 신도림 출발이다.
+        return deadhead(start, Bundled.isHolidayTimetable(date.plusDays(1))).copy(nextDay = true)
+    }
+
+    private val FOUR_DIGITS = Regex("^\\d{4}$")
+
+    /**
      * 그 날 그 근무의 알람 권장 시각. **전반사업**([second] = false)은 세 갈래다(v1.6.27 사용자 확정):
      *
      *  · **지선** — 양천구청에서 바로 승무를 시작하므로 편승이 없다. 전반시작 **5분 전 도착**.
@@ -208,7 +313,8 @@ object BundledTimetable {
      * 다이아**(v1.6.30)와 **기지 출고인 다이아**(v1.6.34, [SECOND_DEPOT_WEEKDAY] ·
      * [SECOND_DEPOT_HOLIDAY])까지 계산한다. 둘 다 아닌 다이아는 [SECOND_NOT_SINDORIM_WEEKDAY] ·
      * [SECOND_NOT_SINDORIM_HOLIDAY]에 사유를 적어 두고 그 사유를 그대로 보여 준다.
-     * 야간 후반은 익일 새벽이라 여전히 제외 — 근거는 이 파일 맨 아래 주석.
+     * **야간 후반은 익일 아침**이라 [mainNightSecond]가 따로 계산하고 [Advice.nextDay]를 붙인다
+     * (v1.6.73 — 종전엔 통째로 알람 없음이었다).
      *
      * 판별이 애매하면 알람을 걸지 않는다 — 틀린 시각을 주는 것이 최악이다.
      */
@@ -219,29 +325,32 @@ object BundledTimetable {
         if (duty.type == DutyType.STANDBY || duty.type == DutyType.BRANCH_STANDBY)
             return Advice(null, "대기 근무는 맡은 열차가 없어 알람을 걸 수 없습니다.")
 
-        // 야간 근무의 후반사업은 전부 **익일** 새벽이다. 예약 목록이 날짜 하나에 묶여 있어
-        // 이 날짜의 알람으로는 못 건다(그리고 익일 새벽 시각은 편승 첫차보다 이른 경우가 많다).
-        if (second && row?.overnight == true)
-            return Advice(null, "야간 근무의 후반사업은 익일 새벽이라 이 날짜 알람으로는 걸 수 없습니다.")
+        // 야간 근무의 후반사업은 **익일 아침**이다 — 전반을 마치고 사업소 침실에서 자고
+        // 다음날 기상해 나간다. v1.6.72까지는 통째로 "알람 없음"이었는데(예약이 근무일 하나에
+        // 묶여 있었다), v1.6.73에서 [Advice.nextDay]로 하루 뒤임을 알려 익일에 예약한다.
+        val nextDay = second && row?.overnight == true
 
         // A. 지선 — 사업시각("8:13#10:41" / "12:51-14:51")의 앞이 곧 양천구청 출발시각이다.
         //    후반도 같다: 지선 다이아의 후반시작은 전부 **다른 지선 다이아의 사업 종료시각과
         //    정확히 맞물린다**(지1 후반 12:51 = 지6 전반 종료 12:51 …). 인수인계 지점이 곧
         //    양천구청이므로 전반과 같은 "5분 전 도착" 규칙을 그대로 쓴다.
         //    `PatternTest.branch_second_leg_starts_are_handover_points`가 이 맞물림을 잠근다.
+        //    **야간(지10~14)의 후반은 익일 아침이고, 다섯 중 셋이 양천구청이 아니다** —
+        //    [branchNightSecond] 참조. 전반과 지선 주간은 종전 그대로다.
         if (duty.isBranch) {
             val leg = if (second) row?.secondLeg else row?.firstLeg
             val start = time(leg?.split('#', '-')?.firstOrNull())
-                ?: return Advice(null, "이 근무는 승무 시작시각이 없어 알람을 걸 수 없습니다.")
+                ?: return Advice(null, "이 근무는 승무 시작시각이 없어 알람을 걸 수 없습니다.", nextDay = nextDay)
+            if (nextDay) return branchNightSecond(duty.number, holiday, start)
             val at = start.minusMinutes(5)
             return Advice(at, "양천구청역 ${hm(at)} 도착 (${hm(start)} 출발 5분 전)")
         }
 
         // B'. 본선 후반 (v1.6.30) — 신도림 교대인 다이아만 계산하고, 아닌 다이아는 사유를 밝힌다.
-        //     여기 오는 것은 주간 다이아뿐이다(야간은 위에서 "익일 새벽"으로 이미 걸렀다).
         if (second) {
             val num = duty.number
-                ?: return Advice(null, "이 근무는 후반사업 다이아를 알 수 없어 알람을 걸 수 없습니다.")
+                ?: return Advice(null, "이 근무는 후반사업 다이아를 알 수 없어 알람을 걸 수 없습니다.", nextDay = nextDay)
+            if (nextDay) return mainNightSecond(num, date)
             val why = (if (holiday) SECOND_NOT_SINDORIM_HOLIDAY else SECOND_NOT_SINDORIM_WEEKDAY)[num]
             if (why != null)
                 return Advice(null, "후반사업이 신도림 교대로 시작하지 않습니다 ($why). 탈 편승 열차가 없어 알람을 걸지 않습니다.")
@@ -323,10 +432,12 @@ object BundledTimetable {
      *    7 후반 첫 열번 2261 = 23번 전반종료 14:01 ±0).
      *    v1.6.31~33의 옛 값(4 = 14:01/17:16 · 7 = 15:36/17:21)은 **개정 전 기준**이라 되돌리지 말 것.
      *
-     * ### 4. 야간은 그대로 제외
+     * ### 4. 야간은 익일 아침으로 켰다 (v1.6.73 — v1.6.30~72의 "제외"를 뒤집음)
      *
-     * 야간 후반은 전부 **익일** 새벽(5:30~5:52 다수)이라 이 날짜 알람으로 못 걸고,
-     * 양천구청 신도림행 첫차가 5:36이라 편승 자체가 성립하지 않는 경우도 많다.
+     * 야간 후반은 전부 **익일**이다. v1.6.30에서 "이 날짜 알람으로 못 건다"며 통째로 껐던 것을
+     * [Advice.nextDay]로 **예약 날짜를 하루 뒤로 옮겨** 켰다. 계산은 [mainNightSecond] 참조 —
+     * 규칙을 새로 짓지 않고 1절의 열번 신호와 주간에서 확정된 편승·출고 두 규칙을 그대로 쓴다.
+     * 읽을 수 없는 칸(설명 텍스트·주박)은 여전히 켜지 않는다.
      *
      * ⚠ 판별이 애매하면 **켜지 않는다.** 틀린 시각으로 사람을 깨우는 것이 최악이다.
      * ───────────────────────────────────────────────────────────────────────── */
