@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.BundledRooms
 import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.BundledTimetable
@@ -1762,6 +1763,46 @@ class PatternTest {
         assertEquals(Bundled.BRANCH_PATTERN.id, u.segmentOn(aug31).patternId)   // 8월 = 지선 그대로
         assertEquals(40, u.segmentOn(LocalDate.of(2026, 9, 15)).patternOffset)  // 9월 = 첫 예약 살아 있음
         assertEquals(7, u.segmentOn(oct1).patternOffset)                        // 10월 = 새 예약
+    }
+
+    /**
+     * 침실배정표(2023.10.04. `신정` 칸) 조합별 대표값 — 시트를 다시 옮기다 행/열이 밀리면 여기서 깨진다.
+     * 한 호실에 둘인 칸(`지10,11`·`지13,14`)이 **두 다이아 모두** 같은 호실을 가리키는 것도 같이 잠근다.
+     */
+    @Test fun bedrooms_match_the_2023_sheet() {
+        fun at(c: NightCombo, dia: String) = BundledRooms.of(c, dia)?.label
+        assertEquals("7호실 · 기상 4:50", at(NightCombo.PP, "33"))
+        assertEquals("30호실 · 기상 6:30", at(NightCombo.PP, "44"))
+        assertEquals("13호실 · 기상 5:00", at(NightCombo.PH, "35"))
+        assertEquals("37호실 · 기상 6:40", at(NightCombo.PH, "47"))
+        assertEquals("6호실 · 기상 4:40", at(NightCombo.HP, "35"))
+        assertEquals("32호실 · 기상 6:30", at(NightCombo.HP, "47"))
+        assertEquals("4호실 · 기상 4:30", at(NightCombo.HH, "38"))
+        assertEquals("20호실 · 기상 5:50", at(NightCombo.HH, "43"))
+        // 지선 — 지10·지11은 늘 1호실, 지13·지14는 조합마다 한 호실을 같이 쓴다
+        for (c in NightCombo.entries) {
+            assertEquals("1호실 · 기상 4:10", at(c, "지10"))
+            assertEquals(at(c, "지10"), at(c, "지11"))
+            assertEquals(at(c, "지13"), at(c, "지14"))
+        }
+        assertEquals("27호실 · 기상 6:10", at(NightCombo.PP, "지13"))
+        assertEquals("21호실 · 기상 5:40", at(NightCombo.PH, "지12"))
+    }
+
+    /**
+     * 표에 없는 야간 다이아는 **null** — 화면이 아무것도 안 그린다. 잘못된 호실이 최악이라
+     * 억지로 채우지 않는다. 48~51은 역 주박(홍대입구·신도림), 휴휴 33~35는 운휴대기,
+     * 평평 35·휴평 43은 시트 `신정` 칸이 비어 있다(원본 확인).
+     */
+    @Test fun bedrooms_are_null_where_the_sheet_has_none() {
+        for (c in NightCombo.entries) for (n in 48..51) assertNull(BundledRooms.of(c, "$n"))
+        for (n in 33..35) assertNull(BundledRooms.of(NightCombo.HH, "$n"))
+        assertNull(BundledRooms.of(NightCombo.PP, "35"))
+        assertNull(BundledRooms.of(NightCombo.HP, "43"))
+        // 주간 다이아·대기·오타 키도 조용히 없음
+        assertNull(BundledRooms.of(NightCombo.PP, "9"))
+        assertNull(BundledRooms.of(NightCombo.PP, "지3"))
+        assertNull(BundledRooms.of(NightCombo.PP, "대11"))
     }
 
     /** 저장 해제는 날짜만 지운다 — 이미 걸어 둔 교번 구간(예약)은 그대로 남는다 */

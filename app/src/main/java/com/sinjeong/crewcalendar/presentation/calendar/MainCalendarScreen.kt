@@ -49,6 +49,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.BundledRooms
 import com.sinjeong.crewcalendar.domain.model.BundledTimetable
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
@@ -1078,6 +1079,11 @@ private fun DayDetailContent(
                 ) {
                     DeadheadAlarmChip(day.date, day.duty, second = false)
                     if (hasSecond) DeadheadAlarmChip(day.date, day.duty, second = true)
+                    // 침실 (v1.6.76) — `combo`가 야간 근무일에만 값이라 주간·휴무엔 아예 안 붙고,
+                    // 표에 없는 야간 다이아면 [BundledRooms.of]가 null을 줘서 역시 안 붙는다.
+                    // 조합은 v1.6.74 이미지 카드와 같은 [Bundled.comboOf] 값(이 화면 위쪽 `combo`).
+                    combo?.let { BundledRooms.of(it, day.duty.diaRaw) }
+                        ?.let { RoomChip(it, Modifier.align(Alignment.CenterVertically)) }
                 }
             }
             if (showRoute && routeAsset != null) {
@@ -1269,6 +1275,49 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
         },
         dismissButton = { TextButton(onClick = { ask = false }) { Text("닫기") } },
     )
+}
+
+/**
+ * 침실 칩 — `7호실 · 기상 4:50` (v1.6.76). 야간 근무일에만, 편승 알람 칩과 **같은 줄**에 붙는다.
+ *
+ * 값은 [BundledRooms] (침실배정표 2023.10.04. `신정` 칸). 표에 없는 다이아면 호출부가
+ * 아예 안 그린다 — **잘못된 호실을 보여주는 것이 최악**이다.
+ *
+ * ### 왜 같은 줄인가
+ *
+ * 이 줄은 이미 [FlowRow]라 글자배율을 키우면 스스로 접힌다(v1.6.74 침실배정표 칩 줄과 같은 이유).
+ * 아래에 줄을 하나 더 두면 야간에만 시트가 한 줄 길어지고, 정작 붙어 다녀야 할 정보
+ * (*"몇 시에 일어나서 → 몇 시 알람으로 후반을 나가나"*)가 갈린다. 360dp·배율 1.0에서
+ * 칩 셋이 한 줄에 들어가고, 배율 1.5에서 접히면 침실 칩이 둘째 줄로 내려간다.
+ *
+ * ### 색 — 알람 칩과 안 겹치는 모래빛
+ *
+ * 민트(전반)·라벤더(후반)와 계열을 나눠 [R.drawable.ic_tt_room]과 같은 모래빛
+ * (#F2D2A0)을 채운다 — v1.6.74 침실배정표 카드와 한 벌로 읽힌다. 글자는 아이콘 딥 톤
+ * (#8A5A20)보다 한 단계 진한 #6E4514 (대비 **5.75:1**, AA 통과. #8A5A20은 4.07로 모자란다).
+ * **채움**이라 알람 칩의 "예약 가능"(테두리만)과 안 헷갈리고, 라이트·다크 어디서나 불투명이라
+ * 한 벌이면 충분하다(알람 칩처럼 테마별로 색을 뒤집지 않는다).
+ *
+ * 아이콘은 안 붙였다 — [R.drawable.ic_tt_room]의 채움색이 칩 바탕과 **같은 #F2D2A0** 이라
+ * 13dp에서 외곽선만 남아 뭉갠다. `호실`·`기상` 두 낱말이 이미 무슨 값인지 말한다.
+ *
+ * 누를 수 없다(정보만) — 그래서 알람 칩이 얹는 48dp 최소 터치영역이 없어 키가 낮다.
+ * 호출부가 [FlowRowScope.align]으로 세로 가운데를 맞춘다.
+ */
+@Composable
+private fun RoomChip(room: BundledRooms.Room, modifier: Modifier = Modifier) {
+    Surface(
+        modifier,
+        shape = RoundedCornerShape(999.dp),
+        color = Color(0xFFF2D2A0),
+        contentColor = Color(0xFF6E4514),
+    ) {
+        Text(
+            room.label,
+            Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+        )
+    }
 }
 
 @Composable
