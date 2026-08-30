@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.data.remote
 
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
@@ -11,7 +12,9 @@ import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.Schedule
 import com.sinjeong.crewcalendar.domain.model.User
+import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
 import com.sinjeong.crewcalendar.domain.repository.AdminWriteResult
+import com.sinjeong.crewcalendar.domain.repository.MenuRepository
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
@@ -238,10 +241,74 @@ private fun Throwable.asWriteResult(): AdminWriteResult =
         FirebaseFirestoreException.Code.PERMISSION_DENIED
     ) AdminWriteResult.DENIED else AdminWriteResult.FAILED
 
+/**
+ * 구내식당 주간식단표 (v1.6.80). `menus/{주 시작일}` — 문서 하나가 한 주(21칸)다.
+ *
+ * **사진 원본은 안 올린다.** 텍스트 21칸 + 기간뿐이라 문서 하나가 1KB 남짓이고,
+ * Storage 를 아예 안 쓰므로 유출 경로도 없다(원본 표에 "불법유출 시 처벌" 문구가 있다).
+ */
+@Singleton
+class FirestoreMenuRepository @Inject constructor() : MenuRepository {
+    private val db get() = FirebaseFirestore.getInstance()
+
+    override fun observeFrom(from: LocalDate): Flow<Map<LocalDate, List<String>>> = flow {
+        ensureAuth()
+        emitAll(callbackFlow {
+            // 문서 ID 가 곧 날짜라 필드 대신 문서ID 범위로 자른다 — 색인이 따로 필요 없다.
+            val reg = db.collection("menus")
+                .whereGreaterThanOrEqualTo(FieldPath.documentId(), from.toString())
+                .addSnapshotListener { snap, _ ->
+                    trySend(
+                        snap?.documents.orEmpty().mapNotNull { d ->
+                            val date = runCatching { LocalDate.parse(d.id) }.getOrNull()
+                                ?: return@mapNotNull null
+                            @Suppress("UNCHECKED_CAST")
+                            val cells = (d.get("cells") as? List<*>)?.map { it as? String ?: "" }
+                                ?: return@mapNotNull null
+                            if (cells.size != WeeklyMenu.CELLS) return@mapNotNull null
+                            date to cells
+                        }.toMap()
+                    )
+                }
+            awaitClose { reg.remove() }
+        })
+    }
+
+    override suspend fun exists(weekStart: LocalDate): Boolean = runCatching {
+        db.collection("menus").document(weekStart.toString()).get().await().exists()
+    }.getOrDefault(false)
+
+    override suspend fun save(weekStart: LocalDate, cells: List<String>): AdminWriteResult {
+        if (!ensureAuth()) return AdminWriteResult.FAILED
+        return runCatching {
+            db.collection("menus").document(weekStart.toString()).set(
+                mapOf(
+                    "weekStart" to weekStart.toString(),
+                    "cells" to cells,
+                    "updatedAt" to FieldValue.serverTimestamp(),
+                )
+            ).await()
+            // 지난 주는 절대 보여주지 않으므로(WeeklyMenu KDoc) 4주 넘은 문서는 쓸모가 없다.
+            // 저장할 때 곁다리로 치운다 — 청소 전용 화면·워커를 따로 만들 이유가 없다.
+            runCatching {
+                db.collection("menus")
+                    .whereLessThan(FieldPath.documentId(), weekStart.minusWeeks(4).toString())
+                    .get().await().documents.forEach { it.reference.delete() }
+            }
+        }.fold({ AdminWriteResult.OK }, Throwable::asWriteResult)
+    }
+}
+
 /** 오프라인(로컬) 모드용 — 공유 데이터 없음 */
 @Singleton
 class LocalRosterRepository @Inject constructor() : RosterRepository {
     override fun observeUsers(): Flow<List<RosterEntry>> = flowOf(emptyList())
     override fun observeMonthOverrides(month: YearMonth): Flow<Map<String, Map<LocalDate, String>>> =
         flowOf(emptyMap())
+}
+
+/** 오프라인(로컬) 모드용 — 식단표는 서버가 있어야 공유된다 */
+@Singleton
+class LocalMenuRepository @Inject constructor() : MenuRepository {
+    override fun observeFrom(from: LocalDate): Flow<Map<LocalDate, List<String>>> = flowOf(emptyMap())
 }

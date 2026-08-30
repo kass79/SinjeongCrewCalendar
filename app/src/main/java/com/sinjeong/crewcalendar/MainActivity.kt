@@ -41,6 +41,7 @@ import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
+import com.sinjeong.crewcalendar.presentation.menu.MenuAdminScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
 import com.sinjeong.crewcalendar.presentation.timetable.DeadheadScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
@@ -150,17 +151,21 @@ private fun AppRoot() {
             modifier = Modifier.padding(padding),
         ) {
             // 동료근무("roster") 라우트는 v1.6.39에서 사라졌다 — 동료 탭으로 통합.
-            composable(Tab.Calendar.route) { MainCalendarScreen() }
+            composable(Tab.Calendar.route) {
+                MainCalendarScreen(onOpenMenuAdmin = { nav.navigate("menuAdmin") })
+            }
             composable("deadhead") { DeadheadScreen(onBack = { nav.popBackStack() }) }
             composable(Tab.Mates.route) { MatesScreen() }
             composable(Tab.Settings.route) {
                 SettingsScreen(
                     onOpenContacts = { nav.navigate("contacts") },
                     onOpenAdmin = { nav.navigate("admin") },
+                    onOpenMenuAdmin = { nav.navigate("menuAdmin") },
                 )
             }
             composable("contacts") { OfficeContactsScreen(onBack = { nav.popBackStack() }) }
             composable("admin") { AdminScreen(onBack = { nav.popBackStack() }) }
+            composable("menuAdmin") { MenuAdminScreen(onBack = { nav.popBackStack() }) }
         }
     }
 }

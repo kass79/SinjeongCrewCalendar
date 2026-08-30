@@ -1,2 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<paths><cache-path name="share" path="share/" /></paths>
+<!-- share/ = 근무표·식단표 공유 PNG · menu/ = 식단표 촬영 원본(인식 뒤 버려진다, 서버로 안 감) -->
+<paths>
+    <cache-path name="share" path="share/" />
+    <cache-path name="menu" path="menu/" />
+</paths>

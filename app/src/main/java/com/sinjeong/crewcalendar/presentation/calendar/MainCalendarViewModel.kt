@@ -7,6 +7,9 @@ import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.User
+import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
+import com.sinjeong.crewcalendar.domain.model.weekStartOf
+import com.sinjeong.crewcalendar.domain.repository.MenuRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.domain.usecase.GetMonthScheduleUseCase
 import com.sinjeong.crewcalendar.domain.usecase.SelectDutyPositionUseCase
@@ -101,8 +104,27 @@ class MainCalendarViewModel @Inject constructor(
     private val selectDutyPosition: SelectDutyPositionUseCase,
     private val updateDay: UpdateDayUseCase,
     private val userRepo: UserRepository,
+    menuRepo: MenuRepository,
     val themeController: ThemeController,
 ) : ViewModel() {
+
+    /**
+     * 구내식당 주간식단표 (v1.6.80) — 주 시작일(월) → 한 주치.
+     *
+     * `uiState`의 `combine`에 끼워 넣지 않고 따로 둔다. 그 combine은 7갈래를 배열로 받아
+     * 인덱스로 꺼내는 자리라 한 갈래만 늘려도 **전부 한 칸씩 밀 위험**이 있고, 식단표는
+     * 달력 계산과 아무 관계가 없다.
+     *
+     * **질의 하한이 이번 주 월요일**이라 지난 주 문서는 애초에 앱까지 오지도 않는다 —
+     * "지난주 메뉴를 보여주면 절대 안 된다"를 화면 로직이 아니라 구조로 막는다.
+     * (자정을 넘겨 앱이 켜져 있으면 하한이 한 주 낡을 수 있어, 화면도 열릴 때마다
+     *  `weekStartOf(오늘)`을 다시 구해 그 키로만 꺼낸다.)
+     */
+    val menus: StateFlow<Map<LocalDate, WeeklyMenu>> =
+        menuRepo.observeFrom(weekStartOf(LocalDate.now()))
+            .map { m -> m.mapValues { (start, cells) -> WeeklyMenu(start, cells) } }
+            .catch { emit(emptyMap()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     private val month = MutableStateFlow(YearMonth.now())
     private val selectedDate = MutableStateFlow<LocalDate?>(null)

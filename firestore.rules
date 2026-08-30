@@ -22,8 +22,8 @@ rules_version = '2';
 //    앱은 runCatching + await 없음이라 실패가 UI 에 안 뜬다 —
 //    신규 가입자가 동료 탭에 안 나타나는 증상으로만 새어나온다. **테스트가 유일한 경보다.**
 //
-// 앱이 쓰는 컬렉션은 users / rosterOverrides **둘 뿐**이다(FirestoreRepositories.kt 전수 확인).
-// 메모는 서버에 안 올린다(폰에만 저장).
+// 앱이 쓰는 컬렉션은 users / rosterOverrides / menus **셋**이다(FirestoreRepositories.kt 전수 확인).
+// 메모는 서버에 안 올린다(폰에만 저장). 식단표도 **사진 원본은 안 올린다** — 텍스트 21칸뿐이다.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -151,6 +151,49 @@ service cloud.firestore {
       //    피해는 제한적 — 원본은 각자 폰(로컬)에 남아 있고 다음 수정 때 다시 올라간다.
       allow delete: if signedIn()
         && docId == resource.data.get('uid', '') + '_' + resource.data.get('date', '');
+    }
+
+    // ── menus/{주 시작일} — 구내식당 주간식단표 (v1.6.80) ─────────────────
+    //  쓰기: FirestoreMenuRepository.save()  = weekStart/cells/updatedAt (3키)
+    //  읽기: observeFrom() = 문서ID(=주 시작일) 범위 쿼리
+    //  삭제: save() 가 4주 넘은 문서를 곁다리로 치운다
+    //
+    // ⚠ **"관리자만 쓰기"는 이 앱 구조에서 서버로 강제할 수 없다.**
+    //    인증이 **익명 로그인**이라 서버는 지금 쓰는 사람이 누구인지 알 방법이 없다
+    //    (파일 맨 위 전제와 같은 한계). 앱의 관리자 암호는 **화면만** 막는 것이고,
+    //    규칙이 걸 수 있는 것은 **모양 검사**뿐이다 — 스키마 밖 쓰레기·거대 문서·엉뚱한
+    //    문서ID 를 막아 "실수·장난에 의한 파괴"를 줄인다. 이 파일의 다른 컬렉션과 같은 수준이다.
+    //    진짜 관리자 강제는 사번 기반 계정(커스텀 토큰) 또는 Cloud Functions 경유 쓰기가 필요하고,
+    //    둘 다 앱 구조 변경이라 이번 범위 밖이다.
+    match /menus/{weekStart} {
+
+      // 21칸 전부 문자열이고 한 칸이 너무 길지 않은가. 규칙 언어엔 반복문이 없어 손으로 편다 —
+      // users/segsOk 와 같은 방식이고, 21회 평가는 요청당 1000 expression 상한에 한참 못 미친다.
+      function cellOk(c) { return c is string && c.size() <= 300; }
+      function cellsOk(cs) {
+        return cs is list && cs.size() == 21
+            && cellOk(cs[0])  && cellOk(cs[1])  && cellOk(cs[2])  && cellOk(cs[3])
+            && cellOk(cs[4])  && cellOk(cs[5])  && cellOk(cs[6])  && cellOk(cs[7])
+            && cellOk(cs[8])  && cellOk(cs[9])  && cellOk(cs[10]) && cellOk(cs[11])
+            && cellOk(cs[12]) && cellOk(cs[13]) && cellOk(cs[14]) && cellOk(cs[15])
+            && cellOk(cs[16]) && cellOk(cs[17]) && cellOk(cs[18]) && cellOk(cs[19])
+            && cellOk(cs[20]);
+      }
+
+      allow read: if signedIn();
+
+      allow create, update: if signedIn()
+        && request.resource.data.keys().hasAll(['weekStart', 'cells', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['weekStart', 'cells', 'updatedAt'])
+        && request.resource.data.weekStart is string
+        && request.resource.data.weekStart.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        // 문서ID 와 내용이 반드시 일치 — 8/24 주 내용을 9/7 자리에 심는 유령 문서 차단
+        && weekStart == request.resource.data.weekStart
+        && request.resource.data.updatedAt is timestamp
+        && cellsOk(request.resource.data.cells);
+
+      // 오래된 주 청소(save 곁다리). 지난 주는 앱이 아예 안 읽으므로 남겨 둘 이유가 없다.
+      allow delete: if signedIn();
     }
 
     // 앱이 안 쓰는 나머지 전부 차단 (schedules/patterns/dias/holidays 등은 미사용)

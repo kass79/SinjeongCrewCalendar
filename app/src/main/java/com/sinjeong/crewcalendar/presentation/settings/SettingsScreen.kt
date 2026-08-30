@@ -30,6 +30,9 @@ import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.menu.MenuStyle
+import com.sinjeong.crewcalendar.presentation.menu.menuStyleOf
+import com.sinjeong.crewcalendar.presentation.menu.setMenuStyle
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WX_LOC_FIXED_KEY
@@ -139,12 +142,15 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel(),
     onOpenContacts: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
+    onOpenMenuAdmin: () -> Unit = {},
 ) {
     val user by viewModel.user.collectAsStateWithLifecycle()
     val mode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val savedMonths by viewModel.savedMonths.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
     var askAdminPw by remember { mutableStateOf(false) }
+    /** 암호를 통과한 뒤 어디로 갈지 — 대리등록 / 식단표 올리기 두 곳이 같은 잠금을 쓴다 */
+    var afterUnlock by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     LaunchedEffect(user?.uid) { viewModel.refreshSavedMonths() }
 
@@ -225,6 +231,30 @@ fun SettingsScreen(
                                 fontSize = 11.sp,
                             )
                         }
+                    }
+                }
+            }
+
+            // 식단표 포스터 (v1.6.80). **관리자가 전체를 통일하는 게 아니라 각자 고른다**
+            // (사용자 확정). 위 테마·아래 날씨와 같은 세그먼트 한 줄 — 둘 중 하나를 고르는
+            // 같은 성격이라 한 벌로 읽힌다.
+            var menuStyle by remember { mutableStateOf(menuStyleOf(ctx)) }
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("식단표 포스터", fontWeight = FontWeight.Bold)
+                Text(
+                    if (menuStyle == MenuStyle.VINTAGE) "크림색 종이 · 명조체 · 레트로 전철"
+                    else "밝은 바탕 · 요일마다 다른 파스텔 색",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    MenuStyle.entries.forEachIndexed { i, s ->
+                        SegmentedButton(
+                            selected = menuStyle == s,
+                            onClick = { menuStyle = s; setMenuStyle(ctx, s) },
+                            shape = SegmentedButtonDefaults.itemShape(i, MenuStyle.entries.size),
+                        ) { Text(s.label, fontSize = 11.sp) }
                     }
                 }
             }
@@ -379,7 +409,17 @@ fun SettingsScreen(
                 trailing = {
                     TextButton(onClick = {
                         if (com.sinjeong.crewcalendar.presentation.admin.AdminGate.unlocked) onOpenAdmin()
-                        else askAdminPw = true
+                        else { afterUnlock = onOpenAdmin; askAdminPw = true }
+                    }) { Text("열기") }
+                },
+            )
+            SettingRow(
+                title = "주간식단표 올리기",
+                sub = "구내식당 표 사진·PDF를 넣으면 글자를 읽어 21칸을 채웁니다 (암호 필요)",
+                trailing = {
+                    TextButton(onClick = {
+                        if (com.sinjeong.crewcalendar.presentation.admin.AdminGate.unlocked) onOpenMenuAdmin()
+                        else { afterUnlock = onOpenMenuAdmin; askAdminPw = true }
                     }) { Text("열기") }
                 },
             )
@@ -414,8 +454,8 @@ fun SettingsScreen(
     }
 
     if (askAdminPw) com.sinjeong.crewcalendar.presentation.admin.AdminPasswordDialog(
-        onUnlocked = { askAdminPw = false; onOpenAdmin() },
-        onDismiss = { askAdminPw = false },
+        onUnlocked = { askAdminPw = false; (afterUnlock ?: onOpenAdmin)(); afterUnlock = null },
+        onDismiss = { askAdminPw = false; afterUnlock = null },
     )
 
     if (confirmLogout) {

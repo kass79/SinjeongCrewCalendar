@@ -1,0 +1,50 @@
+<!--
+  주간식단표 카드 아이콘 (v1.6.80 직접 제작 — 외부 이미지·타사 아이콘 아님).
+
+  [ic_tt_work](시계)·[ic_tt_deadhead](전동차)·[ic_tt_room](침대)와 한 벌: 24dp 뷰포트 ·
+  **파스텔 채움 + 딥 톤 외곽선** · 둥근 끝단. 색만 다르다 — 민트(근무)·라벤더(편승)·
+  모래(침실)와 안 겹치는 살구빛(#F8C9AE / #A8482A). 형태는 식판 위 밥공기 + 젓가락이라
+  22dp에서도 나머지 셋과 실루엣이 갈린다.
+  ⚠ tint가 먹으면 색이 통째로 날아간다 — `Icon`이 아니라 `Image(painterResource(...))`로 그릴 것.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+
+    <!-- 식판(쟁반) -->
+    <path
+        android:pathData="M2.2,15.6 h19.6 a1.0,1.0 0 0 1 1.0,1.0 v1.2 a2.2,2.2 0 0 1 -2.2,2.2 h-17.2 a2.2,2.2 0 0 1 -2.2,-2.2 v-1.2 a1.0,1.0 0 0 1 1.0,-1.0 z"
+        android:fillColor="#F8C9AE"
+        android:strokeColor="#A8482A"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round" />
+
+    <!-- 밥공기(뚜껑 덮인 그릇) -->
+    <path
+        android:pathData="M4.6,15.4 a5.6,5.6 0 0 1 11.2,0 z"
+        android:fillColor="#FFF3E6"
+        android:strokeColor="#A8482A"
+        android:strokeWidth="1.5"
+        android:strokeLineJoin="round" />
+
+    <!-- 그릇 손잡이 꼭지 -->
+    <path
+        android:pathData="M10.2,8.5 v1.6"
+        android:strokeColor="#A8482A"
+        android:strokeWidth="1.6"
+        android:strokeLineCap="round" />
+
+    <!-- 젓가락 두 짝 -->
+    <path
+        android:pathData="M17.6,5.6 l1.4,9.0"
+        android:strokeColor="#A8482A"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round" />
+    <path
+        android:pathData="M20.4,5.4 l-0.6,9.2"
+        android:strokeColor="#A8482A"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round" />
+</vector>

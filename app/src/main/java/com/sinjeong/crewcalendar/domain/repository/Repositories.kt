@@ -72,6 +72,28 @@ data class RosterEntry(
  */
 enum class AdminWriteResult { OK, DENIED, FAILED }
 
+/**
+ * 구내식당 주간식단표 (v1.6.80). 문서 ID = **주 시작일(월요일)** — 여러 주가 나란히 산다.
+ *
+ * 왜 여러 주인지는 [com.sinjeong.crewcalendar.domain.model.WeeklyMenu] KDoc 참고
+ * (다음 주 표가 **일요일쯤** 나오는데 한 장만 들고 있으면 그날 점심이 사라진다).
+ *
+ * 오프라인 캐시는 **따로 만들지 않는다** — Firestore 안드로이드 SDK 는 로컬 영속화가 기본 켜짐이라
+ * 스냅샷 리스너가 마지막으로 받은 문서를 오프라인에서 그대로 돌려준다. 지하 터널에서 쓰는 앱이라
+ * 이 동작이 곧 요구사항이고, 별도 SharedPreferences 미러는 두 벌을 어긋나게 만들 뿐이다.
+ */
+interface MenuRepository {
+    /** [from] 이후로 시작하는 주들 (주 시작일 → 21칸). 오래된 주는 [save] 가 청소한다 */
+    fun observeFrom(from: LocalDate): Flow<Map<LocalDate, List<String>>>
+
+    /** 관리자 저장. 같은 주 문서가 있으면 통째로 덮어쓴다(화면이 먼저 확인을 받는다) */
+    suspend fun save(weekStart: LocalDate, cells: List<String>): AdminWriteResult =
+        AdminWriteResult.FAILED
+
+    /** 이미 그 주 문서가 있나 — 편집 화면의 "덮어쓸까요?" 확인용 */
+    suspend fun exists(weekStart: LocalDate): Boolean = false
+}
+
 interface RosterRepository {
     fun observeUsers(): Flow<List<RosterEntry>>
     /** 해당 월 근무변경 전체: uid → (날짜 → 변경 근무) */

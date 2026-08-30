@@ -23,8 +23,8 @@ android {
         // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
         // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
         targetSdk = 36
-        versionCode = 91
-        versionName = "1.6.79"
+        versionCode = 92
+        versionName = "1.6.80"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -121,6 +121,12 @@ dependencies {
     // Widget (Glance)
     implementation(libs.glance.appwidget)
     implementation(libs.glance.material3)
+
+    // 주간식단표 글자인식(v1.6.80) — **다운로드형** ML Kit 한국어 인식기.
+    // 모델은 구글 플레이 서비스가 들고 있어 APK 에는 얇은 접착제만 들어간다(번들판은 +4MB).
+    // 대신 관리자가 처음 쓸 때 모델이 내려받아지는 짧은 대기가 있고, GMS 없는 기기에선 안 된다 —
+    // 이 앱은 이미 Firebase(로그인·공유) 때문에 GMS 전제라 새로 생기는 제약이 아니다.
+    implementation(libs.mlkit.text.korean)
 
     // Background sync
     implementation(libs.androidx.work.runtime)

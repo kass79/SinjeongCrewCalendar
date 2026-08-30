@@ -59,7 +59,11 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.domain.model.weekStartOf
+import com.sinjeong.crewcalendar.presentation.admin.AdminGate
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
+import com.sinjeong.crewcalendar.presentation.menu.MenuDialog
+import com.sinjeong.crewcalendar.presentation.menu.menuStyleOf
 import com.sinjeong.crewcalendar.presentation.roster.changedCorner
 import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
@@ -88,9 +92,12 @@ import java.util.Locale
 fun MainCalendarScreen(
     onOpenTimetable: () -> Unit = {},
     onOpenDeadhead: () -> Unit = {},
+    /** 식단표가 비었을 때 관리자에게만 보이는 "올리기" 버튼이 여기로 간다(v1.6.80) */
+    onOpenMenuAdmin: () -> Unit = {},
     viewModel: MainCalendarViewModel = hiltViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val menus by viewModel.menus.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
@@ -103,6 +110,8 @@ fun MainCalendarScreen(
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
     // 침실배정표(v1.6.74) — 열려 있는 조합. null이면 닫힘. 처음엔 오늘 조합으로 열고 칩으로 갈아탄다.
     var roomCombo by remember { mutableStateOf<NightCombo?>(null) }
+    // 주간식단표(v1.6.80). ⚠ `rememberSaveable` 금지(CLAUDE.md) — 이 파일에선 초기값이 안 먹는다.
+    var showMenu by remember { mutableStateOf(false) }
     // 근무 저장 확인 대화상자가 걸린 날짜(길게 누른 날). ⚠ `rememberSaveable`은 이 파일에서
     // 초기값이 조용히 깨진다(CLAUDE.md) — `remember`를 쓴다(회전 시 대화상자는 닫힌다).
     var freezeAsk by remember { mutableStateOf<LocalDate?>(null) }
@@ -223,6 +232,7 @@ fun MainCalendarScreen(
                         onOpenTimetable = { fullTimetable = "tt_work" to "근무시각표" },
                         onOpenDeadhead = { fullTimetable = "tt_deadhead" to "편승시각표" },
                         onOpenRooms = { roomCombo = Bundled.comboOf(LocalDate.now()) },
+                        onOpenMenu = { showMenu = true },
                         frozenUntil = state.user?.frozenUntil,
                         onLongPress = { freezeAsk = it },
                         modifier = Modifier.weight(1f),
@@ -372,6 +382,18 @@ fun MainCalendarScreen(
         )
     }
 
+    // 주간식단표 (v1.6.80) — **달력이 몇 월을 보고 있든 늘 "오늘이 속한 주"**를 연다.
+    // 주 판정을 여기서 다시 하는 이유는 MainCalendarViewModel.menus KDoc 참고(자정 넘김 대비).
+    if (showMenu) MenuDialog(
+        weeks = menus,
+        thisWeek = weekStartOf(LocalDate.now()),
+        // 열 때마다 다시 읽는다 — 설정에서 스타일을 바꾸고 돌아왔을 때 바로 반영되게
+        style = remember(showMenu) { menuStyleOf(context) },
+        isAdmin = AdminGate.unlocked,
+        onUpload = { showMenu = false; onOpenMenuAdmin() },
+        onDismiss = { showMenu = false },
+    )
+
     // 근무 저장 (v1.6.69) — 길게 누른 날짜까지 확정
     freezeAsk?.let { date ->
         FreezeConfirmDialog(
@@ -496,6 +518,7 @@ private fun CalendarGrid(
     onOpenTimetable: () -> Unit,
     onOpenDeadhead: () -> Unit,
     onOpenRooms: () -> Unit,
+    onOpenMenu: () -> Unit,
     /** 근무 저장(v1.6.69)으로 확정한 마지막 날. 이 날 이하 칸은 연녹색 바탕 */
     frozenUntil: LocalDate?,
     onLongPress: (LocalDate) -> Unit,
@@ -505,21 +528,31 @@ private fun CalendarGrid(
     val cells0: List<DaySchedule?> = List(leading) { null } + days
     val trailing = (7 - (cells0.size % 7)) % 7
     val cells: List<DaySchedule?> = cells0 + List(trailing) { null }
-    // 빈 칸(null) 3개 = 근무시각표 / 편승시각표 / 침실배정표 카드.
+    // 빈 칸(null) 4개 = 근무시각표 / 편승시각표 / 침실배정표 / 주간식단표 카드.
     // v1.6.59에서 날씨를 헤더 칩(`WeatherChip`)으로 옮겨 두 칸만 쓰다가, v1.6.74에 그 빈자리를
-    // 침실배정표가 받았다.
+    // 침실배정표가, v1.6.80에 식단표가 받았다.
     // ⚠ 카드는 **이미 비어 있는 칸을 채울 뿐** 자리를 예약하지 않는다(leading은 1일의 요일에서만
     //   나온다). 그래서 카드를 늘리든 줄이든 1일이 앉는 요일 칸은 그대로다.
-    // 셋은 **한 덩어리로** 놓는다: 앞 빈칸(1일 앞)이 3개 이상이면 거기(첫 줄), 아니면 뒷 빈칸으로
-    // 통째로 옮긴다 — 2026년 9월처럼 앞이 2칸인 달에서 앞에 둘·뒤에 하나로 갈라지면 한 벌로 안 읽힌다.
-    // 어느 쪽도 3개가 안 되는 달(1일 화요일 + 31일 달 등)만 갈라지더라도 셋 다 보여주고,
-    // 빈 칸 자체가 모자라면 `getOrNull`이 남는 카드를 조용히 뺀다(2월 1일이 일요일인 해).
+    // 넷은 **한 덩어리로** 놓는다: 앞 빈칸(1일 앞)이 4개 이상이면 거기(첫 줄), 아니면 뒷 빈칸으로
+    // 통째로 옮긴다 — 앞에 둘·뒤에 둘로 갈라지면 한 벌로 안 읽힌다.
+    //
+    // **어느 쪽도 4개가 안 되는 달은 갈라진다** — 사용자 확정(v1.6.80): *"빈칸4개가 갈라지면
+    // 어쩔수없지.. 갈라져도 돼"*. 그래서 날씨 칩 옆 별도 진입점을 만들지 않았다.
+    // 2026~2028년 실계산: 갈라지는 달은 2026-04·07·09·12, 2027-03·06·09·12, 2028-03·05·08·11
+    // (전부 앞·뒤가 각각 3칸 이하). 나머지 달은 넷이 한 줄에 붙는다.
+    //
+    // ⚠ **빈 칸이 아예 0개인 달이 있다** — 28일 2월이 일요일로 시작하면 7×4=28로 딱 떨어져
+    //   빈 칸이 하나도 없고, `getOrNull`이 카드 네 장을 모두 조용히 뺀다. 이건 v1.6.80이 만든
+    //   문제가 아니라 카드가 생긴 이래 그대로였다(2026-02에 이미 세 장이 다 사라졌다).
+    //   다음은 **2037-02 · 2043-02 · 2054-02**다. 그 밖의 달은 빈 칸이 최소 4개라 넷이 다 들어간다
+    //   (31일 달 4 또는 11 · 30일 달 5 또는 12 · 29일 달 6 · 28일 달 0 또는 7).
     val lead = cells.indices.filter { cells[it] == null && it < leading }
     val trail = cells.indices.filter { cells[it] == null && it >= leading }
-    val slots = listOf(lead, trail).firstOrNull { it.size >= 3 } ?: (lead + trail)
+    val slots = listOf(lead, trail).firstOrNull { it.size >= 4 } ?: (lead + trail)
     val card1 = slots.getOrNull(0)
     val card2 = slots.getOrNull(1)
     val card3 = slots.getOrNull(2)
+    val card4 = slots.getOrNull(3)
     val duty = LocalDutyColors.current
     var dragX by remember { mutableFloatStateOf(0f) }
     val rows = (cells.size + 6) / 7
@@ -565,6 +598,7 @@ private fun CalendarGrid(
                     card1 -> TimetableCard("근무시각표", R.drawable.ic_tt_work, onOpenTimetable, cellHeight, duty.main, duty.onMain)
                     card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.main, duty.onMain)
                     card3 -> TimetableCard("침실배정표", R.drawable.ic_tt_room, onOpenRooms, cellHeight, duty.main, duty.onMain)
+                    card4 -> TimetableCard("주간식단표", R.drawable.ic_tt_menu, onOpenMenu, cellHeight, duty.main, duty.onMain)
                     else -> if (day == null) Spacer(Modifier.height(cellHeight))
                     else DayCell(
                         day, isSelected = day.date == selected, height = cellHeight,
