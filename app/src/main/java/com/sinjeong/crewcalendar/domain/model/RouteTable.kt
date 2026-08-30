@@ -1,5 +1,7 @@
 package com.sinjeong.crewcalendar.domain.model
 
+import java.time.LocalDate
+
 /**
  * 행로표(신정승무사업소 근무표, 확인일 2023.10.04 — 시각과 대조해 현행본 확인됨) 열번·근무시간 데이터.
  * 본선(1~29 주간, 33~51 야간 4종 조합 전체) 확보 — 지선 행로표만 미입수.
@@ -267,4 +269,45 @@ object RouteTable {
         if (number >= DutyCode.BRANCH_NIGHT_FROM)
             (if (holiday) BRANCH_NIGHT_HOLIDAY else BRANCH_NIGHT_WEEKDAY)[number]
         else (if (holiday) BRANCH_DAY_HOLIDAY else BRANCH_DAY_WEEKDAY)[number]
+
+    /**
+     * 그 근무의 **행로표 원본 그림 파일 이름**(`assets/routes/{이름}.webp`). 없으면 `null`.
+     *
+     * v1.6.81 ②에서 `MainCalendarScreen` 안에 인라인으로 있던 계산을 그대로 옮겨 왔다 —
+     * 동료 탭 격자에서 근무를 눌러도 같은 행로표가 떠야 하는데(사용자: *"즐겨찾기 이름 옆에
+     * 근무를 찍으면 행로표가 보이는게 구현하기 어려움?"*), 같은 규칙이 두 군데 있으면
+     * 한쪽만 고쳐 어긋난다. **부르는 곳이 둘이라 여기 한 벌만 둔다.**
+     *
+     * ⚠ 넘기는 값은 [DutyCode] 그대로다. 충당 계열(`충당 9`)은 [DutyCode.parse]가 이미
+     * 뒤따르는 다이아의 `type`·`number`·`isBranch`를 물려주므로 대신 뛰는 다이아의 행로표가
+     * 그대로 나온다(달력 상세시트와 같은 동작).
+     *
+     * 돌려주는 이름은 **자산이 실제로 있는 것만**이다(전수 대조: `wd_1~29` · `hol_1~25` ·
+     * `pp/ph/hp/hh_33~51` · `bwd/bhol_1~8` · `bnwd/bnhol_10~14`). 그래서 부르는 쪽은
+     * `null`이면 "행로표 없음", 아니면 "연다"로만 갈라도 된다.
+     *  · 휴일 본선 주간 26~29는 그날 운휴라 표가 없다 → `null`
+     *  · 지선 야간 표는 시각이 조합과 무관해 **당일 평일/휴일 2종**이면 충분하다
+     *  · 대기(대1~13)·지선대기·휴무·비번은 애초에 행로표라는 것이 없다 → `null`
+     */
+    fun assetFor(duty: DutyCode, date: LocalDate): String? {
+        val n = duty.number ?: return null
+        val holiday = Bundled.isHolidayTimetable(date)
+        return when {
+            duty.isBranch -> when {
+                duty.type == DutyType.BRANCH && n in 1..8 -> if (holiday) "bhol_$n" else "bwd_$n"
+                duty.type == DutyType.BRANCH_NIGHT && n in DutyCode.BRANCH_NIGHT_FROM..14 ->
+                    if (holiday) "bnhol_$n" else "bnwd_$n"
+                else -> null
+            }
+            duty.type == DutyType.MAIN_NIGHT -> when (Bundled.comboOf(date)) {
+                NightCombo.PP -> "pp_$n"
+                NightCombo.PH -> "ph_$n"
+                NightCombo.HP -> "hp_$n"
+                NightCombo.HH -> "hh_$n"
+            }
+            duty.type == DutyType.MAIN_DAY ->
+                if (holiday) { if (n <= 25) "hol_$n" else null } else "wd_$n"
+            else -> null
+        }
+    }
 }

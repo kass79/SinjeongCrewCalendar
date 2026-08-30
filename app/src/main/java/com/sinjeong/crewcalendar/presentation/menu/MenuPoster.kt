@@ -7,8 +7,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -43,11 +45,21 @@ import com.sinjeong.crewcalendar.domain.model.menuEmoji
  * (`충무식→홍무식` · `얼큰국→얼콘국` · `달걀장조림→달결장조림` · `신정차량사업소→산정차량사업스`).
  * 견본은 **레이아웃·색·구성의 참고**일 뿐이고, 글자는 관리자가 확정한 텍스트를 그대로 렌더한다.
  *
- * ## 왜 세로 흐름인가
+ * ## 배치 — **7행(요일) × 3열(끼니) 표** (v1.6.81 ③에서 세로 흐름을 갈아엎었다)
  *
- * 원본은 7열 × 3행 표지만 360dp 폰에서 4열로 나누면 칸 하나가 85dp — 메뉴 4~6줄이 안 들어간다.
- * 그래서 **하루씩 아래로** 흐르게 하고 끼니 머리글을 날마다 되풀이한다. 1배에서 그냥 읽히고,
- * 확대는 글자배율을 크게 쓰는 사람을 위한 덤이다(벡터라 몇 배로 키워도 선명하다).
+ * v1.6.80은 "하루씩 아래로" 흐르는 세로 배치였다. 그 근거는 *"원본은 7열 × 3행 표지만 360dp
+ * 폰에서 4열로 나누면 칸 하나가 85dp"* 였는데, **그 계산이 요일을 열로 놓은 것**이었다.
+ * 사용자 신고: *"주간식단표 지금 한화면에 석식까지는 안나오는데..한화면에 나오게 하면?"* —
+ * 세로 흐름은 21칸이 세로로 늘어서서 한 화면에 하루 반도 못 담는다(411dp 실측 약 2,350dp).
+ *
+ * **표를 뒤집으면 풀린다**: 요일을 행, 끼니를 열로 두면 열이 셋뿐이라 411dp에서 칸 폭이
+ * **112dp**다(85dp가 아니라). 메뉴 이름은 대개 6~9글자라 10sp면 한 줄에 들어가고, 긴 것만
+ * 두 줄로 접힌다. 전체 높이가 **약 640dp**로 줄어 1배에서 석식·리본까지 다 보인다.
+ *
+ * 행 높이는 [IntrinsicSize.Min] + `fillMaxHeight`로 **그 요일의 세 칸 중 가장 긴 것에 맞춰
+ * 넷이 같이 늘어난다** — 칸마다 높이가 들쭉날쭉하면 표가 아니라 계단이 된다.
+ *
+ * 확대(핀치 1~4배)는 그대로다 — 벡터라 몇 배로 키워도 선명하다.
  *
  * ## 글꼴
  *
@@ -152,49 +164,66 @@ fun MenuPoster(
     val ms = menu.weekStart
     val me = menu.weekEnd
 
+    val round = if (serif) 6.dp else 12.dp
+
     Column(
         modifier
             .background(p.paper)
-            .padding(horizontal = 12.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp),
     ) {
         // ── 머리 ────────────────────────────────────────────
+        // 사업소 이름까지 머리 안으로 넣어 **한 덩어리**로 만들었다(v1.6.81 ③) —
+        // 바깥에 한 줄로 두면 그 줄만 22dp를 먹는데, 표를 한 화면에 넣는 게 우선이다.
         Box(
             Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(if (serif) 6.dp else 22.dp))
+                .clip(RoundedCornerShape(if (serif) 6.dp else 18.dp))
                 .background(p.headerBg)
-                .padding(vertical = 10.dp, horizontal = 12.dp),
+                .padding(vertical = 7.dp, horizontal = 10.dp),
         ) {
-            Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "주간식단표", color = p.headerFg, fontFamily = family,
-                    fontSize = 21.sp, fontWeight = FontWeight.ExtraBold,
-                )
-                Text(
-                    "WEEKLY MENU · ${ms.year}.${ms.monthValue}.${ms.dayOfMonth}" +
-                        " - ${me.monthValue}.${me.dayOfMonth}",
-                    color = p.headerFg.copy(alpha = 0.9f), fontFamily = family,
-                    fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp,
-                )
-            }
-        }
-        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            if (serif) {
-                RetroTrain(Modifier.size(46.dp, 24.dp))
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                if (serif) RetroTrain(Modifier.size(38.dp, 20.dp))
+                else Text("🍽", fontSize = 16.sp)
                 Spacer(Modifier.width(8.dp))
-            } else {
-                Text("🍽", fontSize = 18.sp)
-                Spacer(Modifier.width(6.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "주간식단표", color = p.headerFg, fontFamily = family,
+                        fontSize = 17.sp, fontWeight = FontWeight.ExtraBold,
+                    )
+                    Text(
+                        "서울교통공사 신정차량사업소 구내식당",
+                        color = p.headerFg.copy(alpha = 0.88f), fontFamily = family,
+                        fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1,
+                    )
+                }
+                Text(
+                    "${ms.monthValue}.${ms.dayOfMonth} - ${me.monthValue}.${me.dayOfMonth}",
+                    color = p.headerFg, fontFamily = family,
+                    fontSize = 11.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
+                )
             }
-            Text(
-                "서울교통공사 신정차량사업소 구내식당",
-                color = p.ink, fontFamily = family,
-                fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-            )
         }
 
-        // ── 하루씩 ──────────────────────────────────────────
+        // ── 끼니 머리글 (표의 열 이름) ───────────────────────
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Spacer(Modifier.width(DAY_W))
+            Meal.entries.forEach { meal ->
+                // ⚠ **`maxLines`를 걸지 않는다**(v1.6.81 ③ 실측). 한 줄로 못 박았더니
+                // 글자배율 1.5에서 `07:30~09:00`이 통째로 잘려 **끼니 시각이 사라졌다.**
+                // 그냥 두면 배율 1.0에선 한 줄이고 좁아질 때만 시각이 아랫줄로 접힌다 —
+                // 평상시 높이 비용 0dp에 정보는 어느 배율에서도 남는다.
+                Text(
+                    "${meal.emoji} ${meal.label} ${meal.time}",
+                    color = p.mealFg, fontFamily = family,
+                    fontSize = 9.sp, lineHeight = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.weight(1f),
+                )
+            }
+        }
+
+        // ── 7행(요일) × 3열(끼니) ────────────────────────────
         for (d in 0 until WeeklyMenu.DAYS) {
             val date = ms.plusDays(d.toLong())
             val dayBg = when {
@@ -203,56 +232,61 @@ fun MenuPoster(
                 else -> PASTEL_DAY[d].first
             }
             val dayFg = if (style == MenuStyle.VINTAGE) p.dayFg else p.ink
+            // ⚠ `IntrinsicSize.Min` + 자식들의 `fillMaxHeight` = **한 행의 네 칸이 같은 높이**.
+            // 없으면 조식만 짧은 날 그 칸이 쪼그라들어 표가 계단처럼 보인다.
             Row(
-                Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(if (serif) 8.dp else 16.dp))
-                    .background(dayBg)
-                    .padding(horizontal = 12.dp, vertical = 7.dp),
-                verticalAlignment = Alignment.CenterVertically,
+                Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                Text(
-                    "${date.monthValue}월 ${date.dayOfMonth}일",
-                    color = dayFg, fontFamily = family,
-                    fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    WeeklyMenu.DAY_LABELS[d],
-                    color = dayFg.copy(alpha = 0.85f), fontFamily = family,
-                    fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                )
-                Spacer(Modifier.weight(1f))
-                if (style == MenuStyle.PASTEL) Text(PASTEL_DAY[d].second, fontSize = 15.sp)
-            }
-
-            for (meal in Meal.entries) {
-                val items = menu.items(d, meal)
                 Column(
-                    Modifier.fillMaxWidth()
-                        .padding(start = 6.dp)
-                        .clip(RoundedCornerShape(if (serif) 6.dp else 14.dp))
-                        .background(p.cardBg)
-                        .border(1.dp, p.cardBorder, RoundedCornerShape(if (serif) 6.dp else 14.dp))
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    Modifier.width(DAY_W).fillMaxHeight()
+                        .clip(RoundedCornerShape(round))
+                        .background(dayBg)
+                        .padding(vertical = 5.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
                 ) {
                     Text(
-                        "${meal.emoji} ${meal.label} ${meal.time}",
-                        color = p.mealFg, fontFamily = family,
-                        fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
+                        "${date.monthValue}/${date.dayOfMonth}",
+                        color = dayFg, fontFamily = family,
+                        fontSize = 11.sp, lineHeight = 13.sp,
+                        fontWeight = FontWeight.ExtraBold, maxLines = 1,
                     )
-                    if (items.isEmpty()) {
-                        Text(
-                            "-", color = p.ink.copy(alpha = 0.45f), fontFamily = family, fontSize = 12.sp,
-                        )
-                    } else items.forEach { item ->
-                        // 이모지는 맞는 게 있을 때만. 없으면 불릿만 — 엉뚱한 그림보다 없는 게 낫다.
-                        val e = menuEmoji(item)
-                        Text(
-                            "· $item" + if (e != null) " $e" else "",
-                            color = p.ink, fontFamily = family,
-                            fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                        )
+                    Text(
+                        WeeklyMenu.DAY_LABELS[d],
+                        color = dayFg.copy(alpha = 0.85f), fontFamily = family,
+                        fontSize = 11.sp, lineHeight = 13.sp,
+                        fontWeight = FontWeight.Bold, maxLines = 1,
+                    )
+                    if (style == MenuStyle.PASTEL) Text(PASTEL_DAY[d].second, fontSize = 11.sp)
+                }
+                Meal.entries.forEach { meal ->
+                    val items = menu.items(d, meal)
+                    Column(
+                        Modifier.weight(1f).fillMaxHeight()
+                            .clip(RoundedCornerShape(round))
+                            .background(p.cardBg)
+                            .border(1.dp, p.cardBorder, RoundedCornerShape(round))
+                            .padding(horizontal = 5.dp, vertical = 5.dp),
+                        verticalArrangement = Arrangement.spacedBy(1.dp),
+                    ) {
+                        if (items.isEmpty()) {
+                            Text(
+                                "-", color = p.ink.copy(alpha = 0.45f), fontFamily = family,
+                                fontSize = 10.sp, lineHeight = 13.sp,
+                            )
+                        } else items.forEach { item ->
+                            // 이모지는 맞는 게 있을 때만. 없으면 그냥 이름만 — 엉뚱한 그림보다 없는 게 낫다.
+                            // 불릿(`·`)은 뺐다(v1.6.81 ③) — 좁아진 칸에서 한 글자가 아깝고,
+                            // 칸 테두리가 이미 "여기부터 한 칸"을 말해 준다.
+                            val e = menuEmoji(item)
+                            Text(
+                                item + if (e != null) " $e" else "",
+                                color = p.ink, fontFamily = family,
+                                fontSize = 10.sp, lineHeight = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                            )
+                        }
                     }
                 }
             }
@@ -263,17 +297,24 @@ fun MenuPoster(
             Modifier.fillMaxWidth()
                 .clip(RoundedCornerShape(if (serif) 4.dp else 999.dp))
                 .background(p.ribbonBg)
-                .padding(vertical = 8.dp),
+                .padding(vertical = 5.dp),
         ) {
             Text(
                 if (serif) "정식 3,000원" else "🍽 정식 3,000원",
                 color = p.ribbonFg, fontFamily = family,
-                fontSize = 14.sp, fontWeight = FontWeight.ExtraBold,
+                fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
                 textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth(),
             )
         }
     }
 }
+
+/**
+ * 요일 칸 폭. `8/24` 넉 자가 11sp에서 들어가는 최소치(약 30dp) + 좌우 숨통.
+ * 여기를 넓히면 메뉴 칸 셋이 그만큼씩 좁아진다 — 411dp 기준 칸 폭은
+ * `(411 − 20 − DAY_W − 9) ÷ 3`이다(DAY_W 40이면 **114dp**).
+ */
+private val DAY_W = 40.dp
 
 /**
  * 빈티지 머리의 레트로 전철 — 견본의 초록/크림 톤 일러스트를 도형 몇 개로 옮겼다.

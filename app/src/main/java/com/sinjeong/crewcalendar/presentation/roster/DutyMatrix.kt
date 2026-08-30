@@ -622,6 +622,12 @@ fun MatrixRow(
     /** 홀짝 줄무늬 — 사람이 많을 때 가로로 눈이 미끄러지는 걸 막는다 */
     zebra: Boolean = false,
     onNameClick: () -> Unit = {},
+    /**
+     * 근무 칸을 눌렀을 때 — 그 날짜의 **그 사람 근무**를 그대로 넘긴다(v1.6.81 ②).
+     * 이름 열과 **터치 영역이 물리적으로 갈려 있다**: 이름은 왼쪽 고정 칸(`nameW`)의
+     * `clickable`이고 근무 칸은 가로 스크롤되는 오른쪽 [Row] 안이라 서로 겹치지 않는다.
+     */
+    onDutyClick: (LocalDate, DutyCode) -> Unit = { _, _ -> },
 ) {
     val pattern = Bundled.patternFor(p.group)
     val today = LocalDate.now()
@@ -707,6 +713,10 @@ fun MatrixRow(
                 Box(
                     Modifier.width(m.cellW).height(m.cellH + m.rowPadV * 2)
                         .columnBand(date, today, duty)
+                        // 눌러서 행로표(v1.6.81 ②). 밴드·레일 **뒤**, 여백 **앞**에 걸어
+                        // ⓐ 물결 효과가 칸 전체에 퍼지고 ⓑ 손가락이 칸 가장자리를 짚어도 걸린다.
+                        // 가로 스크롤 안에 있어도 탭과 끌기는 컴포즈가 알아서 가른다(실화면 확인).
+                        .clickable { onDutyClick(date, code) }
                         .padding(
                             horizontal = MatrixMetrics.CELL_GAP,
                             vertical = m.rowPadV,

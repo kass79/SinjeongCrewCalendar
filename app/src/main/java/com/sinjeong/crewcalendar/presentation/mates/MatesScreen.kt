@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.mates
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -28,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
@@ -43,6 +45,7 @@ import com.sinjeong.crewcalendar.domain.repository.MateRepository
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.calendar.RouteImageDialog
 import com.sinjeong.crewcalendar.presentation.roster.*
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -304,6 +307,13 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     var showAdd by remember { mutableStateOf(false) }
     var sheetTarget by remember { mutableStateOf<MatrixPerson?>(null) }
     var editTarget by remember { mutableStateOf<Mate?>(null) }
+    /**
+     * 근무 칸을 눌러 연 **행로표** (v1.6.81 ②). `(자산이름, 제목)`. null이면 닫힘.
+     * 사용자: *"즐겨찾기 이름 옆에 근무를 찍으면 행로표가 보이는게 구현하기 어려움?"*
+     * 즐겨찾기뿐 아니라 **목록의 모든 사람·모든 날짜**가 같은 동작이다 — 규칙이 하나면 헷갈리지 않는다.
+     */
+    var routeTarget by remember { mutableStateOf<Pair<String, String>?>(null) }
+    val ctx = LocalContext.current
 
     val duty = LocalDutyColors.current
     // ⚠ `MatrixMetrics.Roomy`를 직접 쓰지 말 것 — 이름 열이 dp 고정이라 글자배율 1.5부터
@@ -615,7 +625,19 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                             isFav = p.key in favKeys,
                             overrides = p.uid?.let { monthOverrides[it] } ?: emptyMap(),
                             zebra = i % 2 == 1,
-                            onNameClick = { sheetTarget = p })
+                            onNameClick = { sheetTarget = p },
+                            onDutyClick = { date, code ->
+                                // 행로표가 있는 다이아만 연다. 휴무·비번·대기처럼 표가 없는 근무는
+                                // 다이얼로그를 빈 채로 띄우지 않고 **토스트 한 줄**로 끝낸다
+                                // (없는 걸 보여 주려고 화면을 덮는 건 손해다).
+                                val asset = RouteTable.assetFor(code, date)
+                                if (asset == null) Toast.makeText(
+                                    ctx, "행로표가 없는 근무예요", Toast.LENGTH_SHORT,
+                                ).show()
+                                else routeTarget = asset to
+                                    "${date.monthValue}/${date.dayOfMonth} " +
+                                    "${p.displayName} · ${code.displayLong} 다이아 행로표"
+                            })
                     }
                 }
             }
@@ -636,6 +658,12 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             onRemove = if (mate != null && !person.isMe) ({ viewModel.remove(mate) }) else null,
             onEdit = if (manual && !person.isMe) ({ editTarget = mate }) else null,
         )
+    }
+
+    // 달력 상세시트가 쓰는 **그 뷰어 그대로**다(핀치 확대·회전·폴드 펼침 잘림 처리 전부 포함).
+    // 새 뷰어를 만들지 않았다 — v1.6.77이 고쳐 둔 자리를 두 벌로 만들면 한쪽만 낡는다.
+    routeTarget?.let { (asset, title) ->
+        RouteImageDialog(asset = asset, title = title, onDismiss = { routeTarget = null })
     }
 
     if (showAdd) {

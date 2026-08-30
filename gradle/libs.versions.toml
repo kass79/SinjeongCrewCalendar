@@ -20,6 +20,11 @@ desugar = "2.1.3"
 # APK 에는 얇은 접착제만 들어간다. 번들판(com.google.mlkit:text-recognition-korean)은 모델 4MB 를
 # 전 직원 APK 에 태우는데, 이 기능을 쓰는 사람은 관리자 하나뿐이라 그럴 값어치가 없다.
 mlkitTextKorean = "16.0.1"
+# 식단표 한글파일(.hwp) 읽기(v1.6.81 ④). Apache-2.0 · 0.96MB · **의존성 0개**(POM 에
+# <dependencies> 자체가 없다). Apache POI 를 끌어오지 않고 필요한 POIFS 부분만 자기
+# 패키지(kr.dogfoot.hwplib.org.apache.poi.*)로 품고 있어 안드로이드에서 그대로 돈다.
+# .hwpx 는 zip+XML 이라 자바 표준만으로 읽는다 — hwpxlib(1.24MB)은 안 넣었다(MenuHwpx 주석).
+hwplib = "1.1.10"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -58,6 +63,8 @@ kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-play-services", version.ref = "coroutines" }
 
 mlkit-text-korean = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition-korean", version.ref = "mlkitTextKorean" }
+
+hwplib = { group = "kr.dogfoot", name = "hwplib", version.ref = "hwplib" }
 
 androidx-work-runtime = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }

@@ -23,8 +23,8 @@ android {
         // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
         // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
         targetSdk = 36
-        versionCode = 92
-        versionName = "1.6.80"
+        versionCode = 93
+        versionName = "1.6.81"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -127,6 +127,13 @@ dependencies {
     // 대신 관리자가 처음 쓸 때 모델이 내려받아지는 짧은 대기가 있고, GMS 없는 기기에선 안 된다 —
     // 이 앱은 이미 Firebase(로그인·공유) 때문에 GMS 전제라 새로 생기는 제약이 아니다.
     implementation(libs.mlkit.text.korean)
+
+    // 주간식단표 **한글파일(.hwp)** 읽기(v1.6.81 ④) — 표 칸을 직접 읽으므로 글자인식 없이 정확하다.
+    // Apache-2.0 · 0.96MB · 의존성 0개(POI 를 끌어오지 않는다) · 자바 7 바이트코드라 디슈가링 불필요.
+    // ⚠ `HWPReader.fromBase64String`만 안드로이드에 없는 javax.xml.bind 를 쓴다 — 부르지 않는다
+    //    (`data/menu/MenuHwp.kt` 주석). 나머지 726개 클래스는 java.*·javax.crypto 만 쓴다.
+    // **.hwpx 는 이 라이브러리가 필요 없다** — zip+XML 이라 java.util.zip + SAX 로 읽는다(APK 증가 0).
+    implementation(libs.hwplib)
 
     // Background sync
     implementation(libs.androidx.work.runtime)

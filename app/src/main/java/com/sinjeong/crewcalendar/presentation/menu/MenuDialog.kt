@@ -148,16 +148,31 @@ fun MenuDialog(
                         val vw = constraints.maxWidth.toFloat()
                         val vh = constraints.maxHeight.toFloat()
                         val posterW = with(LocalDensity.current) { constraints.maxWidth.toDp() }
-                        var scale by remember { mutableFloatStateOf(1f) }
-                        var offset by remember { mutableStateOf(Offset.Zero) }
                         var content by remember { mutableStateOf(IntSize.Zero) }
-                        // 주를 바꾸면 길이가 달라지므로 위치를 처음으로 되돌린다
-                        LaunchedEffect(showNext) { scale = 1f; offset = Offset.Zero }
+                        /**
+                         * **처음 열 때는 포스터 전체가 화면에 들어온다**(v1.6.81 ③).
+                         * 사용자: *"주간식단표 지금 한화면에 석식까지는 안나오는데..한화면에 나오게 하면?"*
+                         *
+                         * v1.6.81의 표 배치(7행 × 3열)면 1080×2400에서 이미 1배로 다 들어오지만,
+                         * 메뉴가 유난히 많은 주·작은 화면·큰 글자배율에서는 그래도 넘칠 수 있다.
+                         * 그때만 **딱 들어갈 만큼 줄인다**(1배를 넘겨 키우지는 않는다).
+                         * 이 값이 그대로 핀치의 **하한**이기도 하다 — 하한이 1배로 남아 있으면
+                         * 손가락을 대는 순간 다시 잘린 상태로 튄다.
+                         */
+                        val fit = if (content.height > 0)
+                            (vh / content.height).coerceAtMost(1f) else 1f
+                        var scale by remember { mutableFloatStateOf(0f) }  // 0 = 아직 안 정해짐
+                        var offset by remember { mutableStateOf(Offset.Zero) }
+                        // 주를 바꾸면 길이가 달라지므로 배율·위치를 다시 맞춘다(0 = 전체보기로 복귀)
+                        LaunchedEffect(showNext) { scale = 0f; offset = Offset.Zero }
+                        val shown2 = if (scale <= 0f) fit else scale
+                        // 줄어든 포스터는 가로로 **가운데** 놓는다 — 왼쪽에 붙으면 오른쪽만 비어 튄다
+                        val centerX = max(0f, (vw - content.width * shown2) / 2f)
 
                         Box(
                             Modifier.fillMaxSize().pointerInput(Unit) {
                                 detectTransformGestures { _, pan, zoom, _ ->
-                                    scale = (scale * zoom).coerceIn(1f, 4f)
+                                    scale = (shown2 * zoom).coerceIn(fit, 4f)
                                     val maxX = max(0f, content.width * scale - vw)
                                     val maxY = max(0f, content.height * scale - vh)
                                     offset = Offset(
@@ -176,8 +191,9 @@ fun MenuDialog(
                                     // 없으면 21칸이 화면 높이에 눌려 아래쪽이 통째로 잘린다.
                                     .wrapContentHeight(Alignment.Top, unbounded = true)
                                     .graphicsLayer(
-                                        scaleX = scale, scaleY = scale,
-                                        translationX = offset.x, translationY = offset.y,
+                                        scaleX = shown2, scaleY = shown2,
+                                        translationX = offset.x + centerX,
+                                        translationY = offset.y,
                                         transformOrigin = TransformOrigin(0f, 0f),
                                     )
                                     .onSizeChanged { content = it }

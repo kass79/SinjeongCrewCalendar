@@ -132,10 +132,27 @@ private fun AppRoot() {
                     NavigationBarItem(
                         selected = currentDest?.hierarchy?.any { it.route == tab.route } == true,
                         onClick = {
+                            // ⚠ **`saveState`/`restoreState`를 쓰지 않는다**(v1.6.81 ①).
+                            //
+                            // 구글 표본의 그 짝은 **탭마다 중첩 그래프**가 있을 때의 것이다. 이 앱은
+                            // 그래프가 평평해서 `contacts`·`admin`·`menuAdmin`이 탭과 **형제**로 있고,
+                            // 그러면 탭을 옮기는 순간 **그때 보고 있던 상세화면까지 통째로 저장**됐다가
+                            // 그 탭으로 돌아올 때 **되살아난다.**
+                            //   실측(에뮬 재현): 설정 → 사업소 연락처 → [달력] → [설정]을 누르면
+                            //   설정이 아니라 **연락처**가 뜨고, 거기서 뒤로가기는 연락처 → 설정 →
+                            //   달력으로 **세 번**을 되짚는다. 사용자 신고 *"뒤로 가기 누르면 바로
+                            //   달력 메인이 나오지 않고 봤던 화면이 몇번 나오는듯?"*의 정체다.
+                            //   달력 탭도 같다 — 식단표 관리를 열어 둔 채 탭을 오가면 **달력 자리에
+                            //   관리자 화면**이 되살아난다.
+                            // → 저장·복원을 빼면 탭은 **언제나 그 탭의 첫 화면**으로 간다.
+                            //
+                            // 치르는 값: 탭을 떠나면 그 탭의 화면 상태(동료 탭 소속 칩·구간·스크롤)가
+                            // 초기화된다. 동료 탭은 **진입 기본값이 애초에 `전체`**라(v1.6.42 ⑤
+                            // *"동료탭에 들어가면 먼저 전체를 보여줘야지..?"*) 오히려 확정 동작에 가깝고,
+                            // 달력 탭은 시작 목적지라 팝되지 않아 ViewModel(보고 있던 달)이 그대로 산다.
                             nav.navigate(tab.route) {
-                                popUpTo(nav.graph.startDestinationId) { saveState = true }
+                                popUpTo(nav.graph.startDestinationId)
                                 launchSingleTop = true
-                                restoreState = true
                             }
                         },
                         icon = { Icon(tab.icon, tab.label, modifier = Modifier.size(20.dp)) },

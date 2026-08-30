@@ -1,7 +1,11 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.DocCell
 import com.sinjeong.crewcalendar.domain.model.Meal
+import com.sinjeong.crewcalendar.domain.model.MenuDoc
+import com.sinjeong.crewcalendar.domain.model.MenuHwpx
 import com.sinjeong.crewcalendar.domain.model.MenuOcr
+import com.sinjeong.crewcalendar.domain.model.MenuTable
 import com.sinjeong.crewcalendar.domain.model.OcrWord
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
 import com.sinjeong.crewcalendar.domain.model.menuEmoji
@@ -227,5 +231,160 @@ class MenuTest {
         assertEquals(2, a.indexOf(500f, 7))
         assertEquals(-1, a.indexOf(-500f, 7))
         assertNotNull(MenuOcr.fitAxis(listOf(0 to 200f, 1 to 352f, 2 to 498f)))
+    }
+
+    // ── 한글파일(.hwp/.hwpx) 표 → 21칸 (v1.6.81 ④) ─────────────
+    //
+    // ⚠ 여기서 `MenuHwp`(.hwp)는 **부르지 않는다** — 그쪽만 `kr.dogfoot:hwplib` 을 쓰는데
+    //   JUnitCore 직접 실행의 클래스패스에는 그 jar 가 없다. 두 형식이 **같은 [MenuTable] 로
+    //   합류**하므로 여기서 잠그는 것이 곧 .hwp 의 21칸 배치도 잠그는 것이고,
+    //   .hwp 는 실기기(에뮬)에서 진짜 파일로 확인한다(docs/project-notes.md).
+
+    /** 표 한 칸 만들기 도우미 */
+    private fun dc(r: Int, c: Int, t: String, rs: Int = 1, cs: Int = 1) = DocCell(r, c, rs, cs, t)
+
+    /** 구내식당 표의 보통 모양: 머리행 = 요일, 첫 열 = 끼니 */
+    private fun normalTable(): List<DocCell> = buildList {
+        add(dc(0, 0, "구분"))
+        listOf("월", "화", "수", "목", "금", "토", "일").forEachIndexed { i, d ->
+            add(dc(0, i + 1, "8/${24 + i}($d)"))
+        }
+        listOf("조식", "중식", "석식").forEachIndexed { m, label ->
+            add(dc(m + 1, 0, label))
+            for (d in 0..6) add(dc(m + 1, d + 1, "$label${d}밥\n$label${d}국"))
+        }
+    }
+
+    @Test fun a_normal_menu_table_maps_to_21_cells() {
+        val cells = MenuTable.cellsFromTable(normalTable())!!
+        assertEquals(21, cells.size)
+        // index = 요일*3 + 끼니
+        assertEquals("조식0밥\n조식0국", cells[0 * 3 + 0])   // 월 조식
+        assertEquals("석식0밥\n석식0국", cells[0 * 3 + 2])   // 월 석식
+        assertEquals("중식6밥\n중식6국", cells[6 * 3 + 1])   // 일 중식
+        assertTrue(cells.none { it.isBlank() })
+    }
+
+    /**
+     * **뒤집힌 표도 읽는다** — 요일이 행, 끼니가 열인 문서가 있다.
+     * 방향은 못 박지 않고 머리칸이 어떻게 늘어서 있는지로 판정한다.
+     */
+    @Test fun a_transposed_table_maps_to_the_same_21_cells() {
+        val flipped = normalTable().map { DocCell(it.col, it.row, it.colSpan, it.rowSpan, it.text) }
+        val cells = MenuTable.cellsFromTable(flipped)!!
+        assertEquals("조식0밥\n조식0국", cells[0 * 3 + 0])
+        assertEquals("중식6밥\n중식6국", cells[6 * 3 + 1])
+    }
+
+    /** 끼니 이름이 두 행에 걸쳐 **병합**돼 있으면 그 두 행이 다 그 끼니다 */
+    @Test fun a_merged_meal_label_covers_every_row_it_spans() {
+        val t = listOf(
+            dc(0, 1, "월"), dc(0, 2, "화"),
+            dc(1, 0, "조식", rs = 2), dc(1, 1, "흑미밥"), dc(1, 2, "잡곡밥"),
+            dc(2, 1, "북어국"), dc(2, 2, "미역국"),
+            dc(3, 0, "중식"), dc(3, 1, "제육볶음"), dc(3, 2, "돈까스"),
+        )
+        val cells = MenuTable.cellsFromTable(t)!!
+        assertEquals("흑미밥\n북어국", cells[0 * 3 + 0])   // 월 조식 — 병합된 두 행이 합쳐진다
+        assertEquals("잡곡밥\n미역국", cells[1 * 3 + 0])   // 화 조식
+        assertEquals("제육볶음", cells[0 * 3 + 1])         // 월 중식
+        assertTrue(cells[0 * 3 + 2].isBlank())            // 석식 머리칸이 없다 → 빈 칸
+    }
+
+    /** 식단표가 아닌 표는 **포기한다**(null) — 엉뚱하게 앉히면 지우는 게 더 오래 걸린다 */
+    @Test fun a_table_without_day_and_meal_headers_is_refused() {
+        val t = listOf(dc(0, 0, "성명"), dc(0, 1, "사번"), dc(1, 0, "홍길동"), dc(1, 1, "12345"))
+        assertNull(MenuTable.cellsFromTable(t))
+        // 요일만 있고 끼니가 없어도 포기한다
+        assertNull(MenuTable.cellsFromTable(listOf(dc(0, 0, "월"), dc(0, 1, "화"), dc(1, 0, "1"))))
+    }
+
+    /** 표가 여럿이면 **가장 많이 채워지는 한 장**을 고른다(머리말 표·범례 표에 안 속는다) */
+    @Test fun the_best_filled_table_wins_when_a_document_has_several() {
+        val junk = listOf(dc(0, 0, "성명"), dc(0, 1, "사번"))
+        val doc = MenuDoc(listOf(junk, normalTable()), "")
+        assertEquals("조식0밥\n조식0국", MenuTable.toCells(doc)[0])
+        // 쓸 만한 표가 하나도 없으면 21칸 전부 빈 문자열(수동 편집으로 떨어진다)
+        assertTrue(MenuTable.toCells(MenuDoc(listOf(junk), "")).all { it.isBlank() })
+    }
+
+    /**
+     * 머리칸 판정 — 한글만 남겼을 때 **한 글자**면 요일이다.
+     * 끼니는 길이를 걸어, 메뉴가 잔뜩 든 칸에 `중식`이 섞여도 머리칸으로 오인하지 않는다.
+     */
+    @Test fun header_cells_are_told_apart_from_menu_cells() {
+        assertEquals(0, MenuTable.dayIndexIn("월"))
+        assertEquals(0, MenuTable.dayIndexIn("8/24(월)"))
+        assertEquals(0, MenuTable.dayIndexIn("월요일"))
+        assertEquals(6, MenuTable.dayIndexIn("8. 30.\n일"))
+        assertEquals(-1, MenuTable.dayIndexIn("잡곡밥"))
+        assertEquals(-1, MenuTable.dayIndexIn(""))
+
+        assertEquals(0, MenuTable.mealIndexIn("조식"))
+        assertEquals(0, MenuTable.mealIndexIn("조식(07:30~09:00)"))
+        assertEquals(0, MenuTable.mealIndexIn("아침"))       // 사업소마다 말이 갈린다
+        assertEquals(2, MenuTable.mealIndexIn("석식"))
+        assertEquals(-1, MenuTable.mealIndexIn("잡곡밥\n북어국\n포기김치\n중식보다 긴 메뉴 목록입니다"))
+    }
+
+    /** 칸 길이는 `firestore.rules` 상한(300자)에서 자른다 — 넘기면 서버가 통째로 거부한다 */
+    @Test fun a_cell_is_capped_at_the_server_limit() {
+        val long = (1..80).joinToString("\n") { "메뉴$it" }
+        assertTrue(long.length > MenuTable.MAX_CELL)
+        assertEquals(MenuTable.MAX_CELL, MenuTable.tidy(long).length)
+        // 빈 줄·앞뒤 공백은 버린다
+        assertEquals("흑미밥\n북어국", MenuTable.tidy("  흑미밥 \n\n  북어국\n \n"))
+    }
+
+    /**
+     * **.hwpx 는 zip + XML 이라 자바 표준만으로 읽는다**(APK 증가 0바이트).
+     * 여기서 진짜 zip 을 만들어 21칸까지 통째로 잠근다 — 특히 실제 hwpx 처럼
+     * `hp:subList`(글자)를 `hp:cellAddr`(주소)보다 **먼저** 써서 그 함정을 재현한다.
+     */
+    @Test fun a_real_hwpx_zip_is_read_into_21_cells() {
+        val days = listOf("월", "화", "수", "목", "금", "토", "일")
+        val meals = listOf("조식", "중식", "석식")
+        fun tc(row: Int, col: Int, lines: List<String>): String {
+            val paras = lines.joinToString("") { "<hp:p><hp:run><hp:t>$it</hp:t></hp:run></hp:p>" }
+            return "<hp:tc><hp:subList>$paras</hp:subList>" +
+                "<hp:cellAddr colAddr=\"$col\" rowAddr=\"$row\"/>" +
+                "<hp:cellSpan colSpan=\"1\" rowSpan=\"1\"/></hp:tc>"
+        }
+        val rows = StringBuilder()
+        rows.append("<hp:tr>").append(tc(0, 0, listOf("구분")))
+        days.forEachIndexed { i, d -> rows.append(tc(0, i + 1, listOf("8/${24 + i}($d)"))) }
+        rows.append("</hp:tr>")
+        meals.forEachIndexed { m, label ->
+            rows.append("<hp:tr>").append(tc(m + 1, 0, listOf(label)))
+            for (d in 0..6) rows.append(tc(m + 1, d + 1, listOf("$label$d-1", "$label$d-2")))
+            rows.append("</hp:tr>")
+        }
+        val section = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>" +
+            "<hs:sec xmlns:hs=\"http://www.hancom.co.kr/hwpml/2011/section\"" +
+            " xmlns:hp=\"http://www.hancom.co.kr/hwpml/2011/paragraph\">" +
+            "<hp:p><hp:run><hp:t>구내식당 주간식단표 기간 : '26. 8. 24 ~ '26. 8. 30</hp:t></hp:run></hp:p>" +
+            "<hp:p><hp:run><hp:tbl rowCnt=\"4\" colCnt=\"8\">$rows</hp:tbl></hp:run></hp:p></hs:sec>"
+
+        val zipped = java.io.ByteArrayOutputStream().also { out ->
+            java.util.zip.ZipOutputStream(out).use { z ->
+                z.putNextEntry(java.util.zip.ZipEntry("mimetype"))
+                z.write("application/hwp+zip".toByteArray())
+                z.putNextEntry(java.util.zip.ZipEntry("Contents/section0.xml"))
+                z.write(section.toByteArray(Charsets.UTF_8))
+            }
+        }.toByteArray()
+
+        val doc = MenuHwpx.read(java.io.ByteArrayInputStream(zipped))
+        assertEquals(1, doc.tables.size)
+        assertEquals(32, doc.tables[0].size)               // 4행 x 8열
+        val cells = MenuTable.toCells(doc)
+        assertEquals("조식0-1\n조식0-2", cells[0 * 3 + 0])  // 월 조식, 문단 두 줄이 그대로 두 줄
+        assertEquals("석식6-1\n석식6-2", cells[6 * 3 + 2])  // 일 석식
+        assertTrue(cells.none { it.isBlank() })
+        // 기간 문구는 문서 전체 글자에서 읽어 주 시작일(월요일)이 된다
+        assertEquals(LocalDate.of(2026, 8, 24), MenuOcr.parseWeekStart(doc.text))
+        // zip 판별 — 앞머리 `PK`
+        assertTrue(MenuHwpx.looksLikeZip(zipped.copyOf(8)))
+        assertFalse(MenuHwpx.looksLikeZip("%PDF-1.7".toByteArray()))
     }
 }

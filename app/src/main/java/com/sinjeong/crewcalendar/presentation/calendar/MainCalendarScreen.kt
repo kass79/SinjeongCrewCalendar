@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.calendar
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -132,6 +133,15 @@ fun MainCalendarScreen(
     LaunchedEffect(wide) {
         if (wide) state.selectedDate?.let { panelEpochDay = it.toEpochDay(); viewModel.selectDate(null) }
     }
+    // 다른 달을 보다가 뒤로가기 → **한 번에 이번 달로**(v1.6.81 ①).
+    //
+    // 달 이동은 백스택에 안 쌓이므로 종전엔 11월을 보다 뒤로가기를 누르면 **앱이 그대로 꺼졌다**
+    // (에뮬 실측). 사용자가 기대하는 건 "보던 자리에서 벗어나기"라 이번 달로 되돌리는 쪽이 맞다.
+    // ⚠ **달을 하나씩 되짚지 않는다** — 몇 달을 넘겨 왔든 한 번에 이번 달이고, 이번 달이면
+    // `enabled = false`라 이 처리기가 아예 없는 것과 같아 종전대로 앱이 닫힌다.
+    // 시트·다이얼로그는 각자 제 창에서 뒤로가기를 먼저 먹으므로 여기까지 오지 않는다
+    // (`ModalBottomSheet`·`Dialog` 모두 별도 윈도우다 — 실화면으로 확인).
+    BackHandler(enabled = state.month != YearMonth.now()) { viewModel.goToday() }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
@@ -980,30 +990,9 @@ private fun DayDetailContent(
             } else null
             fun fmtLeg(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", " ▼")
 
-            // 행로표 원본 (본선 + 지선)
-            val routeAsset = day.duty.number?.let { n ->
-                when {
-                    // 지선 주간 지1~8 (bwd/bhol) + 야간 지10~14 (당일 휴일=bnhol, 평일=bnwd)
-                    // 야간 표는 시각이 전부 동일하고 종료편성(지N)만 조합별로 달라 당일 기준 2종이면 충분
-                    day.duty.isBranch -> when {
-                        day.duty.type == DutyType.BRANCH && n in 1..8 ->
-                            if (holiday) "bhol_$n" else "bwd_$n"
-                        day.duty.type == DutyType.BRANCH_NIGHT && n in 10..14 ->
-                            if (holiday) "bnhol_$n" else "bnwd_$n"
-                        else -> null
-                    }
-                    day.duty.type == DutyType.MAIN_NIGHT -> combo?.let { c ->
-                        val tag = when (c) {
-                            NightCombo.PP -> "pp"; NightCombo.PH -> "ph"
-                            NightCombo.HP -> "hp"; NightCombo.HH -> "hh"
-                        }
-                        "${tag}_$n"
-                    }
-                    day.duty.type == DutyType.MAIN_DAY ->
-                        if (holiday) { if (n <= 25) "hol_$n" else null } else "wd_$n"
-                    else -> null
-                }
-            }
+            // 행로표 원본 (본선 + 지선). 계산은 [RouteTable.assetFor] 한 곳뿐이다 —
+            // 동료 탭 격자(v1.6.81 ②)도 같은 함수를 부른다.
+            val routeAsset = RouteTable.assetFor(day.duty, day.date)
             // 전체화면 행로표는 인라인 표를 탭했을 때만 연다(날짜 탭 자동 오픈은 되돌림).
             // 키를 날짜로 둬서 ① 닫으면 리컴포지션에도 다시 안 열리고 ② 날짜를 바꾸면 닫힌 채 시작.
             var showRoute by remember(day.date) { mutableStateOf(false) }

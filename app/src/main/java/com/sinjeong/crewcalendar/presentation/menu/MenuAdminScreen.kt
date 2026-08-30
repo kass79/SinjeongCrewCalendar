@@ -32,8 +32,11 @@ import androidx.lifecycle.viewModelScope
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+import com.sinjeong.crewcalendar.data.menu.MenuHwp
 import com.sinjeong.crewcalendar.domain.model.Meal
+import com.sinjeong.crewcalendar.domain.model.MenuHwpx
 import com.sinjeong.crewcalendar.domain.model.MenuOcr
+import com.sinjeong.crewcalendar.domain.model.MenuTable
 import com.sinjeong.crewcalendar.domain.model.OcrWord
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
@@ -86,19 +89,25 @@ class MenuAdminViewModel @Inject constructor(
     }
     fun clearAll() { cells = List(WeeklyMenu.CELLS) { "" }; recognized = null }
 
-    fun recognize(ctx: Context, uri: Uri, isPdf: Boolean) = viewModelScope.launch {
+    /**
+     * 사진·PDF·**한글파일** 어느 것이든 여기 하나로 들어온다(v1.6.81 ④).
+     * 무엇인지는 **파일 앞머리 몇 바이트**로 가른다 — 확장자·MIME 은 기기마다 안 맞는 일이 잦다
+     * ([sniff] 주석).
+     */
+    fun load(ctx: Context, uri: Uri) = viewModelScope.launch {
         busy = true
-        val result = runCatching { withContext(Dispatchers.IO) { readTable(ctx, uri, isPdf) } }
+        val result = runCatching { withContext(Dispatchers.IO) { readTable(ctx, uri) } }
         busy = false
-        result.onSuccess { (newCells, weekFromText) ->
+        result.onSuccess { (newCells, weekFromText, kind) ->
             cells = newCells
             recognized = newCells.count { it.isNotBlank() }
             weekFromText?.let { weekStart = it }
+            val what = if (kind == DocKind.HWP || kind == DocKind.HWPX) "한글파일에서" else "글자인식으로"
             message = if (recognized == 0)
-                "글자를 21칸에 앉히지 못했습니다 — 아래에서 직접 채워 주세요."
-            else "21칸 중 ${recognized}칸을 채웠습니다. 틀린 곳을 눌러 고치세요."
+                "$what 21칸을 채우지 못했습니다 — 아래에서 직접 채워 주세요."
+            else "$what 21칸 중 ${recognized}칸을 채웠습니다. 틀린 곳을 눌러 고치세요."
         }.onFailure {
-            message = "글자 인식 실패: ${it.message ?: "알 수 없는 오류"} — 직접 채워 주세요."
+            message = "읽기 실패: ${it.message ?: "알 수 없는 오류"} — 직접 채워 주세요."
         }
     }
 
@@ -117,9 +126,51 @@ class MenuAdminViewModel @Inject constructor(
     }
 }
 
-/** 사진/PDF → (21칸, 기간에서 읽은 주 시작일) */
-private suspend fun readTable(ctx: Context, uri: Uri, isPdf: Boolean): Pair<List<String>, LocalDate?> {
-    val image = if (isPdf) InputImage.fromBitmap(renderPdfFirstPage(ctx, uri), 0)
+/** 넣은 파일이 무엇인가 */
+enum class DocKind { IMAGE, PDF, HWP, HWPX }
+
+/**
+ * **파일 앞머리 8바이트로 종류를 가른다**(v1.6.81 ④).
+ *
+ * 확장자·MIME 으로 가르지 않는 이유: 기기·파일앱마다 `.hwp` 의 MIME 이 제각각이고
+ * (`application/x-hwp`·`application/haansofthwp`·`application/octet-stream`…),
+ * `content://` URI 는 이름조차 안 주는 경우가 있다. 파일 선택기 필터는 **모든 형식**으로 넓게 잡고
+ * **실제 내용**으로 판정하는 것이 기기 편차에 안 흔들린다.
+ * (필터 문자열을 여기 적지 않는 이유: 별표+빗금 조합이 코틀린 주석을 닫아 버린다. 실제 값은
+ *  아래 `pickDoc.launch(...)` 한 줄에 있다.)
+ *
+ * | 앞머리 | 무엇 |
+ * |---|---|
+ * | `%PDF` | PDF |
+ * | `D0 CF 11 E0 A1 B1 1A E1` | 복합문서 = **.hwp**(5.0) |
+ * | `PK 03 04` | zip = **.hwpx** (아니면 표가 안 나와 빈 21칸으로 떨어진다) |
+ * | 그 밖 | 사진 → 글자인식 |
+ */
+private fun sniff(ctx: Context, uri: Uri): DocKind {
+    val head = runCatching {
+        ctx.contentResolver.openInputStream(uri)?.use { s -> ByteArray(8).also { s.read(it) } }
+    }.getOrNull() ?: return DocKind.IMAGE
+    return when {
+        head.size >= 4 && head[0] == '%'.code.toByte() && head[1] == 'P'.code.toByte() &&
+            head[2] == 'D'.code.toByte() && head[3] == 'F'.code.toByte() -> DocKind.PDF
+        MenuHwp.looksLikeHwp(head) -> DocKind.HWP
+        MenuHwpx.looksLikeZip(head) -> DocKind.HWPX
+        else -> DocKind.IMAGE
+    }
+}
+
+/** 사진/PDF/한글파일 → (21칸, 기간에서 읽은 주 시작일, 무엇이었는지) */
+private suspend fun readTable(ctx: Context, uri: Uri): Triple<List<String>, LocalDate?, DocKind> {
+    val kind = sniff(ctx, uri)
+    // ── 한글파일: 표 칸을 직접 읽는다. 글자인식이 낄 자리가 없어 **정확도가 100%** 다 ──
+    if (kind == DocKind.HWP || kind == DocKind.HWPX) {
+        val doc = ctx.contentResolver.openInputStream(uri)?.use { s ->
+            if (kind == DocKind.HWP) MenuHwp.read(s) else MenuHwpx.read(s)
+        } ?: error("파일을 열 수 없습니다")
+        return Triple(MenuTable.toCells(doc), MenuOcr.parseWeekStart(doc.text), kind)
+    }
+
+    val image = if (kind == DocKind.PDF) InputImage.fromBitmap(renderPdfFirstPage(ctx, uri), 0)
     // 사진은 파일 경로로 넘긴다 — ML Kit 가 EXIF 회전을 알아서 편다(직접 비트맵을 만들면
     // 세로로 찍은 사진이 눕는다).
     else InputImage.fromFilePath(ctx, uri)
@@ -135,7 +186,7 @@ private suspend fun readTable(ctx: Context, uri: Uri, isPdf: Boolean): Pair<List
             val b = e.boundingBox ?: return@mapNotNull null
             OcrWord(e.text, b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
         }
-    return MenuOcr.toCells(words) to MenuOcr.parseWeekStart(text.text)
+    return Triple(MenuOcr.toCells(words), MenuOcr.parseWeekStart(text.text), kind)
 }
 
 /**
@@ -177,13 +228,16 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
     LaunchedEffect(vm.message) { vm.message?.let { snackbar.showSnackbar(it); vm.message = null } }
 
     val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { vm.recognize(ctx, it, isPdf = false) }
+        uri?.let { vm.load(ctx, it) }
     }
-    val pickPdf = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        uri?.let { vm.recognize(ctx, it, isPdf = true) }
+    // ⚠ **필터를 모든 형식으로 넓게 잡는다**(v1.6.81 ④). 한글파일의 MIME 은 기기·파일앱마다 제각각이라
+    // (`application/x-hwp`·`application/haansofthwp`·`application/octet-stream` …) 좁게 걸면
+    // **선택기에 hwp 가 아예 안 보이는 기기**가 생긴다. 무엇인지는 고른 뒤 앞머리 바이트로 가른다.
+    val pickDoc = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        uri?.let { vm.load(ctx, it) }
     }
     val takePhoto = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-        if (ok) vm.recognize(ctx, shotUri, isPdf = false)
+        if (ok) vm.load(ctx, shotUri)
     }
 
     Scaffold(
@@ -204,7 +258,8 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "사진이나 PDF를 넣으면 글자를 읽어 21칸을 채웁니다. 사진 원본은 저장하지 않고 " +
+                "한글파일(.hwp/.hwpx)이 가장 정확합니다 — 표 칸을 그대로 읽어 글자인식이 낄 자리가 " +
+                    "없습니다. 사진·PDF는 글자를 읽어 21칸을 채웁니다. 원본 파일은 저장하지 않고 " +
                     "글자만 올라갑니다. 틀린 칸은 눌러서 고치고 마지막에 [저장]을 눌러야 모두에게 보입니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -222,10 +277,10 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
                     contentPadding = PaddingValues(horizontal = 4.dp),
                 ) { Text("촬영", fontSize = 12.sp) }
                 FilledTonalButton(
-                    onClick = { pickPdf.launch("application/pdf") },
+                    onClick = { pickDoc.launch(arrayOf("*/*")) },
                     enabled = !vm.busy, modifier = Modifier.weight(1f),
                     contentPadding = PaddingValues(horizontal = 4.dp),
-                ) { Text("PDF", fontSize = 12.sp) }
+                ) { Text("PDF·한글", fontSize = 12.sp) }
             }
             if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
 

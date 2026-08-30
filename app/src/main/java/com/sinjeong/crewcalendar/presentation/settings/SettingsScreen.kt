@@ -415,7 +415,7 @@ fun SettingsScreen(
             )
             SettingRow(
                 title = "주간식단표 올리기",
-                sub = "구내식당 표 사진·PDF를 넣으면 글자를 읽어 21칸을 채웁니다 (암호 필요)",
+                sub = "구내식당 표를 한글파일(.hwp/.hwpx)·사진·PDF로 넣으면 21칸을 채웁니다 (암호 필요)",
                 trailing = {
                     TextButton(onClick = {
                         if (com.sinjeong.crewcalendar.presentation.admin.AdminGate.unlocked) onOpenMenuAdmin()
