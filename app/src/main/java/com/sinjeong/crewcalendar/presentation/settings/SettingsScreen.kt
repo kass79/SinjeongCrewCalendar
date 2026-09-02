@@ -30,9 +30,6 @@ import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
-import com.sinjeong.crewcalendar.presentation.menu.MenuStyle
-import com.sinjeong.crewcalendar.presentation.menu.menuStyleOf
-import com.sinjeong.crewcalendar.presentation.menu.setMenuStyle
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WX_LOC_FIXED_KEY
@@ -231,30 +228,6 @@ fun SettingsScreen(
                                 fontSize = 11.sp,
                             )
                         }
-                    }
-                }
-            }
-
-            // 식단표 포스터 (v1.6.80). **관리자가 전체를 통일하는 게 아니라 각자 고른다**
-            // (사용자 확정). 위 테마·아래 날씨와 같은 세그먼트 한 줄 — 둘 중 하나를 고르는
-            // 같은 성격이라 한 벌로 읽힌다.
-            var menuStyle by remember { mutableStateOf(menuStyleOf(ctx)) }
-            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                Text("식단표 포스터", fontWeight = FontWeight.Bold)
-                Text(
-                    if (menuStyle == MenuStyle.VINTAGE) "크림색 종이 · 명조체 · 레트로 전철"
-                    else "밝은 바탕 · 요일마다 다른 파스텔 색",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(6.dp))
-                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    MenuStyle.entries.forEachIndexed { i, s ->
-                        SegmentedButton(
-                            selected = menuStyle == s,
-                            onClick = { menuStyle = s; setMenuStyle(ctx, s) },
-                            shape = SegmentedButtonDefaults.itemShape(i, MenuStyle.entries.size),
-                        ) { Text(s.label, fontSize = 11.sp) }
                     }
                 }
             }

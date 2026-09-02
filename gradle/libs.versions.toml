@@ -9,7 +9,11 @@ composeBom = "2024.12.01"
 navigationCompose = "2.8.5"
 hilt = "2.56.2"
 hiltNavigationCompose = "1.2.0"
-firebaseBom = "33.7.0"
+# 33.7.0 → 33.16.0 (v1.6.82 ②-4). **firebase-ai 를 주는 가장 낮은 BOM**이면서
+# `firebase-common` 을 21.0.0 그대로 두는 마지막 줄기다 — auth 23.1.0→23.2.1,
+# firestore 25.1.1→25.1.4 로 마이너만 움직인다. BOM 34.x 는 common 22 · auth 24 ·
+# firestore 26 **메이저 점프**라 로그인·근무표 저장 전부를 다시 검증해야 해서 피했다.
+firebaseBom = "33.16.0"
 googleServices = "4.4.2"
 glance = "1.1.1"
 coroutines = "1.9.0"
@@ -25,6 +29,13 @@ mlkitTextKorean = "16.0.1"
 # 패키지(kr.dogfoot.hwplib.org.apache.poi.*)로 품고 있어 안드로이드에서 그대로 돈다.
 # .hwpx 는 zip+XML 이라 자바 표준만으로 읽는다 — hwpxlib(1.24MB)은 안 넣었다(MenuHwpx 주석).
 hwplib = "1.1.10"
+# 주간식단표 **PDF 글자층 직접 추출**(v1.6.82 ②-1). Apache-2.0 · AAR 3.25MB.
+# v1.6.80~81 은 PdfRenderer 로 그림을 그려 글자인식했다 — **PDF 안에 이미 완성돼 있는 글자를
+# 버리고 사진처럼 다시 읽는** 구조라 정확도가 떨어졌다. PDFBox 는 글자와 그 좌표(TextPosition)를
+# 그대로 준다. 이 조건(Apache/MIT · 글자별 좌표 · minSdk 26)에서 더 가벼운 대안이 없다 —
+# pdfium 계열은 네이티브 .so 라 3배 무겁고, 안드로이드 내장 `PdfRenderer.getTextContents()` 는
+# **API 35+** 라 minSdk 26 을 못 받친다.
+pdfboxAndroid = "2.0.27.0"
 junit = "4.13.2"
 androidxJunit = "1.2.1"
 espresso = "3.6.1"
@@ -65,6 +76,12 @@ kotlinx-coroutines-play-services = { group = "org.jetbrains.kotlinx", name = "ko
 mlkit-text-korean = { group = "com.google.android.gms", name = "play-services-mlkit-text-recognition-korean", version.ref = "mlkitTextKorean" }
 
 hwplib = { group = "kr.dogfoot", name = "hwplib", version.ref = "hwplib" }
+pdfbox-android = { group = "com.tom-roush", name = "pdfbox-android", version.ref = "pdfboxAndroid" }
+
+# 식단표 **사진**을 클라우드 AI 가 읽는다(v1.6.82 ②-4). BOM 이 주는 16.2.0.
+# `GenerativeBackend.googleAI()` = Gemini Developer API 백엔드라 **Spark(무료) 요금제 그대로** 쓴다
+# (Vertex 백엔드는 Blaze 필수). API 키는 앱에 안 들어간다 — Firebase 가 서비스 계정으로 인가한다.
+firebase-ai = { group = "com.google.firebase", name = "firebase-ai" }
 
 androidx-work-runtime = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 desugar-jdk-libs = { group = "com.android.tools", name = "desugar_jdk_libs", version.ref = "desugar" }

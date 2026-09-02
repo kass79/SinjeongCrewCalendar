@@ -115,6 +115,11 @@ object MenuTable {
      * `잡곡밥`(3자)·`북어국`(3자) 같은 메뉴는 자동으로 걸러진다.
      */
     internal fun dayIndexIn(cell: String): Int {
+        // ⚠ **괄호 규칙이 먼저다**(v1.6.82). 실파일 머리칸은 `8월 31일(월)` 이라 한글만 남기면
+        // `월일월` 세 글자가 되어 아래 규칙에 **하나도 안 걸렸다.** 그래서 v1.6.81 은 요일 머리칸을
+        // 0개 찾았고 `cellsFromTable`이 곧바로 null → 한글파일이 **빈 21칸**을 돌려줬다.
+        // 사용자가 겪은 *"텍스트를 너무 인식 못한다"* 의 실체(사진·PDF·한글파일 공통 원인)다.
+        MenuOcr.DAY_IN_PAREN.find(cell)?.let { return DAY_CHARS.indexOf(it.groupValues[1]) }
         val hangul = cell.filter { it in '가'..'힣' }.replace("요일", "")
         return if (hangul.length == 1) DAY_CHARS.indexOf(hangul) else -1
     }

@@ -5,10 +5,10 @@ import com.sinjeong.crewcalendar.domain.model.Meal
 import com.sinjeong.crewcalendar.domain.model.MenuDoc
 import com.sinjeong.crewcalendar.domain.model.MenuHwpx
 import com.sinjeong.crewcalendar.domain.model.MenuOcr
+import com.sinjeong.crewcalendar.domain.model.MenuPaste
 import com.sinjeong.crewcalendar.domain.model.MenuTable
 import com.sinjeong.crewcalendar.domain.model.OcrWord
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
-import com.sinjeong.crewcalendar.domain.model.menuEmoji
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -102,34 +102,6 @@ class MenuTest {
             .withCell(1, Meal.LUNCH, " 잡곡밥 \n\n  북어국\n포기김치\n  ")
         assertEquals(listOf("잡곡밥", "북어국", "포기김치"), m.items(1, Meal.LUNCH))
     }
-
-    // ── 이모지 ─────────────────────────────────────────────
-
-    /** 국물이 먼저다 — `계란국`은 달걀이 아니라 국이다 */
-    @Test fun emoji_prefers_the_more_specific_keyword() {
-        assertEquals("🍲", menuEmoji("계란국"))
-        assertEquals("🥚", menuEmoji("달걀장조림"))
-        assertEquals("🥬", menuEmoji("포기김치"))
-        assertEquals("🍜", menuEmoji("잔치국수"))     // `국`이 아니라 `국수`
-        assertEquals("🍖", menuEmoji("돈까스"))
-        assertEquals("🍚", menuEmoji("잡곡밥"))
-        assertEquals("🍲", menuEmoji("된장찌개"))
-    }
-
-    /** 못 맞히면 **null** — 사용자 확정: 엉뚱한 이모지보다 없는 게 낫다 */
-    @Test fun emoji_is_null_when_nothing_matches() {
-        assertNull(menuEmoji("깻잎지"))
-        assertNull(menuEmoji("단무지"))
-        assertNull(menuEmoji(""))
-    }
-
-    /** 한 글자 `김`·`배`·`차`를 뺀 결과가 실제로 안전한지 */
-    @Test fun single_char_keywords_do_not_misfire() {
-        assertEquals("🥬", menuEmoji("배추김치"))     // 김치 (배·김에 먼저 걸리면 안 된다)
-        assertEquals("🍲", menuEmoji("차돌된장국"))   // 국 (차 → 🍵 가 아니다)
-        assertEquals("🍙", menuEmoji("김자반"))       // 자반김은 밥반찬 — 구이(🍖)로 새면 안 된다
-    }
-
     // ── 기간 파싱 ───────────────────────────────────────────
 
     @Test fun period_parses_the_two_digit_year_form() {
@@ -387,4 +359,160 @@ class MenuTest {
         assertTrue(MenuHwpx.looksLikeZip(zipped.copyOf(8)))
         assertFalse(MenuHwpx.looksLikeZip("%PDF-1.7".toByteArray()))
     }
+
+    // ── v1.6.82 ② 실파일에서 드러난 것들 ─────────────────────
+
+    /**
+     * 【핵심 회귀】 실파일 머리칸은 `8월 31일(월)` 이다.
+     *
+     * v1.6.80~81 은 "한글만 남겨 한 글자면 요일" 이라 `월일월`(세 글자)이 되어 **하나도 못 잡았고**,
+     * 기준점 0개 → 21칸이 통째로 비었다. 사진·PDF·한글파일이 **전부 같은 이유로** 실패했다.
+     */
+    @Test fun dayHeader_withKoreanDate_isRecognized() {
+        assertEquals(0, MenuTable.dayIndexIn("8월 31일(월)"))
+        assertEquals(1, MenuTable.dayIndexIn("9월 1일(화)"))
+        assertEquals(6, MenuTable.dayIndexIn("9월 6일(일)"))
+        // 종전 모양도 그대로 산다
+        assertEquals(0, MenuTable.dayIndexIn("월"))
+        assertEquals(2, MenuTable.dayIndexIn("수요일"))
+        assertEquals(3, MenuTable.dayIndexIn("8/27(목)"))
+        // 메뉴 칸은 여전히 머리칸이 아니다
+        assertEquals(-1, MenuTable.dayIndexIn("잡곡밥"))
+        assertEquals(-1, MenuTable.dayIndexIn("중화풍잡채덮밥"))
+        assertEquals(-1, MenuTable.dayIndexIn("구 분"))
+    }
+
+    /** 실파일 한글파일 표 그대로(4행 × 8열, 머리칸 `8월 31일(월)` · `조식\n(07:30\n~09:00)`) → 21/21 */
+    @Test fun realHwpShapedTable_fillsAll21() {
+        val head = listOf("8월 31일(월)", "9월 1일(화)", "9월 2일(수)", "9월 3일(목)", "9월 4일(금)", "9월 5일(토)", "9월 6일(일)")
+        val meals = listOf("조식\n(07:30\n~09:00)", "중식\n(11:40\n~13:00)", "석식\n(17:30\n~19:00)")
+        val cells = mutableListOf(DocCell(0, 0, 1, 1, "구 분"))
+        head.forEachIndexed { c, t -> cells += DocCell(0, c + 1, 1, 1, t) }
+        meals.forEachIndexed { r, t ->
+            cells += DocCell(r + 1, 0, 1, 1, t)
+            for (c in 0..6) cells += DocCell(r + 1, c + 1, 1, 1, "밥$c\n국$r\n김치")
+        }
+        val out = MenuTable.cellsFromTable(cells)
+        assertNotNull(out)
+        assertEquals(21, out!!.count { it.isNotBlank() })
+        assertEquals("밥0\n국0\n김치", out[0 * 3 + 0])   // 월 조식
+        assertEquals("밥6\n국2\n김치", out[6 * 3 + 2])   // 일 석식
+    }
+
+    /**
+     * 【핵심 회귀】 PDF 글자층은 **글리프 단위**로 온다 — `8` `월` `31` `일` `(` `월` `)`.
+     * 이어 붙이지 않으면 `8월`의 `월` 과 옆 칸 `9월`의 `월` 이 같은 요일 기준점으로 잡혀 표가 엉킨다.
+     */
+    @Test fun pdfGlyphs_areJoinedIntoWords() {
+        // `9월 1일(화)` 를 실파일 좌표 그대로 쪼갠 것
+        val glyphs = listOf(
+            w("9", 200.6f, 6.4f), w("월", 207.1f, 10.3f), w("1", 222.8f, 6.4f), w("일", 229.2f, 10.3f),
+            w("(", 239.4f, 4.9f), w("화", 244.3f, 10.3f), w(")", 254.6f, 4.9f),
+        )
+        val runs = MenuOcr.groupRuns(glyphs)
+        assertEquals(1, runs.size)
+        assertEquals("9월 1일(화)", runs[0].text)
+    }
+
+    /**
+     * 【핵심 회귀】 끼니 머리칸이 **세 줄**(`조식` / `(07:30` / `~09:00)`)이면 기준점을 덩어리 가운데로
+     * 잡아야 한다. `조식` 낱말 하나의 y 를 쓰면 기준점이 한 줄 위로 떠서 **칸 맨 아랫줄이 다음 끼니로
+     * 넘어간다**(실파일 좌표에서 실제로 그랬다).
+     */
+    @Test fun threeLineMealHeader_keepsBottomRowInItsMeal() {
+        val words = mutableListOf<OcrWord>()
+        // 요일 머리글 7개 — 실파일 간격(첫 칸 124.2, 간격 106.9), y 는 표 위쪽
+        val dayY = 139.3f
+        for (d in 0..6) words += OcrWord(
+            "9월 ${d + 1}일(${listOf("월", "화", "수", "목", "금", "토", "일")[d]})",
+            124.2f + 106.9f * d - 30f, dayY - 5.5f, 124.2f + 106.9f * d + 30f, dayY + 5.5f,
+        )
+        // 끼니 머리칸 3장 × 3줄. 실파일 간격 117.2, 첫 칸 가운데 209.2
+        val mealTop = listOf("조식", "중식", "석식")
+        for (m in 0..2) {
+            val center = 209.2f + 117.2f * m
+            listOf(mealTop[m], "(07:30", "~09:00)").forEachIndexed { i, t ->
+                val y = center - 17.6f + 17.6f * i
+                words += OcrWord(t, 25.8f, y - 5.5f, 67.0f, y + 5.5f)
+            }
+        }
+        // 각 칸 여섯 줄 — 맨 윗줄과 **맨 아랫줄**이 같은 끼니에 남아야 한다
+        for (d in 0..6) for (m in 0..2) {
+            val center = 209.2f + 117.2f * m
+            for (i in 0..5) {
+                val y = center - 44f + 17.6f * i
+                words += OcrWord("m${m}d${d}i$i", 104.5f + 106.9f * d, y - 5.5f, 144f + 106.9f * d, y + 5.5f)
+            }
+        }
+        val cells = MenuOcr.toCells(words)
+        assertEquals(21, cells.count { it.isNotBlank() })
+        // 월 조식: 여섯 줄이 다 남아 있다 (한 줄이라도 새면 5줄이 된다)
+        assertEquals(6, cells[0].split('\n').size)
+        assertEquals("m0d0i0", cells[0].lineSequence().first())
+        assertEquals("m0d0i5", cells[0].lineSequence().last())
+        // 일 석식도 온전
+        assertEquals("m2d6i5", cells[6 * 3 + 2].lineSequence().last())
+    }
+
+    // ── v1.6.82 ②-3 붙여넣기 ────────────────────────────────
+
+    /** 한글·엑셀에서 표를 통째로 복사하면 탭이 온다 → 격자로 세워 그대로 앉힌다 */
+    @Test fun paste_tabSeparatedTable() {
+        val text = buildString {
+            append("구 분\t8월 31일(월)\t9월 1일(화)\t9월 2일(수)\t9월 3일(목)\t9월 4일(금)\t9월 5일(토)\t9월 6일(일)\n")
+            append("조식\t샌드위치\t잡곡밥\tc\td\te\tf\tg\n")
+            append("중식\th\ti\tj\tk\tl\tm\tn\n")
+            append("석식\to\tp\tq\tr\ts\tt\tu\n")
+        }
+        val cells = MenuPaste.toCells(text)
+        assertEquals(21, cells.count { it.isNotBlank() })
+        assertEquals("샌드위치", cells[0 * 3 + 0])
+        assertEquals("잡곡밥", cells[1 * 3 + 0])
+        assertEquals("u", cells[6 * 3 + 2])
+    }
+
+    /** 끼니 머리글 + 빈 줄로 나뉜 목록 — 사람이 손으로 정리해 붙이는 가장 흔한 모양 */
+    @Test fun paste_mealHeadersAndBlankLines() {
+        val text = """
+            조식
+
+            샌드위치
+            두유
+
+            잡곡밥
+            북어해장국
+        """.trimIndent()
+        val cells = MenuPaste.toCells(text)
+        assertEquals("샌드위치\n두유", cells[0 * 3 + 0])
+        assertEquals("잡곡밥\n북어해장국", cells[1 * 3 + 0])
+        assertEquals(2, cells.count { it.isNotBlank() })
+    }
+
+    /** 요일 머리글이 세 벌 반복된 목록 — 같은 요일에 또 쓰게 되면 다음 끼니로 내려간다 */
+    @Test fun paste_dayHeadersRepeatAcrossMeals() {
+        // ⚠ 내용 줄에 `조식`·`중식` 이 들어 있으면 그 줄이 끼니 머리글로 잡힌다(의도된 동작).
+        val text = "월\n월밥\n화\n화밥\n월\n월국\n화\n화국"
+        val cells = MenuPaste.toCells(text)
+        assertEquals("월밥", cells[0 * 3 + 0])
+        assertEquals("월국", cells[0 * 3 + 1])
+        assertEquals("화밥", cells[1 * 3 + 0])
+        assertEquals("화국", cells[1 * 3 + 1])
+    }
+
+    /** 나눌 근거가 아예 없는 글자는 **찍지 않는다** — 잘못 나눈 21칸을 지우는 게 더 오래 걸린다 */
+    @Test fun paste_flatListIsNotGuessed() {
+        val cells = MenuPaste.toCells("조식\n잡곡밥\n북어국\n포기김치\n흑미밥\n미역국\n깍두기")
+        assertEquals(1, cells.count { it.isNotBlank() })   // 한 칸에 몰아넣고 사람에게 맡긴다
+    }
+
+    /** 실파일 기간 문구(`※ 기 간 : ’26. 8. 31 ~ ‘26. 9. 06`) → 주 시작일 */
+    @Test fun realPeriodLine_parsesWeekStart() {
+        assertEquals(
+            LocalDate.of(2026, 8, 31),
+            MenuOcr.parseWeekStart("※ 기 간 : ’26. 8. 31 ~　‘26. 9. 06"),
+        )
+    }
+
+    private fun w(t: String, left: Float, width: Float, y: Float = 100f, h: Float = 11f) =
+        OcrWord(t, left, y - h / 2, left + width, y + h / 2)
 }

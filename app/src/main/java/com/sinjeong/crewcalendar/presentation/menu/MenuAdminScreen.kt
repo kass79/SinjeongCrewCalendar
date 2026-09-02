@@ -2,9 +2,10 @@ package com.sinjeong.crewcalendar.presentation.menu
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.pdf.PdfRenderer
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -32,10 +33,13 @@ import androidx.lifecycle.viewModelScope
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.korean.KoreanTextRecognizerOptions
+import com.sinjeong.crewcalendar.data.menu.MenuAi
 import com.sinjeong.crewcalendar.data.menu.MenuHwp
+import com.sinjeong.crewcalendar.data.menu.MenuPdf
 import com.sinjeong.crewcalendar.domain.model.Meal
 import com.sinjeong.crewcalendar.domain.model.MenuHwpx
 import com.sinjeong.crewcalendar.domain.model.MenuOcr
+import com.sinjeong.crewcalendar.domain.model.MenuPaste
 import com.sinjeong.crewcalendar.domain.model.MenuTable
 import com.sinjeong.crewcalendar.domain.model.OcrWord
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
@@ -102,13 +106,36 @@ class MenuAdminViewModel @Inject constructor(
             cells = newCells
             recognized = newCells.count { it.isNotBlank() }
             weekFromText?.let { weekStart = it }
-            val what = if (kind == DocKind.HWP || kind == DocKind.HWPX) "한글파일에서" else "글자인식으로"
+            val what = when (kind) {
+                DocKind.HWP, DocKind.HWPX -> "한글파일에서"
+                DocKind.PDF -> "PDF 글자를 그대로 읽어"
+                DocKind.PHOTO_AI -> "사진을 AI가 읽어"
+                DocKind.IMAGE -> "기기 글자인식으로"
+            }
             message = if (recognized == 0)
                 "$what 21칸을 채우지 못했습니다 — 아래에서 직접 채워 주세요."
             else "$what 21칸 중 ${recognized}칸을 채웠습니다. 틀린 곳을 눌러 고치세요."
         }.onFailure {
             message = "읽기 실패: ${it.message ?: "알 수 없는 오류"} — 직접 채워 주세요."
         }
+    }
+
+    /**
+     * **글자를 붙여넣어 채우기** (v1.6.82 ②-3). 파일이 아예 안 열리는 날의 안전망 —
+     * 어디서 복사해 오든 나눌 수 있는 만큼 나눠 준다([MenuPaste] 주석에 무엇을 알아듣는지 적혀 있다).
+     */
+    fun paste(text: String) {
+        val newCells = MenuPaste.toCells(text)
+        val filled = newCells.count { it.isNotBlank() }
+        if (filled == 0) {
+            message = "붙여넣은 글자에서 칸을 못 찾았습니다 — 칸 사이를 빈 줄로 나눠 보세요."
+            return
+        }
+        cells = newCells
+        recognized = filled
+        MenuOcr.parseWeekStart(text)?.let { weekStart = it }
+        message = if (filled == WeeklyMenu.CELLS) "붙여넣기로 21칸을 모두 채웠습니다."
+        else "붙여넣기로 21칸 중 ${filled}칸을 채웠습니다. 나머지는 눌러서 채우세요."
     }
 
     suspend fun alreadyExists(): Boolean = repo.exists(weekStart)
@@ -126,8 +153,8 @@ class MenuAdminViewModel @Inject constructor(
     }
 }
 
-/** 넣은 파일이 무엇인가 */
-enum class DocKind { IMAGE, PDF, HWP, HWPX }
+/** 넣은 파일이 무엇인가. [PHOTO_AI] = 사진을 클라우드 AI 가 읽은 것(v1.6.82) */
+enum class DocKind { IMAGE, PHOTO_AI, PDF, HWP, HWPX }
 
 /**
  * **파일 앞머리 8바이트로 종류를 가른다**(v1.6.81 ④).
@@ -151,15 +178,22 @@ private fun sniff(ctx: Context, uri: Uri): DocKind {
         ctx.contentResolver.openInputStream(uri)?.use { s -> ByteArray(8).also { s.read(it) } }
     }.getOrNull() ?: return DocKind.IMAGE
     return when {
-        head.size >= 4 && head[0] == '%'.code.toByte() && head[1] == 'P'.code.toByte() &&
-            head[2] == 'D'.code.toByte() && head[3] == 'F'.code.toByte() -> DocKind.PDF
+        MenuPdf.looksLikePdf(head) -> DocKind.PDF
         MenuHwp.looksLikeHwp(head) -> DocKind.HWP
         MenuHwpx.looksLikeZip(head) -> DocKind.HWPX
         else -> DocKind.IMAGE
     }
 }
 
-/** 사진/PDF/한글파일 → (21칸, 기간에서 읽은 주 시작일, 무엇이었는지) */
+/**
+ * 사진/PDF/한글파일 → (21칸, 기간에서 읽은 주 시작일, 무엇이었는지).
+ *
+ * **정확한 순서대로 시도한다**(v1.6.82 ②):
+ * 1. 한글파일 → 표 칸을 그대로 읽는다. 100%.
+ * 2. PDF → **글자층을 그대로 읽는다**(`MenuPdf`). 100%. 글자층이 없는 스캔 PDF 면 3으로 내려간다.
+ * 3. 사진 → **클라우드 AI**(`MenuAi`)가 표로 읽는다.
+ * 4. (AI 가 안 켜졌거나 인터넷이 없으면) 기기 안 글자인식(ML Kit) — 오프라인 최후 수단.
+ */
 private suspend fun readTable(ctx: Context, uri: Uri): Triple<List<String>, LocalDate?, DocKind> {
     val kind = sniff(ctx, uri)
     // ── 한글파일: 표 칸을 직접 읽는다. 글자인식이 낄 자리가 없어 **정확도가 100%** 다 ──
@@ -170,14 +204,27 @@ private suspend fun readTable(ctx: Context, uri: Uri): Triple<List<String>, Loca
         return Triple(MenuTable.toCells(doc), MenuOcr.parseWeekStart(doc.text), kind)
     }
 
-    val image = if (kind == DocKind.PDF) InputImage.fromBitmap(renderPdfFirstPage(ctx, uri), 0)
-    // 사진은 파일 경로로 넘긴다 — ML Kit 가 EXIF 회전을 알아서 편다(직접 비트맵을 만들면
-    // 세로로 찍은 사진이 눕는다).
-    else InputImage.fromFilePath(ctx, uri)
+    // ── PDF: 안에 이미 완성돼 있는 글자를 그대로 꺼낸다(v1.6.82 — 종전엔 그림으로 그려 읽었다) ──
+    if (kind == DocKind.PDF) {
+        val (words, full) = ctx.contentResolver.openInputStream(uri)?.use { MenuPdf.read(ctx, it) }
+            ?: error("PDF를 열 수 없습니다")
+        if (words.isNotEmpty()) {
+            return Triple(MenuOcr.toCells(words), MenuOcr.parseWeekStart(full), DocKind.PDF)
+        }
+        // 글자층이 없는 PDF = 종이를 스캔해 사진만 넣은 것 → 아래 사진 경로로 내려간다
+    }
+
+    // ── 사진: 큰 모델이 **표로** 읽는다. 실패하면 기기 안 글자인식으로 되돌아간다 ──
+    val bitmap = decodeUpright(ctx, uri)
+    runCatching { MenuAi.read(bitmap) }
+        .onSuccess { (cells, week) ->
+            if (cells.any { it.isNotBlank() }) return Triple(cells, week, DocKind.PHOTO_AI)
+        }
+        .onFailure { android.util.Log.w("MenuAdmin", "클라우드 인식 실패 — 기기 인식으로", it) }
 
     // Task→코루틴 변환은 이미 있는 `kotlinx-coroutines-play-services` 로 끝난다(새 의존성 0).
     val recognizer = TextRecognition.getClient(KoreanTextRecognizerOptions.Builder().build())
-    val text = recognizer.process(image).await()
+    val text = recognizer.process(InputImage.fromBitmap(bitmap, 0)).await()
 
     val words = text.textBlocks
         .flatMap { it.lines }
@@ -186,29 +233,38 @@ private suspend fun readTable(ctx: Context, uri: Uri): Triple<List<String>, Loca
             val b = e.boundingBox ?: return@mapNotNull null
             OcrWord(e.text, b.left.toFloat(), b.top.toFloat(), b.right.toFloat(), b.bottom.toFloat())
         }
-    return Triple(MenuOcr.toCells(words), MenuOcr.parseWeekStart(text.text), kind)
+    return Triple(MenuOcr.toCells(words), MenuOcr.parseWeekStart(text.text), DocKind.IMAGE)
 }
 
 /**
- * PDF 1쪽을 비트맵으로. 안드로이드 내장 [PdfRenderer] 라 새 의존성이 0이다(minSdk 26 에서 쓸 수 있다).
- * 가로 2000px 로 키워 렌더한다 — 원본 크기 그대로면 글자가 작아 인식률이 뚝 떨어진다.
+ * 사진을 **바로 세워서** 적당한 크기로 읽는다 (v1.6.82).
+ *
+ * 종전엔 ML Kit 에 파일 경로만 넘겨 EXIF 회전을 맡겼는데, 이제는 클라우드에도 같은 비트맵을
+ * 보내야 해서 여기서 한 번만 만든다. 폰 사진은 1200만 화소가 예사라 원본 그대로 읽으면
+ * **48MB 짜리 비트맵**이 되어 관리자 폰이 죽는다 — 표시가 아니라 인식이 목적이므로
+ * 긴 변 2400px 이면 글자가 남는다.
  */
-private fun renderPdfFirstPage(ctx: Context, uri: Uri): Bitmap {
-    val pfd: ParcelFileDescriptor = ctx.contentResolver.openFileDescriptor(uri, "r")
-        ?: error("PDF를 열 수 없습니다")
-    pfd.use { fd ->
-        PdfRenderer(fd).use { renderer ->
-            require(renderer.pageCount > 0) { "빈 PDF입니다" }
-            renderer.openPage(0).use { page ->
-                val w = 2000
-                val h = (w.toLong() * page.height / page.width).toInt().coerceAtLeast(1)
-                val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-                android.graphics.Canvas(bmp).drawColor(android.graphics.Color.WHITE)
-                page.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                return bmp
-            }
+private fun decodeUpright(ctx: Context, uri: Uri): Bitmap {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    ctx.contentResolver.openInputStream(uri)?.use { BitmapFactory.decodeStream(it, null, bounds) }
+    var sample = 1
+    while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 2400) sample *= 2
+    val bmp = ctx.contentResolver.openInputStream(uri)?.use {
+        BitmapFactory.decodeStream(it, null, BitmapFactory.Options().apply { inSampleSize = sample })
+    } ?: error("사진을 열 수 없습니다")
+
+    // 세로로 찍은 사진은 파일 안에서 눕혀져 있고 회전 각도만 EXIF 에 적혀 있다.
+    // 안 펴면 표가 90도 누운 채로 인식기에 들어가 요일 머리글이 세로가 된다.
+    val degrees = ctx.contentResolver.openInputStream(uri)?.use { s ->
+        when (ExifInterface(s).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
         }
-    }
+    } ?: 0f
+    if (degrees == 0f) return bmp
+    return Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, Matrix().apply { postRotate(degrees) }, true)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -219,6 +275,7 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<Pair<Int, Meal>?>(null) }
     var confirmOverwrite by remember { mutableStateOf(false) }
+    var pasting by remember { mutableStateOf(false) }
     // 촬영 결과를 받을 파일 — 캐시라 자동으로 청소된다. cache/share 와 섞지 않으려고 menu/ 로 나눈다.
     val shotUri = remember {
         val dir = File(ctx.cacheDir, "menu").apply { mkdirs() }
@@ -258,29 +315,35 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                "한글파일(.hwp/.hwpx)이 가장 정확합니다 — 표 칸을 그대로 읽어 글자인식이 낄 자리가 " +
-                    "없습니다. 사진·PDF는 글자를 읽어 21칸을 채웁니다. 원본 파일은 저장하지 않고 " +
-                    "글자만 올라갑니다. 틀린 칸은 눌러서 고치고 마지막에 [저장]을 눌러야 모두에게 보입니다.",
+                "한글파일(.hwp/.hwpx)과 PDF가 가장 정확합니다 — 파일 안의 글자를 그대로 읽어 " +
+                    "인식이 낄 자리가 없습니다. 사진은 AI가 표로 읽습니다. 어느 것도 안 되면 " +
+                    "[붙여넣기]로 글자를 넣으세요. 원본 파일은 저장하지 않고 글자만 올라갑니다. " +
+                    "틀린 칸은 눌러서 고치고 마지막에 [저장]을 눌러야 모두에게 보입니다.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(vertical = 6.dp),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 FilledTonalButton(
+                    onClick = { pickDoc.launch(arrayOf("*/*")) },
+                    enabled = !vm.busy, modifier = Modifier.weight(1.1f),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                ) { Text("PDF·한글", fontSize = 11.sp) }
+                FilledTonalButton(
                     onClick = { pickImage.launch("image/*") },
                     enabled = !vm.busy, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 4.dp),
-                ) { Text("갤러리", fontSize = 12.sp) }
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                ) { Text("갤러리", fontSize = 11.sp) }
                 FilledTonalButton(
                     onClick = { runCatching { takePhoto.launch(shotUri) } },
                     enabled = !vm.busy, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 4.dp),
-                ) { Text("촬영", fontSize = 12.sp) }
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                ) { Text("촬영", fontSize = 11.sp) }
                 FilledTonalButton(
-                    onClick = { pickDoc.launch(arrayOf("*/*")) },
-                    enabled = !vm.busy, modifier = Modifier.weight(1f),
-                    contentPadding = PaddingValues(horizontal = 4.dp),
-                ) { Text("PDF·한글", fontSize = 12.sp) }
+                    onClick = { pasting = true },
+                    enabled = !vm.busy, modifier = Modifier.weight(1.1f),
+                    contentPadding = PaddingValues(horizontal = 2.dp),
+                ) { Text("붙여넣기", fontSize = 11.sp) }
             }
             if (vm.busy) LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
 
@@ -398,6 +461,38 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
                 TextButton(onClick = { vm.setCell(d, meal, draft.trim()); editing = null }) { Text("확인") }
             },
             dismissButton = { TextButton(onClick = { editing = null }) { Text("취소") } },
+        )
+    }
+
+    // ── 붙여넣기 (v1.6.82 ②-3) ──────────────────────────────
+    if (pasting) {
+        var draft by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { pasting = false },
+            title = { Text("글자 붙여넣기") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "한글파일·PDF·문자에서 표를 복사해 붙여넣으세요. 표를 통째로 복사한 것(탭이 " +
+                            "들어간 글자)이 가장 잘 나뉩니다. 목록만 있을 때는 칸과 칸 사이를 " +
+                            "빈 줄로 나누거나 `조식`·`월` 같은 머리글을 남겨 두면 알아서 앉힙니다.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = draft, onValueChange = { draft = it },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 200.dp),
+                        placeholder = { Text("조식\n\n잡곡밥\n북어해장국\n포기김치\n\n샌드위치\n두유") },
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { vm.paste(draft); pasting = false },
+                    enabled = draft.isNotBlank(),
+                ) { Text("채우기", fontWeight = FontWeight.ExtraBold) }
+            },
+            dismissButton = { TextButton(onClick = { pasting = false }) { Text("취소") } },
         )
     }
 

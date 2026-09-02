@@ -23,8 +23,8 @@ android {
         // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
         // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
         targetSdk = 36
-        versionCode = 93
-        versionName = "1.6.81"
+        versionCode = 94
+        versionName = "1.6.82"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -134,6 +134,16 @@ dependencies {
     //    (`data/menu/MenuHwp.kt` 주석). 나머지 726개 클래스는 java.*·javax.crypto 만 쓴다.
     // **.hwpx 는 이 라이브러리가 필요 없다** — zip+XML 이라 java.util.zip + SAX 로 읽는다(APK 증가 0).
     implementation(libs.hwplib)
+
+    // 주간식단표 **PDF 글자층 직접 추출**(v1.6.82 ②-1). Apache-2.0.
+    // ⚠ `PDFBoxResourceLoader.init(context)` 를 앱 시작 때 한 번 불러야 한다(`SinjeongApp`).
+    implementation(libs.pdfbox.android)
+
+    // 주간식단표 **사진** → 클라우드 AI 인식(v1.6.82 ②-4). Gemini Developer API 백엔드라
+    // **Spark(무료) 요금제 그대로** 돈다. 앱에 API 키가 들어가지 않는다.
+    // ⚠ 2026-11-02 부터 **App Check 필수** — 그 전에 켜지 않으면 사진 인식만 멈춘다
+    //   (PDF·한글파일·붙여넣기는 클라우드와 무관하므로 영향 없다). docs/project-notes.md 참고.
+    implementation(libs.firebase.ai)
 
     // Background sync
     implementation(libs.androidx.work.runtime)

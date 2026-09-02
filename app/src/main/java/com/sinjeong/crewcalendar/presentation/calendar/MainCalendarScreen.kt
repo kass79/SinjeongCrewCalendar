@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DarkMode
+import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
@@ -64,7 +65,6 @@ import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import com.sinjeong.crewcalendar.presentation.admin.AdminGate
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
 import com.sinjeong.crewcalendar.presentation.menu.MenuDialog
-import com.sinjeong.crewcalendar.presentation.menu.menuStyleOf
 import com.sinjeong.crewcalendar.presentation.roster.changedCorner
 import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
@@ -113,6 +113,8 @@ fun MainCalendarScreen(
     var roomCombo by remember { mutableStateOf<NightCombo?>(null) }
     // 주간식단표(v1.6.80). ⚠ `rememberSaveable` 금지(CLAUDE.md) — 이 파일에선 초기값이 안 먹는다.
     var showMenu by remember { mutableStateOf(false) }
+    // 메모 모아보기(v1.6.82). 같은 이유로 `remember`.
+    var showMemos by remember { mutableStateOf(false) }
     // 근무 저장 확인 대화상자가 걸린 날짜(길게 누른 날). ⚠ `rememberSaveable`은 이 파일에서
     // 초기값이 조용히 깨진다(CLAUDE.md) — `remember`를 쓴다(회전 시 대화상자는 닫힌다).
     var freezeAsk by remember { mutableStateOf<LocalDate?>(null) }
@@ -183,6 +185,16 @@ fun MainCalendarScreen(
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
                         modifier = Modifier.height(28.dp),
                     ) { Text("근무선택", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
+                    // 메모 모아보기 (v1.6.82) — 이 달 메모를 한 목록으로. 설정 화면이 아니라 헤더에
+                    // 두는 이유는 **보고 있는 달**이 곧 목록의 범위이기 때문이다(달을 넘기면 목록도 따라간다).
+                    // 아이콘 넷째 자리에 들어가는데, 실측(1080x2400/420dpi) 날씨 칩 끝 336px ↔
+                    // `근무선택` 시작 616px = 280px(107dp) 여유라 36dp를 더 넣어도 남는다.
+                    IconButton(
+                        onClick = { showMemos = true },
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(Icons.Default.EditNote, "메모 모아보기", modifier = Modifier.size(21.dp))
+                    }
                     // 아이콘 3종은 반대로 한 단계 키웠다(32→36dp, 아이콘 18→21dp) — 44dp 헤더에 아직 여유가 있다
                     IconButton(
                         onClick = { viewModel.toggleTheme(isDark) },
@@ -397,8 +409,6 @@ fun MainCalendarScreen(
     if (showMenu) MenuDialog(
         weeks = menus,
         thisWeek = weekStartOf(LocalDate.now()),
-        // 열 때마다 다시 읽는다 — 설정에서 스타일을 바꾸고 돌아왔을 때 바로 반영되게
-        style = remember(showMenu) { menuStyleOf(context) },
         isAdmin = AdminGate.unlocked,
         onUpload = { showMenu = false; onOpenMenuAdmin() },
         onDismiss = { showMenu = false },
@@ -413,6 +423,18 @@ fun MainCalendarScreen(
             onDismiss = { freezeAsk = null },
         )
     }
+
+    // 메모 모아보기 (v1.6.82) — **보고 있는 달**의 메모만. 날짜를 누르면 접힘은 상세시트,
+    // 펼침은 오른쪽 패널로 간다(달력 칸을 누른 것과 정확히 같은 경로 — `onSelect`와 한 몸이다).
+    if (showMemos) MemoListSheet(
+        month = state.month,
+        days = state.days,
+        onPick = { d ->
+            showMemos = false
+            if (wide) panelEpochDay = d.toEpochDay() else viewModel.selectDate(d)
+        },
+        onDismiss = { showMemos = false },
+    )
 }
 
 /**
@@ -717,6 +739,11 @@ private fun DayCell(
     val plainBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
     val baseBg = if (frozen) frozenBg else plainBg
 
+    // **메모가 다 안 보일 때만** 켜지는 점(v1.6.82). 메모 [Text]가 배치될 때 스스로 정한다.
+    // 두 줄이 통째로 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
+    // 칸 폭이 54dp(접힘)라 9.5sp 두 줄이면 한글 12~14자쯤에서 갈린다(실측은 커밋 메시지 표).
+    var memoCut by remember(day.memo, height, big) { mutableStateOf(false) }
+
     Column(
         Modifier
             .height(height)
@@ -865,6 +892,17 @@ private fun DayCell(
                     .offset(x = (-4).dp, y = (-2).dp)
                     .size(if (big) 11.dp else 9.dp),
             )
+            // 메모 잘림 표시 — 야간 초승달의 **거울 자리**(칩 오른쪽 위 모서리). 초승달과 같은 이유로
+            // 칩 위에 오프셋으로 얹어 **폭·높이 비용이 0dp**다. 칸은 54dp인데 칩은 34dp라
+            // 오른쪽 10dp가 원래 비어 있어 날짜·공휴일 이름의 폭을 한 픽셀도 안 뺏는다.
+            // 색은 메모 글자와 같은 `onSurfaceVariant` — "저 글자가 더 있다"는 뜻을 색으로도 잇는다.
+            if (memoCut) Box(
+                Modifier
+                    .align(Alignment.TopEnd)
+                    .offset(x = 4.dp, y = (-2).dp)
+                    .size(if (big) 5.dp else 4.dp)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
+            )
         }
         if (day.signOn != null) {
             Text(
@@ -878,12 +916,39 @@ private fun DayCell(
                 color = duty.sunday,
             )
         }
-        // 메모는 항상 한 줄 보이게 (칸이 작아도 잘리지 않도록 축소)
+        // 메모 — **자리가 남으면 두 줄**, 아니면 한 줄 말줄임 (v1.6.82 사용자 요청 "개인 일정").
+        //
+        // 줄 수를 dp 산수로 미리 정하지 않고 **남은 높이에 직접 물어본다**:
+        // `weight(1f, fill = false)`가 위 요소(날짜·공휴일·근무변경 취소선·다이아 칩·출근시각)를
+        // 다 재고 **남은 높이만큼만** 최대 제약으로 주고, 그보다 작으면 제 높이만 차지한다.
+        // 두 줄이 그 높이를 넘치면(`didOverflowHeight`) 한 줄로 내려가 말줄임한다.
+        // → 근무변경 2줄·충당 2줄 칩·글자배율이 뭘 하든 **자동으로 맞는다**(상수 관리 0개).
+        //
+        // 실측(emulator-5554 1080x2400/420dpi, 9월=5주, 칸 136.4dp): 출근시각 아래 남는 높이
+        // **86dp**, 두 줄이 필요한 높이는 배율 1.0에서 21.7dp · 1.5에서 32.6dp라 두 줄이 늘 산다.
+        // 근무변경(취소선 +10dp)·충당 2줄 칩(+12dp)을 다 겹쳐도 배율 1.5에서 55dp가 남는다.
         if (day.memo.isNotBlank()) {
+            var memoLines by remember(day.memo, height, big) { mutableIntStateOf(2) }
             Text(
-                day.memo, fontSize = memoSize, lineHeight = memoSize * 1.06,
+                day.memo, fontSize = memoSize,
+                // 두 줄이 되면서 1.06은 너무 좁다 — 한글 받침이 다음 줄 상자에 닿는다.
+                lineHeight = memoSize * 1.2,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                maxLines = memoLines, overflow = TextOverflow.Ellipsis,
+                onTextLayout = {
+                    // ⚠ **`didOverflowHeight`를 쓰면 안 된다.** 그 값은 `didExceedMaxLines`를 포함해서
+                    // "줄 수를 넘겼다"(= 긴 메모면 언제나 참)일 때도 true다 — 처음에 그걸 썼다가
+                    // 자리가 남아도는 칸에서까지 한 줄로 내려앉았다(에뮬 실측). **높이가 모자란
+                    // 것만** 잡아야 하므로 마지막 줄의 아래끝을 실제 상자 높이와 직접 견준다.
+                    if (memoLines > 1 && it.lineCount > 0 &&
+                        it.getLineBottom(it.lineCount - 1) > it.size.height
+                    ) memoLines = 1
+                    // 잘렸으면 다이아 칩 옆에 점을 켠다(위 `memoCut` 참고).
+                    // 여기서는 `hasVisualOverflow`가 맞다 — 폭이든 줄 수든 "덜 보인다"가 곧 점이다.
+                    memoCut = it.hasVisualOverflow ||
+                        (it.lineCount > 0 && it.isLineEllipsized(it.lineCount - 1))
+                },
+                modifier = Modifier.weight(1f, fill = false),
             )
         }
     }
@@ -1126,10 +1191,18 @@ private fun DayDetailContent(
                     onDismiss = { showRoute = false },
                 )
             }
+            // 메모칸은 **쓴 만큼 늘어난다** — `minLines = 2`에서 시작해 `maxLines`까지 자라고
+            // 그 뒤로는 칸 안에서 스크롤한다(BasicTextField가 알아서 한다. 새 코드 0줄).
+            //
+            // 상한을 8줄로 잡은 근거(접힘 1080x2400 실측): 키보드가 떠 있을 때 시트에 남는 세로가
+            // 약 1050px = 400dp인데, 8줄이면 필드가 약 230dp라 **버튼 줄(삭제·취소·저장)이
+            // 키보드 바로 위에 그대로 남는다**(v1.6.12/v1.6.28이 지킨 그 동작). 상한을 없애면
+            // 긴 메모에서 버튼이 밀려 올라가 다시 가린다 — 그래서 무한이 아니라 8이다.
+            // ⚠ `imeAction`은 여전히 안 넣는다(v1.6.69): 여러 줄이라 Enter가 줄바꿈이어야 한다.
             OutlinedTextField(
                 value = memo, onValueChange = { memo = it },
                 label = { Text("메모") }, modifier = Modifier.fillMaxWidth(),
-                minLines = 2, colors = fieldColors(),
+                minLines = 2, maxLines = 8, colors = fieldColors(),
             )
             Row(Modifier.fillMaxWidth()) {
                 // 펼침은 날짜·근무변경 줄 자체가 없으니 **이 버튼이 근무변경의 유일한 진입점**이다.

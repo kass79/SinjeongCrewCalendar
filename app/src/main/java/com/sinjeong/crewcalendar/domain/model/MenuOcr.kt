@@ -43,6 +43,9 @@ object MenuOcr {
     private val DAY_CHARS = listOf("월", "화", "수", "목", "금", "토", "일")
     private val MEAL_LABELS = listOf("조식", "중식", "석식")
 
+    /** `8월 31일(월)` 처럼 **괄호 안에 요일 한 글자** — 실파일 머리글의 실제 모양 */
+    internal val DAY_IN_PAREN = Regex("[(\\[]\\s*([월화수목금토일])\\s*[)\\]]")
+
     /** 기준점 → 등간격 직선. `null` = 기준점이 2개 미만이라 세울 수 없음 */
     internal data class Axis(val origin: Float, val step: Float) {
         fun at(index: Int) = origin + step * index
@@ -74,8 +77,17 @@ object MenuOcr {
         return Axis(origin.toFloat(), step.toFloat())
     }
 
-    /** 머리글 `월`~`일` 낱말인가. `8월`·`24일`처럼 숫자가 붙은 건 제외한다 */
+    /**
+     * 머리글 `월`~`일` 낱말인가. `8월`·`24일`처럼 숫자가 붙은 건 제외한다.
+     *
+     * ⚠ **괄호 규칙이 먼저다**(v1.6.82). 실파일 머리글은 `8월 31일(월)` 인데, 여기엔 `8월`의 `월`과
+     * `31일`의 `일`이 섞여 있어 "한글 한 글자" 규칙으로는 **아예 안 걸린다**. 그래서 v1.6.80~81 은
+     * 요일 기준점을 하나도 못 잡았고 `fitAxis`가 null → **21칸이 통째로 비었다.** 사용자가 겪은
+     * *"텍스트를 너무 인식 못한다"* 의 실체가 이것이다(사진·PDF·한글파일 **세 경로 모두** 같은 원인).
+     * 괄호 안 한 글자는 오직 요일 머리글에만 나오므로 메뉴 이름과 부딪히지 않는다.
+     */
     private fun dayIndexOf(raw: String): Int {
+        DAY_IN_PAREN.find(raw)?.let { return DAY_CHARS.indexOf(it.groupValues[1]) }
         val s = raw.trim().trim('(', ')', '[', ']', '.', '·', '/')
         if (s.length !in 1..3 || s.any { it.isDigit() }) return -1
         val core = s.removeSuffix("요일")
@@ -90,6 +102,62 @@ object MenuOcr {
     }
 
     /**
+     * 끼니 기준점 = 왼쪽 머리칸 **덩어리의 세로 가운데** (v1.6.82).
+     *
+     * ⚠ `조식` 낱말 하나의 y 를 그대로 쓰면 안 된다. 실제 머리칸은
+     * `조식` / `(07:30` / `~09:00)` **세 줄**이고 `조식`은 그 중 맨 윗줄이라, 기준점이 칸 가운데보다
+     * 한 줄(약 17pt) 위로 뜬다. 그러면 반올림 경계가 통째로 밀려 **칸 아래쪽 메뉴가 다음 끼니로
+     * 넘어간다**(실파일 실측: 조식 칸 맨 아랫줄이 중식으로 감). 줄 수는 사업소 표마다 다르므로
+     * 상수로 뺄 수 없다 — 덩어리로 묶어 가운데를 잡는 것이 유일하게 안 틀리는 방법이다.
+     *
+     * @param leftBound 첫 요일 칸의 왼쪽 — 이보다 왼쪽이 `구 분` 머리칸이다.
+     */
+    internal fun mealAnchors(words: List<OcrWord>, leftBound: Float): List<Pair<Int, Float>> {
+        val label = words.filter { it.cx < leftBound && it.text.isNotBlank() }.sortedBy { it.cy }
+        val blocks = mutableListOf<MutableList<OcrWord>>()
+        for (w in label) {
+            val last = blocks.lastOrNull()
+            // 줄 간격 2배보다 멀면 다른 칸이다 (하단 안내문이 석식 칸에 붙는 것을 막는다)
+            if (last != null && w.top - last.maxOf { it.bottom } <= w.height * 2f) last.add(w)
+            else blocks.add(mutableListOf(w))
+        }
+        val fromBlocks = blocks.mapNotNull { b ->
+            val m = mealIndexOf(b.joinToString("") { it.text })
+            if (m < 0) null else m to (b.minOf { it.top } + b.maxOf { it.bottom }) / 2f
+        }
+        // 머리칸이 왼쪽에 없는 사진(잘려 찍힌 것)에서는 종전대로 낱말 위치를 그대로 쓴다
+        return if (fromBlocks.distinctBy { it.first }.size >= 2) fromBlocks
+        else words.mapNotNull { w -> mealIndexOf(w.text).takeIf { it >= 0 }?.let { it to w.cy } }
+    }
+
+    /**
+     * 낱자로 흩어진 글자를 **한 줄 안의 낱말 덩어리**로 잇는다 (v1.6.82).
+     *
+     * PDF 글자층은 글리프 단위로 나온다 — `8` `월` `31` `일` `(` `월` `)`. 그대로 두면 `월` 하나가
+     * 요일 기준점으로 잡히고, 같은 `월`이 `9월 1일(화)` 칸에도 있어 **기준점이 뒤엉킨다.**
+     * 사진 인식(ML Kit)은 이미 낱말 단위라 이 함수를 거치지 않는다.
+     */
+    fun groupRuns(words: List<OcrWord>): List<OcrWord> {
+        val sorted = words.filter { it.text.isNotBlank() }.sortedWith(compareBy({ it.cy }, { it.left }))
+        val out = mutableListOf<OcrWord>()
+        for (w in sorted) {
+            val last = out.lastOrNull()
+            if (last != null && abs(last.cy - w.cy) <= last.height * 0.4f &&
+                w.left - last.right <= last.height * 1.2f && w.left >= last.left
+            ) {
+                // 글자 폭의 1/4보다 벌어져 있으면 원래 띄어쓰기였다
+                val sep = if (w.left - last.right > last.height * 0.28f) " " else ""
+                out[out.lastIndex] = last.copy(
+                    text = last.text + sep + w.text,
+                    left = minOf(last.left, w.left), right = maxOf(last.right, w.right),
+                    top = minOf(last.top, w.top), bottom = maxOf(last.bottom, w.bottom),
+                )
+            } else out += w
+        }
+        return out
+    }
+
+    /**
      * 낱말 목록 → 21칸.
      *
      * @param words 인식된 낱말과 그 사각형. 좌표계는 픽셀이든 무엇이든 **단조 증가**면 된다.
@@ -100,13 +168,12 @@ object MenuOcr {
         if (words.isEmpty()) return empty
 
         val dayAnchors = words.mapNotNull { w -> dayIndexOf(w.text).takeIf { it >= 0 }?.let { it to w.cx } }
-        val mealAnchors = words.mapNotNull { w -> mealIndexOf(w.text).takeIf { it >= 0 }?.let { it to w.cy } }
         val colAxis = fitAxis(dayAnchors) ?: return empty
-        val rowAxis = fitAxis(mealAnchors) ?: return empty
 
         // 표 바깥(제목·기간·사업소명·하단 안내)을 잘라내는 테두리. 칸 한 칸의 절반만큼 여유를 준다.
         val leftBound = colAxis.at(0) - colAxis.step * 0.5f
         val rightBound = colAxis.at(WeeklyMenu.DAYS - 1) + colAxis.step * 0.5f
+        val rowAxis = fitAxis(mealAnchors(words, leftBound)) ?: return empty
         val topBound = rowAxis.at(0) - rowAxis.step * 0.5f
         val bottomBound = rowAxis.at(WeeklyMenu.MEALS - 1) + rowAxis.step * 0.5f
 
@@ -153,7 +220,11 @@ object MenuOcr {
      * 두 자리 연도(`'26`)는 2000년대로 편다. 못 찾으면 null → 화면이 오늘 주를 기본값으로 쓴다.
      */
     fun parseWeekStart(fullText: String): LocalDate? {
-        val m = Regex("(\\d{2,4})\\s*[.\\-/년]\\s*(\\d{1,2})\\s*[.\\-/월]\\s*(\\d{1,2})").find(fullText)
+        // ⚠ **먼저 공백을 전부 지운다**(v1.6.82). 글자를 낱자로 꺼내는 판독기는 숫자 사이에도 공백을
+        // 넣는다 — 실파일에서 PDFBox 가 `’2  6 .  8 .   3 1` 로 내놓아 `\d{2,4}` 가 통째로 빗나갔다.
+        // 사진 인식도 같은 이유로 `2 6` 이 되는 일이 있어 여기서 한 번에 막는다.
+        val flat = fullText.filterNot { it.isWhitespace() }
+        val m = Regex("(\\d{2,4})[.\\-/년](\\d{1,2})[.\\-/월](\\d{1,2})").find(flat)
             ?: return null
         val (ys, ms, ds) = m.destructured
         val year = ys.toInt().let { if (it < 100) 2000 + it else it }

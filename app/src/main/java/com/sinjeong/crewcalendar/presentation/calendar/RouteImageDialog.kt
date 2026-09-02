@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.calendar
 
+import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
@@ -46,12 +47,61 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+
+/** 핀치 확대 상한. 목표 해상도 계산과 제스처 클램프가 **같은 값**을 써야 한다. */
+private const val MAX_ZOOM = 6f
+
+/**
+ * 원본 폭이 [reqW] px 이상으로 남는 **가장 큰 2의 거듭제곱** 축소 배율(1·2·4…).
+ *
+ * [BitmapFactory.Options.inSampleSize]는 2의 거듭제곱만 의미가 있고, "요청 크기보다 작아지지 않는
+ * 선까지만 줄인다"가 안드로이드 공식 권장 계산이다. 여기서는 **폭 하나로만** 판정한다 —
+ * 표시할 때 원본 비율을 지키므로(`Fit` / 비율대로 계산한 높이) 세로 요구는 가로에 비례하고,
+ * 세로만 늘리는 [RouteImageInline]의 `vStretch`는 호출부가 [reqW]에 곱해 넘긴다.
+ */
+fun routeSampleSize(srcW: Int, reqW: Int): Int {
+    if (srcW <= 0 || reqW <= 0) return 1
+    var s = 1
+    while (srcW / (s * 2) >= reqW) s *= 2
+    return s
+}
+
+/**
+ * `assets/routes/{asset}.webp` 를 **필요한 만큼만** 디코딩한다 (플레이 콘솔 메모리 권장 조치).
+ *
+ * 종전엔 두 자리(전체화면 뷰어·상세시트 인라인)가 각자 `BitmapFactory.decodeStream(it)`으로
+ * **원본 크기 ARGB_8888**을 통째로 올렸다. 실측 최악값: `tt_work`(2258x2928) **25.2MB**,
+ * 본선 행로표(2000x1421) **10.8MB**. 인라인과 전체화면이 동시에 살아 있고 90도 회전 사본까지
+ * 만들면 한 표에 30MB가 넘는다.
+ *
+ * 두 가지를 한다 — **해상도는 한 픽셀도 안 버린다**:
+ *  1. `inJustDecodeBounds`로 원본 크기를 먼저 재고 [routeSampleSize]로 축소 배율을 고른다.
+ *     목표 폭은 호출부가 **표시 폭 × 확대 상한([MAX_ZOOM])**으로 준다. 지금 자산은 화면 폭의
+ *     2.15배(`tt_work` 접힘)가 최대라 **전부 `inSampleSize = 1`** — 즉 확대 선명도는 종전과
+ *     완전히 같다. 앞으로 화면의 12배가 넘는 자산이 들어오면 그때 자동으로 절반이 된다.
+ *  2. `inPreferredConfig = RGB_565` — **메모리가 정확히 절반**(픽셀당 4 → 2바이트)이 된다.
+ *     자산 162장 전부 알파 없는 VP8(파일 헤더 전수 확인: `VP8X`/알파 플래그 0건)이라
+ *     투명도를 잃을 것이 없고, 표 이미지는 평면 색·검은 글자뿐이라 밴딩이 생길 그라디언트가 없다.
+ *     ⚠ 사진처럼 그라디언트가 있는 자산을 넣게 되면 이 줄을 다시 봐야 한다.
+ */
+private fun decodeRoute(context: Context, asset: String, reqW: Int): Bitmap? = runCatching {
+    val path = "routes/$asset.webp"
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    context.assets.open(path).use { BitmapFactory.decodeStream(it, null, bounds) }
+    val opts = BitmapFactory.Options().apply {
+        inSampleSize = routeSampleSize(bounds.outWidth, reqW)
+        inPreferredConfig = Bitmap.Config.RGB_565
+    }
+    context.assets.open(path).use { BitmapFactory.decodeStream(it, null, opts) }
+}.getOrNull()
 
 /**
  * 행로표 원본 뷰어 — assets/routes/{asset}.webp, 핀치 확대(1~6배)·드래그 이동.
@@ -88,11 +138,14 @@ fun RouteImageDialog(
     header: @Composable () -> Unit = {},
 ) {
     val context = LocalContext.current
-    val src = remember(asset) {
-        runCatching {
-            context.assets.open("routes/$asset.webp").use { BitmapFactory.decodeStream(it) }
-        }.getOrNull()
+    // 목표 폭 = **화면 폭 × 확대 상한**. `Fit`이 그리는 폭은 화면 폭을 넘지 않으므로 이 값은
+    // 언제나 넉넉한 쪽(= 덜 줄이는 쪽)이다. 회전해도 원본 픽셀 수는 그대로라 값이 같다.
+    val cfg = LocalConfiguration.current
+    val density = LocalDensity.current
+    val reqW = remember(cfg.screenWidthDp, density.density) {
+        (cfg.screenWidthDp * density.density * MAX_ZOOM).toInt()
     }
+    val src = remember(asset, reqW) { decodeRoute(context, asset, reqW) }
     // ⚠ **`overshoot`가 없으면 세로형 표의 아랫부분이 화면 밖으로 잘린다**(v1.6.77 실측).
     //
     // 컴포즈 `Dialog`는 `usePlatformDefaultWidth = false`로도 **폭**만 화면에 맞춘다. 창 높이는
@@ -166,7 +219,7 @@ fun RouteImageDialog(
                                 .fillMaxSize()
                                 .pointerInput(Unit) {
                                     detectTransformGestures { _, pan, zoom, _ ->
-                                        scale = (scale * zoom).coerceIn(1f, 6f)
+                                        scale = (scale * zoom).coerceIn(1f, MAX_ZOOM)
                                         offset = if (scale > 1f) offset + pan else Offset.Zero
                                     }
                                 }
@@ -207,22 +260,23 @@ fun RouteImageInline(
     onExpand: () -> Unit,
 ) {
     val context = LocalContext.current
-    val bitmap = remember(asset) {
-        runCatching {
-            context.assets.open("routes/$asset.webp").use { BitmapFactory.decodeStream(it) }
-        }.getOrNull()
-    }
-    if (bitmap != null) {
-        BoxWithConstraints(
-            Modifier
-                .layout { measurable, constraints ->
-                    val extra = if (constraints.hasBoundedWidth) bleed.roundToPx() * 2 else 0
-                    val p = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + extra))
-                    layout(p.width - extra, p.height) { p.place(-extra / 2, 0) }
-                }
-                .clip(RoundedCornerShape(10.dp)),
-        ) {
-            val w = maxWidth * zoom
+    // ⚠ 디코딩이 [BoxWithConstraints] **안으로** 들어왔다 — 여기서만 실제 표시 폭을 알 수 있다.
+    // 인라인에는 핀치가 없다(탭하면 전체화면이 열린다). 그래서 목표 폭은 "그려질 폭" 그대로면
+    // 충분하고, 세로만 늘리는 `vStretch`가 요구하는 세로 해상도는 같은 비율로 폭에 곱해 넘긴다.
+    // 자산이 없으면 [decodeRoute]가 null → 아무것도 안 그린다(자리도 안 먹는다. 종전과 같다).
+    BoxWithConstraints(
+        Modifier
+            .layout { measurable, constraints ->
+                val extra = if (constraints.hasBoundedWidth) bleed.roundToPx() * 2 else 0
+                val p = measurable.measure(constraints.copy(maxWidth = constraints.maxWidth + extra))
+                layout(p.width - extra, p.height) { p.place(-extra / 2, 0) }
+            }
+            .clip(RoundedCornerShape(10.dp)),
+    ) {
+        val w = maxWidth * zoom
+        val reqW = with(LocalDensity.current) { (w * vStretch).roundToPx() }
+        val bitmap = remember(asset, reqW) { decodeRoute(context, asset, reqW) }
+        if (bitmap != null) {
             val h = w * bitmap.height / bitmap.width * vStretch
             Box(Modifier.horizontalScroll(rememberScrollState())) {
                 Image(
