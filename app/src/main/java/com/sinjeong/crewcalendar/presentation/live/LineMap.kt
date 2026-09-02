@@ -60,11 +60,13 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.sinjeong.crewcalendar.domain.model.DutyCode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.LocalDate
 import java.time.LocalTime
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -115,7 +117,13 @@ private fun inService(t: LocalTime = LocalTime.now()): Boolean {
  *   접힘 시트는 20dp, 펼침 패널은 10dp라 같은 값을 쓰면 패널에서 카드가 벽에 붙는다.
  */
 @Composable
-internal fun BranchLiveMap(bleed: Dp = 0.dp, modifier: Modifier = Modifier) {
+internal fun BranchLiveMap(
+    bleed: Dp = 0.dp,
+    /** 오늘 근무 — 전체 보기(본선 순환선 지도)의 **내 열번** 판정에만 쓴다(v1.6.84) */
+    duty: DutyCode? = null,
+    date: LocalDate = LocalDate.now(),
+    modifier: Modifier = Modifier,
+) {
     var snap by remember { mutableStateOf(Snapshot()) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     val scope = rememberCoroutineScope()
@@ -165,7 +173,13 @@ internal fun BranchLiveMap(bleed: Dp = 0.dp, modifier: Modifier = Modifier) {
         while (isActive) { now = System.currentTimeMillis(); delay(1_000) }
     }
 
+    // v1.6.84 — 지선 지도 카드 우상단의 `전체 보기` 로 여는 본선 순환선 지도.
+    // 닫으면 그쪽 LaunchedEffect 가 취소돼 폴링이 멎는다(스냅샷 캐시는 공유).
+    var showFull by remember { mutableStateOf(false) }
+    if (showFull) MainLineMapDialog(duty, date) { showFull = false }
+
     LineMapCard(
+        onFullMap = { showFull = true },
         trains = snap.trains,
         inbound = snap.inbound,
         fetchedAtMillis = snap.fetchedAtMillis,
@@ -188,6 +202,7 @@ private fun Modifier.bleedH(amount: Dp) = if (amount <= 0.dp) this else this.lay
 
 @Composable
 private fun LineMapCard(
+    onFullMap: () -> Unit,
     trains: List<TrainMark>,
     inbound: List<InboundTrain>,
     fetchedAtMillis: Long,
@@ -563,6 +578,12 @@ private fun LineMapCard(
                 }
                 }
             }
+            // v1.6.84 — 새로고침 왼쪽에 `전체 보기`(본선 순환선 지도). **지도 그림 자체는
+            // 한 픽셀도 안 바뀐다** — 이 Box 의 오버레이만 하나 늘었다.
+            Box(
+                Modifier.align(Alignment.TopEnd).padding(top = 5.dp, end = 40.dp),
+            ) { FullMapButton(onFullMap) }
+
             // 즉시 갱신 버튼 (탭하면 한 바퀴 회전 피드백)
             var refreshTick by remember { mutableIntStateOf(0) }
             val spin by animateFloatAsState(refreshTick * 360f, tween(700), label = "spin")

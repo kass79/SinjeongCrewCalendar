@@ -337,16 +337,13 @@ object BundledTimetable {
             "후반사업이 \"${tokens.first()}\"(으)로 시작해 어디서 열차를 잡는지 표에 없습니다. 알람을 걸지 않습니다.",
             nextDay = true,
         )
-        val base = when {
-            head.startsWith("19") || head.startsWith("29") -> "군자기지"
-            head.startsWith("5") || head.startsWith("6") -> "신정기지"
-            head.startsWith("2") -> null // 영업열차 = 신도림 교대
-            else -> return Advice(
-                null,
-                "후반 첫 열번 $head 이 어느 갈래인지 판단할 수 없어 알람을 걸지 않습니다.",
-                nextDay = true,
-            )
-        }
+        // 갈래 판정은 [boardingPlace] 한 벌뿐이다 — 내 열번 판정(MyTrain)도 같은 것을 부른다.
+        val place = boardingPlace(head) ?: return Advice(
+            null,
+            "후반 첫 열번 " + head + " 이 어느 갈래인지 판단할 수 없어 알람을 걸지 않습니다.",
+            nextDay = true,
+        )
+        val base = place.takeIf { it != SINDORIM }
         base?.let { return depot(it, start).copy(nextDay = true) }
         // **익일**이 평일이냐 휴일이냐로 편승시각표를 고른다. 15분 보정은 하지 않는다 —
         // 그 보정은 주간 **휴일 표**가 양천구청 편승 출발을 적는다는 관측인데(v1.6.30),
@@ -355,7 +352,31 @@ object BundledTimetable {
         return deadhead(start, Bundled.isHolidayTimetable(date.plusDays(1))).copy(nextDay = true)
     }
 
-    private val FOUR_DIGITS = Regex("^\\d{4}$")
+    /** 네 자리 열번만 골라내는 잣대 — 인수인계 주석 토큰을 버리는 데 쓴다. */
+    internal val FOUR_DIGITS = Regex("^\\d{4}$")
+
+    internal const val SINDORIM = "신도림"
+
+    /**
+     * **그 열번을 어디서 잡나** — 열번 앞자리 하나로 갈린다(승무 실무 규칙).
+     *
+     * | 앞자리 | 뜻 | 돌려주는 값 |
+     * |---|---|---|
+     * | `19xx`·`29xx` | 군자기지 출고 회송 | `군자기지` |
+     * | `5xxx`·`6xxx` | 신정기지 출고 회송 | `신정기지` |
+     * | `2xxx` | 영업열차 | [SINDORIM] (신도림 교대) |
+     * | 그 밖 | 판단 불가 | `null` |
+     *
+     * ⚠ **이 규칙은 여기 한 벌만 둔다.** [mainNightSecond] 의 알람 계산과
+     * `MyTrain` 의 내 열번 판정이 같이 부른다 — 두 벌이 되면 한쪽만 고쳐 어긋나고,
+     * 그때 틀리는 것은 화면 글자가 아니라 **출근 알람 시각**이다.
+     */
+    internal fun boardingPlace(head: String): String? = when {
+        head.startsWith("19") || head.startsWith("29") -> "군자기지"
+        head.startsWith("5") || head.startsWith("6") -> "신정기지"
+        head.startsWith("2") -> SINDORIM
+        else -> null
+    }
 
     /**
      * 그 날 그 근무의 알람 권장 시각. **전반사업**([second] = false)은 세 갈래다(v1.6.27 사용자 확정):

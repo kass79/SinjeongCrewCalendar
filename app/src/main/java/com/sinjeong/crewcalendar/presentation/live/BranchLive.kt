@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.presentation.live
 
 import android.util.Log
+import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -93,9 +94,28 @@ internal data class ArrivalRow(
     val trainNo: String, val destName: String, val etaSec: Int, val arvlCd: String = "",
 )
 
+/**
+ * **본선(순환선) 열차** 한 대 (v1.6.84). 지선 [TrainMark] 와 좌표계가 달라 따로 둔다 —
+ * 지선은 0~4의 연속 좌표지만 본선은 43역 순환이라 `역 인덱스 + 미세 오프셋`이다.
+ */
+internal data class MainTrainMark(
+    val trainNo: String,
+    /** [Line2Stations.MAIN] 에서의 자리 0..42 */
+    val stationIdx: Int,
+    /** true = 내선(시계 · 역 순서대로) / false = 외선(반시계) */
+    val inner: Boolean,
+    /** 역 기준 미세 위치(−0.6 ~ +0.15) — 진입/도착/출발/전역출발 */
+    val offset: Float,
+    val statusText: String,
+    /** 종착역명 원본(꼬리 포함) — 툴팁에 그대로 보여 준다 */
+    val destName: String,
+)
+
 /** 화면 한 벌 */
 internal data class Snapshot(
     val trains: List<TrainMark> = emptyList(),
+    /** 본선 열차 — **같은 위치 스냅샷에서 걸러낸 것**이라 API 호출이 늘지 않는다 */
+    val mainTrains: List<MainTrainMark> = emptyList(),
     val inbound: List<InboundTrain> = emptyList(),
     val fetchedAtMillis: Long = 0L,
     val error: String? = null,
@@ -283,6 +303,54 @@ internal object BranchLive {
      * ⚠ [inboundFromPositions]에는 걸지 않는다 — 거기는 본선 입고 열차를 **일부러** 쓴다.
      */
     private fun isBranchNo(no: String) = (no.toIntOrNull() ?: 0) in 5000..5899
+
+    /**
+     * **본선 순환선 열차 전부** (v1.6.84) — [branchTrains] 와 **같은 `rows`** 를 쓴다.
+     * 위치 API 는 이미 2호선 전체를 주고 있었고 지선만 걸러 쓰고 있었을 뿐이라,
+     * 여기서 나머지를 쓰는 데 **API 호출이 한 번도 늘지 않는다**(키 한도 산정 그대로).
+     *
+     * ## 방향 — `updnLine` 은 글자가 아니라 **"0"·"1"** 이다
+     *
+     * 2026-09-03 01:00 실호출로 확인했다: `updnLine` 실값은 `"0"`(8대)·`"1"`(8대)뿐이고
+     * `"상행"`·`"내선"` 같은 글자는 오지 않는다. 어느 쪽이 내선인지는 실데이터로 맞췄다 —
+     * `7523` 이 `문래` 에서 종착 `신도림` 인데 `updnLine=1` 이었다. 내선 순서가
+     * `… 대림 → 신도림 → 문래 …` 이므로 문래에서 신도림으로 가는 것은 **역순 = 외선**이다
+     * (`8527` 을지로3가 → 종착 을지로입구, `updnLine=1` 도 같은 결론).
+     * → **`"0"` = 내선(시계) · 그 밖 = 외선(반시계).**
+     *
+     * ⚠ 지선 열차는 뺀다. 지선 전용역([Line2Stations.BRANCH_ONLY])에 있는 열차와
+     * 본선 43역에 매칭이 안 되는 이름은 그리지 않는다 — 성수지선 `1725`(신설동)·
+     * 신정지선 `5719`(도림천)가 실제로 그렇게 걸러진다.
+     */
+    internal fun mainTrains(rows: List<PositionRow>): List<MainTrainMark> =
+        rows.asSequence()
+            .filter { it.subwayId == BranchLine.SUBWAY_ID_LINE2 }
+            .mapNotNull { r ->
+                val name = Line2Stations.norm(r.statnNm)
+                if (name in Line2Stations.BRANCH_ONLY) return@mapNotNull null
+                val idx = Line2Stations.MAIN.indexOf(name)
+                if (idx < 0) return@mapNotNull null
+                val inner = r.updnLine.trim() == "0"
+                MainTrainMark(
+                    trainNo = r.trainNo,
+                    stationIdx = idx,
+                    inner = inner,
+                    offset = when (r.trainSttus) {
+                        "0" -> -0.15f      // 진입
+                        "1" -> 0f          // 도착
+                        "2" -> 0.15f       // 출발
+                        "3" -> -0.6f       // 전역 출발
+                        else -> 0f
+                    },
+                    statusText = name + when (r.trainSttus) {
+                        "0" -> " 진입"; "1" -> " 도착"; "2" -> " 출발"
+                        "3" -> " 접근 중"; else -> " 부근"
+                    },
+                    destName = Line2Stations.norm(r.statnTnm),
+                )
+            }
+            .distinctBy { it.trainNo }
+            .toList()
 
     /** trainSttus(0진입 1도착 2출발 3전역출발) → 역 인덱스 주변의 미세 위치 */
     private fun posOf(idx: Int, dir: Float, sttus: String) = when (sttus) {
@@ -710,6 +778,7 @@ internal object BranchLive {
                     val merged = (strict + branchTrainsLoose(posRows, strict)).distinctBy { it.trainNo }
                     merged.ifEmpty { trainsFromArrivals(yangRows) }
                 },
+                mainTrains = mainTrains(posRows),
                 inbound = inboundFromPositions(posRows),
                 fetchedAtMillis = System.currentTimeMillis(),
                 // 두 호출이 같은 이유로 죽으면 문구도 하나만 (`인터넷 연결 안 됨 · 인터넷 연결 안 됨` 방지).

@@ -601,4 +601,63 @@ class BranchLiveTest {
         assertFalse(ok("4376"))    // 본선 신도림 종착
         assertFalse(ok("6114"))    // 본선 성수 계열
     }
+
+    // ── 본선 열차 (v1.6.84) ─────────────────────────────────
+    // 같은 위치 스냅샷에서 본선만 걸러 낸다 — API 호출은 늘지 않는다.
+
+    /**
+     * 2026-09-03 01:00 `realtimePosition/2호선` **실호출 응답**에서 뽑은 행들이다.
+     * 그 시각 16대가 왔고 지선 둘(성수지선 1725/1726 · 신정지선 5719/5720)이 섞여 있었다.
+     */
+    private val REAL = """[
+        {"subwayId":"1002","statnNm":"신설동","trainNo":"1725","updnLine":"1","statnTnm":"신설동","trainSttus":"1"},
+        {"subwayId":"1002","statnNm":"도림천","trainNo":"5719","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1"},
+        {"subwayId":"1002","statnNm":"신정네거리","trainNo":"5720","updnLine":"0","statnTnm":"까치산","trainSttus":"2"},
+        {"subwayId":"1002","statnNm":"성수종착","trainNo":"6508","updnLine":"0","statnTnm":"성수종착","trainSttus":"1"},
+        {"subwayId":"1002","statnNm":"건대입구","trainNo":"6513","updnLine":"1","statnTnm":"성수종착","trainSttus":"1"},
+        {"subwayId":"1002","statnNm":"문래","trainNo":"7523","updnLine":"1","statnTnm":"신도림","trainSttus":"1"},
+        {"subwayId":"1002","statnNm":"을지로3가","trainNo":"8527","updnLine":"1","statnTnm":"을지로입구","trainSttus":"3"}
+    ]"""
+
+    @Test
+    fun `본선 열차만 골라낸다`() {
+        val m = BranchLive.mainTrains(BranchLive.parsePositions(REAL))
+        val nos = m.map { it.trainNo }
+        // 지선 전용역(신설동·도림천·신정네거리)에 있는 열차는 본선 지도에 없다
+        assertFalse("1725" in nos)
+        assertFalse("5719" in nos)
+        assertFalse("5720" in nos)
+        // 본선 역에 있는 열차는 남는다 — `성수종착` 꼬리도 흡수된다
+        assertTrue("6508" in nos)
+        assertTrue("6513" in nos)
+        assertTrue("7523" in nos)
+        assertTrue("8527" in nos)
+        assertEquals(4, m.size)
+        assertEquals(10, m.first { it.trainNo == "6508" }.stationIdx)   // 성수
+    }
+
+    /**
+     * ⚠ `updnLine` 은 글자가 아니라 **"0"·"1"** 이다(실호출 확인). `"0"` = 내선.
+     * 근거: `7523` 이 문래에서 종착 신도림인데 `updnLine=1` — 내선 순서가
+     * `대림 → 신도림 → 문래` 이므로 문래에서 신도림으로 가는 건 역순 = 외선이다.
+     */
+    @Test
+    fun `내선 외선 판정`() {
+        val m = BranchLive.mainTrains(BranchLive.parsePositions(REAL)).associateBy { it.trainNo }
+        assertTrue("updnLine 0 은 내선", m.getValue("6508").inner)
+        assertFalse("updnLine 1 은 외선", m.getValue("7523").inner)
+        assertFalse(m.getValue("6513").inner)
+        assertFalse(m.getValue("8527").inner)
+        // trainSttus 3(전역 출발)은 역 앞쪽에 놓인다
+        assertEquals(-0.6f, m.getValue("8527").offset, 0.001f)
+        assertEquals(0f, m.getValue("7523").offset, 0.001f)
+    }
+
+    @Test
+    fun `같은 열번은 한 번만`() {
+        // parsePositions 는 여는/닫는 중괄호 덩어리를 찾을 뿐이라 배열 문법이 아니어도 된다
+        val dup = REAL + """{"subwayId":"1002","statnNm":"삼성","trainNo":"7523","updnLine":"1","statnTnm":"신도림","trainSttus":"1"}"""
+        val m = BranchLive.mainTrains(BranchLive.parsePositions(dup))
+        assertEquals(1, m.count { it.trainNo == "7523" })
+    }
 }

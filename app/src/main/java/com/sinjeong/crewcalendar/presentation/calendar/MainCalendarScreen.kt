@@ -1161,7 +1161,11 @@ private fun DayDetailContent(
             // (v1.6.50 사용자: *"애뮬레이트 가로 길이는 조금 더 늘려줘"*). 절반만 내주는 건
             // 행로표·메모 카드와 왼쪽 선이 아주 어긋나지는 않게 하려는 것이다 —
             // 여백을 다 먹으면 카드 하나만 벽에 붙어 튀어 보인다.
-            if (day.date == LocalDate.now()) BranchLiveMap(bleed = if (compact) 10.dp else 5.dp)
+            if (day.date == LocalDate.now()) BranchLiveMap(
+                bleed = if (compact) 10.dp else 5.dp,
+                // v1.6.84 — 전체 보기(본선 순환선)에서 **내 열번**을 집는 데만 쓴다
+                duty = day.duty, date = day.date,
+            )
             // 출근 알람 — 시각이 있는 근무(본선·지선·대기)에만 띄운다. 계산은 BundledTimetable.advise.
             // 후반 칩은 후반사업이 실제로 있는 근무(본선 다이아 / 지선 사업시각)에만 붙인다 —
             // 대기 근무에 "알람 없음" 칩이 두 개 겹쳐 뜨는 걸 막는다.
