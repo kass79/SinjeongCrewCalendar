@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lucide "dot" (ISC License) — SVG를 벡터 드로어블로 변환. 라이브러리 미사용.
+     원본은 <circle cx=12 cy=12 r=1/> 인데 벡터 드로어블에 circle 태그가 없어 두 호(arc)로 푼다.
+     아이콘 매칭이 안 된 메뉴 줄에 쓴다 — 자리를 비우면 줄 정렬이 들쭉날쭉해진다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:pathData="M13 12A1 1 0 0 1 11 12A1 1 0 0 1 13 12Z"
+        android:fillColor="@android:color/transparent"
+        android:strokeColor="@android:color/white"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

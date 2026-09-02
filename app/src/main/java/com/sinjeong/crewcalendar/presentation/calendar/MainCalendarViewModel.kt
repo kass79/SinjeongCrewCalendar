@@ -6,6 +6,7 @@ import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.model.countsAsRestDay
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
@@ -86,8 +87,8 @@ data class CalendarUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
 ) {
-    /** 이달 휴일 갯수 (앱바 칩) */
-    val restDayCount: Int get() = days.count { it.duty.isRest }
+    /** 이달 휴일 갯수 (앱바 칩) — 충당으로 나가도 안 줄고 **지근으로 바꿀 때만** 준다([countsAsRestDay]) */
+    val restDayCount: Int get() = days.count { it.countsAsRestDay }
 
     /** 현재 소속 (근무선택 1단계 기본 표시용) */
     val currentGroup: CrewGroup?

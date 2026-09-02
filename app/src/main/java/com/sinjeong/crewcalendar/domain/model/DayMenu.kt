@@ -33,12 +33,33 @@ fun nextMealAt(now: LocalDateTime): MealSlot {
 }
 
 /**
+ * 그 칸의 **국** — 국·찌개·탕 첫 줄. 없으면 null(국 없는 칸이 실제로 있다 — 실파일 월요일 조식은
+ * `샌드위치·두유·누룽지·포기김치`다).
+ *
+ * 판정을 [menuIcon] 에 맡기는 것이 요점이다. `두부김치국`·`달걀실파장국`·`꼬치어묵국`이 국이고
+ * `탕수육`이 국이 아니라는 규칙은 이미 거기 한 벌만 있다 — 두 벌이 되면 한쪽만 고쳐 어긋난다.
+ */
+fun soupDish(items: List<String>): String? = items.firstOrNull { menuIcon(it) == MenuIcon.SOUP }
+
+/**
  * 그 칸의 **메인 요리** — "국 다음 첫 항목"(사용자 표현). 밥·국을 건너뛴 첫 줄이고,
  * 다 건너뛰면(밥·국뿐인 칸) 첫 줄을 그대로 쓴다.
+ *
+ * ⚠ **덮밥류는 밥이지만 건너뛰지 않는다.** 실파일 금요일 중식이 `중화풍잡채덮밥`으로 **시작**하는데
+ * (v1.6.82 절에 적힌 그 칸이다) 이걸 밥으로 보고 넘기면 곁들이 `꿔바로우찹쌀탕수육`이 메인으로
+ * 올라온다. 한 그릇으로 끼니가 되는 밥은 반찬이 아니라 주요리다.
  */
 fun mainDish(items: List<String>): String? =
-    items.firstOrNull { menuIcon(it) != MenuIcon.WHEAT && menuIcon(it) != MenuIcon.SOUP }
-        ?: items.firstOrNull()
+    items.firstOrNull(::isMainDish) ?: items.firstOrNull()
+
+private fun isMainDish(name: String): Boolean {
+    if (ONE_BOWL.any { it in name.replace(" ", "") }) return true
+    val icon = menuIcon(name)
+    return icon != MenuIcon.WHEAT && icon != MenuIcon.SOUP
+}
+
+/** 한 그릇으로 끼니가 되는 밥 — 이름에 `밥`이 있어도 메인이다. */
+private val ONE_BOWL = listOf("덮밥", "비빔밥", "볶음밥")
 
 /** 메뉴 아이콘 종류. 리소스 id가 아니라 **뜻**이다 — 화면 쪽에서 그림을 붙인다. */
 enum class MenuIcon { SOUP, FISH, BEEF, DRUMSTICK, EGG, SALAD, SANDWICH, MILK, APPLE, WHEAT, UTENSILS }

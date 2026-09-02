@@ -6,6 +6,7 @@ import androidx.core.content.FileProvider
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.DutyType
+import com.sinjeong.crewcalendar.domain.model.countsAsRestDay
 import java.io.File
 import java.io.FileOutputStream
 import java.time.YearMonth
@@ -47,7 +48,9 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
         c.drawText(s, x, y, p)
     }
     // 헤더
-    val restCount = days.count { it.duty.isRest }
+    // 앱바 칩과 **같은 규칙**으로 센다(충당은 안 줄고 지근만 준다). 여기서 따로 세면
+    // 화면의 `휴 N개`와 공유 그림의 숫자가 갈린다.
+    val restCount = days.count { it.countsAsRestDay }
     txt("${month.year % 100}년 ${month.monthValue}월", pad, 74f, 60f, 0xFF1B1B22.toInt(), bold = true)
     txt("${ownerName} 근무표 · 휴 ${restCount}개", pad, 122f, 34f, 0xFF6B6B78.toInt())
     // 요일

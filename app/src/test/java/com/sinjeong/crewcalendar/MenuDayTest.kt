@@ -6,6 +6,7 @@ import com.sinjeong.crewcalendar.domain.model.MenuIcon
 import com.sinjeong.crewcalendar.domain.model.mainDish
 import com.sinjeong.crewcalendar.domain.model.menuIcon
 import com.sinjeong.crewcalendar.domain.model.nextMealAt
+import com.sinjeong.crewcalendar.domain.model.soupDish
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -129,6 +130,49 @@ class MenuDayTest {
     fun `밥과 국뿐이면 첫 줄이 메인`() {
         assertEquals("잡곡밥", mainDish(listOf("잡곡밥", "미역국")))
         assertNull(mainDish(emptyList()))
+    }
+
+    /**
+     * v1.6.83. **덮밥은 밥이 아니라 메인이다.** 실파일 금요일 중식이 `중화풍잡채덮밥`으로 시작하는데
+     * 이걸 밥으로 보고 넘기면 곁들이 `꿔바로우찹쌀탕수육`이 메인 자리에 올라온다.
+     */
+    @Test
+    fun `한 그릇 밥은 밥이라도 메인이다`() {
+        val 금요일중식 = listOf(
+            "중화풍잡채덮밥", "달걀실파장국", "꿔바로우찹쌀탕수육", "짜사이채무침", "깍둑단무지", "포기김치",
+        )
+        assertEquals("중화풍잡채덮밥", mainDish(금요일중식))
+        assertEquals("김치볶음밥", mainDish(listOf("김치볶음밥", "미소장국", "단무지")))
+        assertEquals("비빔밥", mainDish(listOf("비빔밥", "콩나물국")))
+        // 그냥 밥은 여전히 건너뛴다 — 이걸 메인으로 올리면 매일 "잡곡밥"이 크게 뜬다
+        assertEquals("제육볶음", mainDish(listOf("잡곡밥", "제육볶음", "김치")))
+    }
+
+    // ── 국 고르기 (v1.6.83) ─────────────────────────────────
+    // 강조는 **국 1 + 메인 1** 두 줄뿐이라, 국을 잘못 집으면 나머지가 통째로 회색 줄로 밀린다.
+
+    @Test
+    fun `국은 국물 아이콘이 붙는 첫 줄`() {
+        val 월요일중식 = listOf(
+            "잡곡밥", "햄김치국", "가자미구이", "닭가슴살샐러드", "브로컬리숙회", "깍두기",
+        )
+        assertEquals("햄김치국", soupDish(월요일중식))
+        assertEquals("가자미구이", mainDish(월요일중식))
+        // 재료 이름이 섞여 있어도 국이 이긴다(menuIcon 규칙 한 벌만 쓴다)
+        assertEquals("두부김치국", soupDish(listOf("잡곡밥", "두부김치국", "고기완자전")))
+        assertEquals("차돌된장찌게", soupDish(listOf("잡곡밥", "차돌된장찌게", "새우까스*양파D")))
+        assertEquals("동태얼큰매운탕", soupDish(listOf("잡곡밥", "동태얼큰매운탕", "청경채소고기불고기")))
+    }
+
+    /** 국이 **없는 칸이 실제로 있다** — 실파일 월요일 조식. 없으면 null 이고 메인만 강조된다. */
+    @Test
+    fun `국이 없는 칸도 있다`() {
+        val 월요일조식 = listOf("샌드위치", "두유", "누룽지", "포기김치")
+        assertNull(soupDish(월요일조식))
+        assertEquals("샌드위치", mainDish(월요일조식))
+        // `탕수육`은 국이 아니다 — 여기서 걸리면 국 자리에 튀김이 앉는다
+        assertNull(soupDish(listOf("꿔바로우찹쌀탕수육", "짜사이채무침")))
+        assertNull(soupDish(emptyList()))
     }
 
     private companion object {

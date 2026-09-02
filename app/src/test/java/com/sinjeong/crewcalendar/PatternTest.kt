@@ -7,6 +7,7 @@ import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.BundledTimetable
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
+import com.sinjeong.crewcalendar.domain.model.DaySchedule
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.MainLegs
@@ -15,6 +16,7 @@ import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.model.cancelPendingSegments
+import com.sinjeong.crewcalendar.domain.model.countsAsRestDay
 import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.domain.model.scheduleSegment
 import com.sinjeong.crewcalendar.domain.model.segmentOn
@@ -1658,6 +1660,55 @@ class PatternTest {
         assertEquals(DutyType.REST, DutyCode.parse("작연차").colorType)
         assertEquals("작연차", DutyCode.parse("작연차").display)
         assertTrue(DutyCode.parse("작연차").isRest)
+    }
+
+    // ── 월 휴무 개수 — **지근으로 바꿀 때만 준다** (v1.6.83) ──────────
+    // 사용자 확정: *"휴무를 지정근무로 바꿀 때만 줄어드는 거야."*
+    // 휴무에 `충당`으로 나가는 것은 *그 휴무에 나가는 것*이라 개수가 안 줄고, `지근`(지정근무)만
+    // 그날을 근무일로 바꿔 쓴 것이라 준다. 깨지면 앱바 칩 `휴 N개`와 공유 그림이 틀린다.
+
+    private fun day(d: Int, duty: String, original: String? = null) = DaySchedule(
+        date = LocalDate.of(2026, 9, d),
+        duty = DutyCode.parse(duty),
+        isOverridden = original != null,
+        originalDutyRaw = original,
+    )
+
+    /** 두 자리(앱바 칩·공유 이미지)가 같이 쓰는 규칙 하나 */
+    private fun restCount(days: List<DaySchedule>) = days.count { it.countsAsRestDay }
+
+    /** ① 휴무 → 충당: 불변 */
+    @Test fun restCount_unchangedWhenRestFilledWithStandby() {
+        assertEquals(2, restCount(listOf(day(1, "휴무"), day(2, "휴무"), day(3, "주간"))))
+        val filled = listOf(day(1, "휴무"), day(2, "충당 9", original = "휴무"), day(3, "주간"))
+        assertEquals("충당으로 나가도 휴무 개수는 그대로", 2, restCount(filled))
+        // 규칙이 실제로 갈리는지 확인 — 옛 방식(현재 duty)으로 세면 1로 줄어든다
+        assertEquals(1, filled.count { it.duty.isRest })
+    }
+
+    /** ② 휴무 → **지근**: −1. 이 한 가지만 준다 */
+    @Test fun restCount_decreasesOnlyWhenRestBecomesJigeun() {
+        val days = listOf(day(1, "휴무"), day(2, "지근 9", original = "휴무"), day(3, "주간"))
+        assertEquals("지정근무로 바꾼 휴무는 뺀다", 1, restCount(days))
+        assertEquals("지근", DutyCode.parse("지근 9").fill)   // 판정 근거가 되는 접두어
+    }
+
+    /** ③ 휴무 → 교체·대기충당·연차: 불변 */
+    @Test fun restCount_unchangedForOtherOverrides() {
+        assertEquals(1, restCount(listOf(day(1, "교체 3", original = "휴무"))))
+        assertEquals(1, restCount(listOf(day(1, "대기충당 대2", original = "휴무"))))
+        // 접두어가 아예 없는 변경(연차·교육)도 `fill` 이 null 이라 자동으로 "센다" 쪽이다
+        assertEquals(1, restCount(listOf(day(1, "연차", original = "휴무"))))
+        assertNull(DutyCode.parse("연차").fill)
+    }
+
+    /** ④ 근무 → 휴무(대체휴무): 안 늘어난다(패턴 기준). 변경 없으면 예전 계산과 동일 */
+    @Test fun restCount_notIncreasedWhenWorkdayChangedToRest() {
+        assertEquals(1, restCount(listOf(day(1, "휴무"), day(2, "휴무", original = "주간"), day(3, "주간"))))
+        // 회귀 잠금: 변경이 하나도 없으면 옛 계산과 같아야 한다
+        val plain = listOf(day(1, "휴무"), day(2, "주간"), day(3, "휴무"), day(4, "비번"), day(5, "야간"))
+        assertEquals(plain.count { it.duty.isRest }, restCount(plain))
+        assertEquals(2, restCount(plain))
     }
 
     /**
