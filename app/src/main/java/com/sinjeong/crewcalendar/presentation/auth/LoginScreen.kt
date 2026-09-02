@@ -30,6 +30,7 @@ import androidx.lifecycle.viewModelScope
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.BundledStaff
 import com.sinjeong.crewcalendar.domain.model.CrewRole
+import com.sinjeong.crewcalendar.domain.model.ReviewerAccount
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.presentation.theme.BrandGreen
@@ -57,6 +58,14 @@ class AuthViewModel @Inject constructor(
      * 통과하면 바로 저장·잠금해제 → observeMe가 user를 방출해 달력으로 넘어간다.
      */
     fun submitCredential(name: String, empNo: String) {
+        // 플레이 심사용 계정 — 명단 대조 **앞**에서 갈라 낸다(v1.6.82 ⑥).
+        // 명단(`BundledStaff.ALL`)에 가짜 직원을 끼우면 동료 탭·동명이인 배정·통계가 한 명분
+        // 틀어지므로 명단은 건드리지 않는다. 격리 근거는 `ReviewerAccount` KDoc.
+        if (ReviewerAccount.matches(name, empNo)) {
+            _error.value = null
+            viewModelScope.launch { userRepo.register(ReviewerAccount.user()) }
+            return
+        }
         val staff = BundledStaff.validate(name, empNo)
         if (staff == null) {
             _error.value = "명단에 없는 이름·사번입니다. 사번을 확인해주세요."
