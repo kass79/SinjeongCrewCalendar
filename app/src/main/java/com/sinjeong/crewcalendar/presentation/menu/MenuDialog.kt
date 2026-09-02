@@ -58,10 +58,12 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.layer.drawLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.rememberGraphicsLayer
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -72,6 +74,8 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.FileProvider
+import androidx.core.content.res.ResourcesCompat
+import androidx.core.graphics.createBitmap
 import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.Meal
 import com.sinjeong.crewcalendar.domain.model.MenuIcon
@@ -182,8 +186,11 @@ fun MenuDialog(
 
                 // ── 머리글: 큰 날짜 + (다음 주가 있을 때만) 다음 주 ─────
                 val nextWeekPage = days.indexOf(thisWeek.plusWeeks(1))
+                // 공유 그림 제목띠 색 — 람다 안은 컴포저블이 아니라 여기서 미리 읽는다
+                val shareBg = MaterialTheme.colorScheme.surface.toArgb()
+                val shareFg = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
                 Row(
-                    Modifier.fillMaxWidth().padding(start = 20.dp, top = 12.dp, end = 4.dp),
+                    Modifier.fillMaxWidth().padding(start = 20.dp, top = 8.dp, end = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     // ⚠ `Row` 로 두면 배율 1.5 · 360dp 에서 `내일` 이 `내` 로 **잘린다**(실측) —
@@ -200,15 +207,16 @@ fun MenuDialog(
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
-                        dayRelative(shownDate, today)?.let {
-                            Text(
-                                " $it",
-                                fontFamily = MenuFont, fontSize = 12.sp, lineHeight = 18.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                modifier = Modifier.align(Alignment.Bottom).padding(bottom = 4.dp),
-                            )
-                        }
+                        // `오늘`·`내일` + **구내식당**. 카드 위에 있던 `구내식당 · 9/2 (수)` 줄을
+                        // 뺀 자리를 이 한 조각이 대신한다(날짜는 왼쪽에 이미 크게 있다).
+                        Text(
+                            " " + listOfNotNull(dayRelative(shownDate, today), "구내식당")
+                                .joinToString(" · "),
+                            fontFamily = MenuFont, fontSize = 12.sp, lineHeight = 18.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            modifier = Modifier.align(Alignment.Bottom).padding(bottom = 3.dp),
+                        )
                     }
                     // 주가 둘 있고 지금 이번 주를 보고 있을 때만. 되돌아오는 길은 요일 칩·‹ 가 맡는다.
                     if (nextWeekPage > 0 && pager.currentPage < nextWeekPage) Row(
@@ -232,7 +240,14 @@ fun MenuDialog(
                     IconButton(onClick = {
                         scope.launch {
                             runCatching {
-                                shareMenu(ctx, layer.toImageBitmap().asAndroidBitmap(), shownDate)
+                                shareBitmap(
+                                    ctx,
+                                    shareMenu(
+                                        ctx, layer.toImageBitmap().asAndroidBitmap(), shownDate,
+                                        shareBg, shareFg,
+                                    ),
+                                    shownDate,
+                                )
                             }
                         }
                     }) { LucideIcon(R.drawable.ic_lucide_share_2, "식단표 공유") }
@@ -243,14 +258,13 @@ fun MenuDialog(
                 // 칩은 **지금 보고 있는 날이 속한 주**의 월~일이다.
                 val base = days.indexOf(weekStartOf(shownDate))
                 val duty = LocalDutyColors.current
-                val dark = MaterialTheme.colorScheme.surface.luminance() < 0.5f
                 Row(
                     Modifier
                         // 카드 기둥(520dp) + 좌우 단추 폭만큼으로 묶고 가운데 둔다 — 폴드 펼침(700dp)에서
                         // 칩만 화면 끝까지 벌어지면 아래 카드와 줄이 안 맞는다.
                         .widthIn(max = 616.dp).fillMaxWidth()
                         .align(Alignment.CenterHorizontally)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(horizontal = 6.dp, vertical = 0.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     IconButton(
@@ -275,10 +289,12 @@ fun MenuDialog(
                             ) {
                                 Box(
                                     Modifier
-                                        .fillMaxWidth().height(32.dp)
+                                        .fillMaxWidth().height(28.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        // **오늘**은 끼니 색이 아니라 앱 강조색으로 채운다.
-                                        .background(if (isToday) todayChipColor(dark) else Color.Transparent)
+                                        // ⚠ v1.6.84: **채움을 통째로 뺐다.** 종전엔 오늘 칩을
+                                        // 연두(`#C6F5D8`)로 칠했는데 사용자가 *"형광펜처럼 보인다"*
+                                        // 고 지적했다 — 이 화면에서 형광펜은 국·핵심 두 줄만의
+                                        // 것이어야 한다. 표시는 아래 밑줄·점과 글자 굵기가 맡는다.
                                         .clickable { scope.launch { pager.animateScrollToPage(page) } },
                                     contentAlignment = Alignment.Center,
                                 ) {
@@ -297,13 +313,18 @@ fun MenuDialog(
                                     )
                                 }
                                 Spacer(Modifier.height(3.dp))
-                                // 고른 칩 아래 얇은 막대. "오늘"(칩 채움)과 "고른 날"(막대)이
-                                // 서로 다른 표시라 둘이 겹쳐도 무엇이 무엇인지 읽힌다.
+                                // 칩 아래 한 자리에 표시 하나만 둔다 — **고른 날은 막대(18×2dp)**,
+                                // 고르지 않은 **오늘은 점(4dp)**. 오늘을 보고 있을 때는 막대가
+                                // 이기지만 머리글이 이미 `오늘` 이라고 말하므로 잃는 정보가 없다.
                                 Box(
                                     Modifier
-                                        .width(if (on) 18.dp else 0.dp).height(2.dp)
+                                        .width(if (on) 18.dp else if (isToday) 4.dp else 0.dp)
+                                        .height(if (on) 2.dp else 4.dp)
                                         .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary)
+                                        .background(
+                                            MaterialTheme.colorScheme.primary
+                                                .copy(alpha = if (on) 1f else 0.7f)
+                                        )
                                 )
                             }
                         }
@@ -338,7 +359,7 @@ fun MenuDialog(
                                     .widthIn(max = if (wide) 1000.dp else 520.dp)
                                     .fillMaxWidth()
                                     .background(MaterialTheme.colorScheme.surface)
-                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    .padding(horizontal = 16.dp, vertical = 6.dp)
                                     // 공유 이미지는 **지금 보고 있는 쪽**만 뜬다. 이웃 페이지도 같이
                                     // 기록하면 마지막에 그려진 옆날이 나간다.
                                     .drawWithContent {
@@ -349,16 +370,13 @@ fun MenuDialog(
                                     },
                                 verticalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                // ⚠ 이 줄은 **공유 이미지의 제목**이다. 머리글의 큰 날짜는 기록되는
-                                // 층 밖이라 그림에 안 들어간다 — 지우면 카톡으로 받은 사람이 언제
-                                // 것인지 모른다(v1.6.82가 같은 이유로 넣어 둔 줄).
-                                Text(
-                                    "구내식당 · ${dayLabel(date)}",
-                                    fontFamily = MenuFont, fontSize = 12.sp, lineHeight = 18.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 2.dp),
-                                )
+                                // v1.6.84: 여기 있던 `구내식당 · 9/2 (수)` 줄을 **뺐다**(사용자
+                                // 지적: 머리글 `9/2 (수) 오늘` 과 **날짜가 두 번**이다). 그 줄은
+                                // 원래 **공유 이미지의 제목** 노릇을 겸하고 있었는데 — 머리글은
+                                // 기록되는 층 밖이라 그림에 안 들어간다 — 이제 제목은 [shareMenu]
+                                // 가 **캡처한 그림 위에 직접 그린다.** 화면에서는 사라지고 카톡으로
+                                // 받은 사람은 여전히 언제 것인지 안다. `구내식당` 은 머리글 옆
+                                // 작은 보조글로 옮겼다.
                                 if (wide) Row(
                                     Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -379,7 +397,7 @@ fun MenuDialog(
                                         isNext = meal == hero,
                                     )
                                 }
-                                Spacer(Modifier.height(10.dp))
+                                Spacer(Modifier.height(6.dp))
                             }
                         }
                     }
@@ -390,22 +408,30 @@ fun MenuDialog(
 }
 
 /**
- * 이 화면의 글꼴.
+ * 이 화면의 글꼴 — **Pretendard**(v1.6.84, 사용자가 요청·허가한 글꼴).
  *
- * ⚠ **Pretendard 로 바꿀 자리** — 사용자가 요청한 글꼴이다. `Pretendard-Regular.ttf` ·
- * `Pretendard-Medium.ttf` 를 `res/font/` 에 넣고 이 한 줄만 갈아 끼우면 이 화면 전체가 따라온다:
- * `FontFamily(Font(R.font.pretendard_regular, FontWeight.Normal),`
- * ` Font(R.font.pretendard_medium, FontWeight.Medium))`.
- * 다른 화면은 안 건드린다 — 전면 적용은 사용자가 보고 결정한다.
+ * 받아 온 것은 공식 배포본의 **`PretendardStd`** 다(`orioncactus/pretendard` v1.3.9 릴리스의
+ * `PretendardStd-1.3.9.zip`). Std 는 업스트림이 이미 **KS X 1001 서브셋**으로 잘라 둔 판이라
+ * (한글 상용 2,350자 + KS 기호 + 영문·숫자) 우리가 따로 서브셋을 뜰 필요가 없었다 —
+ * 통짜 Pretendard 는 한 벌 4MB인데 Std 는 **한 벌 311KB**다(둘 합쳐 622KB).
+ * 라이선스(SIL OFL 1.1)는 `assets/Pretendard-OFL.txt` 로 같이 실린다.
  *
- * 이번 세션에는 **못 넣었다**: 폰트 파일을 받아 오는 것이 안전 정책상 **사용자 허가가 필요한
- * 내려받기**라 임의로 할 수 없었다. 크기·굵기·행간(아래 값들)은 지정대로 다 반영돼 있다.
+ * ⚠ **이 화면에만 쓴다.** 전면 적용은 사용자가 보고 결정한다 — 다른 화면은 손대지 않았다.
+ * 여기 한 줄이 이 화면 전체의 글꼴이므로 되돌리려면 `FontFamily.SansSerif` 로 되돌리면 된다.
  */
-private val MenuFont = FontFamily.SansSerif
+private val MenuFont = FontFamily(
+    Font(R.font.pretendard_regular, FontWeight.Normal),
+    Font(R.font.pretendard_medium, FontWeight.Medium),
+)
 
-/** 항목 글자 크기·행간(1.5배). 형광펜 띠도 이 값으로 잰다 — 한 곳에서만 바꾼다. */
-private val ITEM_SIZE = 16.sp
-private val ITEM_LINE = 24.sp
+/**
+ * 항목 글자 크기·행간. 형광펜 띠도 이 값으로 잰다 — 한 곳에서만 바꾼다.
+ *
+ * v1.6.84에서 16/24sp → **15/21sp**(1.4배). 세 끼니를 1080×2400(411dp)에서 **스크롤 없이**
+ * 담기 위한 값이다(사용자: *"한번에 다 볼 수 있으면 좋지"*) — 계산은 [MealSection] KDoc.
+ */
+private val ITEM_SIZE = 15.sp
+private val ITEM_LINE = 21.sp
 
 /** `8/31 (월)` — 머리글의 큰 날짜이자 공유 이미지의 제목. */
 private fun dayLabel(date: LocalDate): String =
@@ -421,8 +447,29 @@ private fun dayRelative(date: LocalDate, today: LocalDate): String? = when (date
 /**
  * 끼니 한 칸 — **항목 전부를 같은 크기로 세로 나열**한다. 접기도 크기 차등도 없다.
  *
- * 강조는 국·메인 두 줄의 **글자 뒤 형광펜**뿐이다([HighlighterText]). [isNext] 면 헤더만
+ * 강조는 국·핵심 반찬 두 줄의 **글자 뒤 형광펜**뿐이다([HighlighterText]). [isNext] 면 헤더만
  * 끼니 색으로 옅게 칠해 "지금 이거"임을 표시한다 — 목록 자체는 세 끼니가 완전히 같은 모양이다.
+ *
+ * ## v1.6.84 — **세 끼니가 스크롤 없이 한 화면에** (사용자: *"한번에 다 볼 수 있으면 좋지"*)
+ *
+ * v1.6.83에서는 석식 마지막 줄이 잘렸다. 1080×2400(411dp · 배율 1.0)의 쓸 수 있는 세로는
+ * 상태바·제스처바를 빼고 **≈845dp**인데 필요한 높이가 그보다 20dp쯤 많았다.
+ *
+ * | | v1.6.83 | **v1.6.84** |
+ * |---|---|---|
+ * | 항목 글자/행간 | 16 / 24sp | **15 / 21sp** ([ITEM_SIZE]) |
+ * | 항목 줄 상하 여백 | 3dp | **2.5dp** → 한 줄 26dp |
+ * | 아이콘 | 20dp | **18dp** |
+ * | 끼니 헤더 상하 여백 | 8dp | **6dp** → 헤더 33dp |
+ * | 목록 위/아래 여백 | 8 / 12dp | **6 / 8dp** |
+ * | 카드 사이 | 8dp | 8dp(그대로) |
+ *
+ * 6줄 카드 = 33 + 14 + 156 = **203dp**, 셋이면 609 + 카드 사이 16 = 625dp.
+ * 머리글 48 + 요일 칩 46 + 바깥 여백 22 를 더해 **≈741dp** — 100dp 남는다.
+ * **7줄 칸이 와도**(+26dp × 3 = 78) 819dp라 여전히 안 잘린다.
+ *
+ * 스크롤은 그대로 살려 둔다 — 360dp·배율 1.5·폴드에서는 넘칠 수 있고, 그때는 잘리는 대신
+ * 스크롤되는 것이 맞다(잘림만 금지).
  */
 @Composable
 private fun MealSection(
@@ -453,10 +500,10 @@ private fun MealSection(
             Modifier
                 .fillMaxWidth()
                 .background(if (isNext) marker.copy(alpha = headerAlpha(dark)) else Color.Transparent)
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 16.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            LucideIcon(mealIconRes(meal), null, 20.dp, MaterialTheme.colorScheme.onSurfaceVariant)
+            LucideIcon(mealIconRes(meal), null, 18.dp, MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.width(8.dp))
             Text(
                 meal.label,
@@ -485,21 +532,21 @@ private fun MealSection(
             )
         }
 
-        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 8.dp)) {
             if (items.isEmpty()) Text(
                 "메뉴가 없어요",
                 fontFamily = MenuFont, fontSize = ITEM_SIZE, lineHeight = ITEM_LINE,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             ) else items.forEach { item ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp)) {
+                Row(Modifier.fillMaxWidth().padding(vertical = 2.5.dp)) {
                     // 매칭 실패는 **빈칸이 아니라 `dot`** — 자리를 비우면 줄 정렬이 들쭉날쭉해진다.
                     LucideIcon(
-                        iconRes(menuIcon(item)) ?: R.drawable.ic_lucide_dot, null, 20.dp,
+                        iconRes(menuIcon(item)) ?: R.drawable.ic_lucide_dot, null, 18.dp,
                         MaterialTheme.colorScheme.onSurfaceVariant,
                         // 이름이 2줄로 접혀도 아이콘은 **첫 줄**에 붙어 있어야 목록으로 읽힌다.
                         Modifier.padding(top = 2.dp),
                     )
-                    Spacer(Modifier.width(10.dp))
+                    Spacer(Modifier.width(8.dp))
                     HighlighterText(
                         item,
                         if (item == main || item == soup) marker.copy(alpha = markerAlpha(dark))
@@ -577,6 +624,7 @@ private fun mealIconRes(meal: Meal) = when (meal) {
 }
 
 private fun iconRes(icon: MenuIcon?) = when (icon) {
+    // 원본 Lucide 에 있던 것
     MenuIcon.SOUP -> R.drawable.ic_lucide_soup
     MenuIcon.FISH -> R.drawable.ic_lucide_fish
     MenuIcon.BEEF -> R.drawable.ic_lucide_beef
@@ -586,8 +634,21 @@ private fun iconRes(icon: MenuIcon?) = when (icon) {
     MenuIcon.SANDWICH -> R.drawable.ic_lucide_sandwich
     MenuIcon.MILK -> R.drawable.ic_lucide_milk
     MenuIcon.APPLE -> R.drawable.ic_lucide_apple
-    MenuIcon.WHEAT -> R.drawable.ic_lucide_wheat
-    MenuIcon.UTENSILS -> R.drawable.ic_lucide_utensils
+    MenuIcon.FRIED -> R.drawable.ic_lucide_utensils
+    // v1.6.84 신규 — Lucide 에 없는 한식 범주라 같은 규격으로 직접 그렸다(`ic_menu_*`).
+    // `sprout` 만 Lucide 원본 path 를 그대로 옮겼다.
+    MenuIcon.RICE -> R.drawable.ic_menu_rice
+    MenuIcon.NOODLE -> R.drawable.ic_menu_noodle
+    MenuIcon.TOFU -> R.drawable.ic_menu_tofu
+    MenuIcon.SPROUT -> R.drawable.ic_menu_sprout
+    MenuIcon.KIMCHI -> R.drawable.ic_menu_kimchi
+    MenuIcon.WRAP -> R.drawable.ic_menu_wrap
+    MenuIcon.SEASONED -> R.drawable.ic_menu_seasoned
+    MenuIcon.BRAISE -> R.drawable.ic_menu_braise
+    MenuIcon.STIRFRY -> R.drawable.ic_menu_stirfry
+    MenuIcon.STEAM -> R.drawable.ic_menu_steam
+    MenuIcon.GRILL -> R.drawable.ic_menu_grill
+    MenuIcon.JEON -> R.drawable.ic_menu_jeon
     null -> null
 }
 
@@ -620,17 +681,6 @@ private fun markerAlpha(dark: Boolean) = if (dark) 0.22f else 0.30f
 
 /** 다음 끼니 헤더의 옅은 칠 — 형광펜보다 더 옅다(헤더는 배경이지 강조가 아니다). */
 private fun headerAlpha(dark: Boolean) = if (dark) 0.12f else 0.16f
-
-/**
- * "오늘" 요일 칩 채움색.
- *
- * ⚠ 스킴의 `primaryContainer`(`#A8F2C1` / `#005229`)를 **그대로 쓰면 안 된다.** 그 위에 얹히는
- * 달력 규칙 색(일=빨강 `#C4302B`/`#FF8A80`)이 4.24:1 · 4.11:1 로 AA에 못 미친다(실측).
- * 한 단계씩 물려 4.5:1을 넘긴 값이다 — 라이트 일 4.59 · 토 5.30 / 다크 일 4.98 · 토 5.40.
- * **요일 글자색은 달력과 똑같이 두고 칩 쪽을 양보한다**(글자색을 손대면 두 화면이 어긋난다).
- */
-private fun todayChipColor(dark: Boolean): Color =
-    if (dark) Color(0xFF00441F) else Color(0xFFC6F5D8)
 
 /**
  * 이번 주 표가 아직 없을 때. **지난주 메뉴는 절대 안 보여준다** —
@@ -666,8 +716,37 @@ fun MenuEmptyNotice(isAdmin: Boolean, onUpload: () -> Unit, modifier: Modifier =
     }
 }
 
-/** 근무표 공유(`cache/share/duty_*.png`)와 **같은 폴더·같은 FileProvider**를 쓴다. */
-private fun shareMenu(ctx: Context, bmp: Bitmap, date: LocalDate) {
+/**
+ * 근무표 공유(`cache/share/duty_*.png`)와 **같은 폴더·같은 FileProvider**를 쓴다.
+ *
+ * ## 제목은 여기서 그림 위에 직접 그린다 (v1.6.84)
+ *
+ * v1.6.83까지는 카드 위의 `구내식당 · 9/2 (수)` 텍스트가 그림의 제목을 겸했다. 그런데 그 줄은
+ * 머리글의 큰 날짜와 **날짜가 두 번**이라 화면에서 뺐다(사용자 지적). 머리글은 캡처되는 층
+ * 밖이라 그냥 빼면 카톡으로 받은 사람이 **언제 것인지 모르게** 된다 — 그래서 제목띠를
+ * 비트맵 위에 얹는다. 화면에서는 사라지고 공유 그림은 그대로다.
+ *
+ * 색은 [bg]·[fg] 로 받는다 — 라이트/다크가 갈리는 값이라 여기서 정하면 한쪽이 안 읽힌다.
+ */
+private fun shareMenu(ctx: Context, bmp: Bitmap, date: LocalDate, bg: Int, fg: Int): Bitmap {
+    val d = ctx.resources.displayMetrics.density
+    val band = (34 * d).toInt()
+    val out = createBitmap(bmp.width, bmp.height + band)
+    val c = android.graphics.Canvas(out)
+    c.drawColor(bg)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = fg
+        textSize = 13 * d
+        typeface = ResourcesCompat.getFont(ctx, R.font.pretendard_medium)
+            ?: android.graphics.Typeface.DEFAULT_BOLD
+    }
+    c.drawText("구내식당 · ${dayLabel(date)}", 18 * d, band - 12 * d, paint)
+    c.drawBitmap(bmp, 0f, band.toFloat(), null)
+    return out
+}
+
+/** 만든 그림을 `cache/share/` 에 써서 공유 인텐트로 넘긴다. */
+private fun shareBitmap(ctx: Context, bmp: Bitmap, date: LocalDate) {
     val dir = File(ctx.cacheDir, "share").apply { mkdirs() }
     val f = File(dir, "menu_$date.png")
     FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
