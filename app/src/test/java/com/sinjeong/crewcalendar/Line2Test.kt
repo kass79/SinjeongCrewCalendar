@@ -76,6 +76,43 @@ class Line2Test {
         assertEquals("신도림", Line2Stations.SINJEONG_BRANCH.first())
     }
 
+    /**
+     * **둥근 사각형 네 변의 역 배치** — 사용자가 준 운전실 보조설비 화면 사진 그대로다(v1.6.85).
+     *
+     * `MainLineMap` 은 [Line2Stations.MAIN] 을 `합정`(둘레 시작)부터 세어 둘레 자리를 만든다
+     * (`k = (mainIdx − 합정자리 + 43) % 43`). 여기 목록이 곧 화면에 찍히는 순서이고,
+     * **[Line2Stations.MAIN] 순서가 바뀌면 이 테스트가 먼저 깨진다** — 지도 전체가 밀리기 전에
+     * 잡으라고 둔 것이다. 변 나누기(17·5·16·5)도 `MainLineMap` 의 상수와 같은 수다.
+     */
+    @Test
+    fun `둘레 네 변 배치가 사진과 같다`() {
+        val start = Line2Stations.MAIN.indexOf("합정")
+        assertEquals(37, start)
+        val perim = (0 until 43).map { Line2Stations.MAIN[(it + start) % 43] }
+
+        assertEquals(
+            listOf("합정", "홍대입구", "신촌", "이대", "아현", "충정로", "시청", "을지로입구",
+                "을지로3가", "을지로4가", "동대문역사문화공원", "신당", "상왕십리", "왕십리",
+                "한양대", "뚝섬", "성수"),
+            perim.subList(0, 17),            // 윗변 왼→오
+        )
+        assertEquals(
+            listOf("건대입구", "구의", "강변", "잠실나루", "잠실"),
+            perim.subList(17, 22),           // 오른변 위→아래
+        )
+        assertEquals(
+            listOf("잠실새내", "종합운동장", "삼성", "선릉", "역삼", "강남", "교대", "서초",
+                "방배", "사당", "낙성대", "서울대입구", "봉천", "신림", "신대방", "구로디지털단지"),
+            perim.subList(22, 38),           // 아랫변 오→왼
+        )
+        assertEquals(
+            listOf("대림", "신도림", "문래", "영등포구청", "당산"),
+            perim.subList(38, 43),           // 왼변 아래→위
+        )
+        // 네 변을 합치면 43역이 하나도 빠짐없이 한 번씩 나온다
+        assertEquals(Line2Stations.MAIN.toSet(), perim.toSet())
+    }
+
     @Test
     fun `모르는 이름은 마이너스 1`() {
         assertEquals(-1, Line2Stations.indexOfMain("서울역"))

@@ -648,9 +648,77 @@ class BranchLiveTest {
         assertFalse("updnLine 1 은 외선", m.getValue("7523").inner)
         assertFalse(m.getValue("6513").inner)
         assertFalse(m.getValue("8527").inner)
-        // trainSttus 3(전역 출발)은 역 앞쪽에 놓인다
-        assertEquals(-0.6f, m.getValue("8527").offset, 0.001f)
+        // trainSttus 3(전역 출발)은 **진행 방향 뒤쪽**에 놓인다. 8527 은 외선이라 부호가
+        // 뒤집혀 +0.6 이다(v1.6.85 — 아래 `외선은 offset 부호가 뒤집힌다` 가 이유를 적었다).
+        assertEquals(+0.6f, m.getValue("8527").offset, 0.001f)
         assertEquals(0f, m.getValue("7523").offset, 0.001f)
+    }
+
+    /**
+     * **외선은 offset 부호가 뒤집힌다** (v1.6.85).
+     *
+     * `stationIdx` 는 [Line2Stations.MAIN] 의 자리이고 그 순서는 **내선**이다. 그러니
+     * "전역 출발 = 아직 도착 안 함"은 내선에서만 `−0.6`(인덱스 작은 쪽)이고, 외선에서는
+     * 인덱스가 **줄어드는** 쪽으로 달리므로 `+0.6` 이어야 지나온 역 쪽에 그려진다.
+     * 부호를 안 뒤집으면 외선 열차가 **가야 할 역을 지나친 자리**에 찍힌다.
+     *
+     * 실응답 근거: `8527` 을지로3가 · 종착 을지로입구 · `updnLine=1`(외선) · `trainSttus=3`.
+     * 내선 대비군은 같은 상태(`trainSttus=3`)에 `updnLine=0` 만 바꾼 행이다.
+     */
+    @Test
+    fun `외선은 offset 부호가 뒤집힌다`() {
+        val json = """{"list":[
+            ${row("8527", "을지로3가", "을지로입구", "3", "1")},
+            ${row("2039", "강남", "성수", "3", "0")},
+            ${row("8531", "선릉", "성수", "0", "1")},
+            ${row("2041", "역삼", "성수", "0", "0")}
+        ]}"""
+        val m = BranchLive.mainTrains(BranchLive.parsePositions(json)).associateBy { it.trainNo }
+        assertEquals(+0.6f, m.getValue("8527").offset, 0.001f)   // 외선 전역출발
+        assertEquals(-0.6f, m.getValue("2039").offset, 0.001f)   // 내선 전역출발
+        assertEquals(+0.15f, m.getValue("8531").offset, 0.001f)  // 외선 진입
+        assertEquals(-0.15f, m.getValue("2041").offset, 0.001f)  // 내선 진입
+        // 부호가 붙어도 역 자리 자체는 그대로다
+        assertEquals(2, m.getValue("8527").stationIdx)           // 을지로3가
+        assertEquals(21, m.getValue("2039").stationIdx)          // 강남
+    }
+
+    /**
+     * `branchTrainsLoose` 의 `updnLine` 폴백 — **`"0"` 상행(신도림 방면) · `"1"` 하행**.
+     *
+     * v1.6.84가 실호출로 확인했다: `updnLine` 실값은 `"0"`·`"1"` 뿐이라 종전의
+     * `"상" in updnLine` 은 **한 번도 참이 된 적이 없었다** — 늘 마지막 `else -> true` 로
+     * 떨어져 하행 열차까지 신도림 방면으로 그렸다.
+     *
+     * 이 폴백에 닿으려면 종착역명이 답을 못 줘야 한다(`destKind == 0`) — 아래 행은
+     * 종착역명을 비워 그 상황을 만든다.
+     */
+    @Test
+    fun `지선 폴백은 updnLine 0을 상행으로 본다`() {
+        val rows = BranchLive.parsePositions(
+            """{"list":[${row("5601", "양천구청", "", "2", "0")}]}""")
+        val t = BranchLive.branchTrainsLoose(rows, emptyList()).single()
+        assertTrue("updnLine 0 은 신도림 방면", t.toSindorim)
+        assertEquals(2.15f, t.position, 0.001f)   // 양천구청(2)에서 신도림 쪽으로 출발
+    }
+
+    @Test
+    fun `지선 폴백은 updnLine 1을 하행으로 본다`() {
+        val rows = BranchLive.parsePositions(
+            """{"list":[${row("5602", "양천구청", "", "2", "1")}]}""")
+        val t = BranchLive.branchTrainsLoose(rows, emptyList()).single()
+        assertFalse("updnLine 1 은 까치산 방면", t.toSindorim)
+        assertEquals(1.85f, t.position, 0.001f)   // 양천구청(2)에서 까치산 쪽으로 출발
+    }
+
+    /** 종착역명이 답을 주면 [updnLine] 은 안 본다 — 폴백 순서가 뒤집히면 지선이 회귀한다. */
+    @Test
+    fun `지선 폴백보다 종착역명이 먼저다`() {
+        val rows = BranchLive.parsePositions(
+            """{"list":[${row("5603", "양천구청", "까치산종착", "1", "0")}]}""")
+        val t = BranchLive.branchTrainsLoose(rows, emptyList()).single()
+        // updnLine 은 "0"(상행)이지만 종착이 까치산이므로 **하행**이 이겨야 한다
+        assertFalse(t.toSindorim)
     }
 
     @Test

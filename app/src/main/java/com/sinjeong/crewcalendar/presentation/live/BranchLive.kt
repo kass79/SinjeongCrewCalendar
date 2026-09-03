@@ -104,7 +104,13 @@ internal data class MainTrainMark(
     val stationIdx: Int,
     /** true = 내선(시계 · 역 순서대로) / false = 외선(반시계) */
     val inner: Boolean,
-    /** 역 기준 미세 위치(−0.6 ~ +0.15) — 진입/도착/출발/전역출발 */
+    /**
+     * 역 기준 미세 위치(−0.6 ~ +0.6) — 진입/도착/출발/전역출발.
+     *
+     * ⚠ **진행 방향으로 부호가 붙어 있다** — 내선(인덱스 증가)은 `전역출발 = −0.6`,
+     * 외선(인덱스 감소)은 `+0.6` 이다. 그래서 `stationIdx + offset` 은 방향과 무관하게
+     * "지나온 역과 다음 역 사이 어디쯤"을 바로 가리킨다.
+     */
     val offset: Float,
     val statusText: String,
     /** 종착역명 원본(꼬리 포함) — 툴팁에 그대로 보여 준다 */
@@ -335,13 +341,16 @@ internal object BranchLive {
                     trainNo = r.trainNo,
                     stationIdx = idx,
                     inner = inner,
+                    // ⚠ **부호는 진행 방향을 따라간다** (v1.6.85 수정). 인덱스가 커지는 쪽으로
+                    // 가는 것은 내선뿐이라, 외선은 같은 상태에서 **반대쪽**에 놓여야 한다 —
+                    // 안 그러면 외선 열차가 다음 역이 아니라 지나온 역 쪽으로 그려진다.
                     offset = when (r.trainSttus) {
-                        "0" -> -0.15f      // 진입
-                        "1" -> 0f          // 도착
-                        "2" -> 0.15f       // 출발
-                        "3" -> -0.6f       // 전역 출발
+                        "0" -> -0.15f      // 진입   (다음 역 바로 앞)
+                        "1" -> 0f          // 도착   (역 위)
+                        "2" -> 0.15f       // 출발   (역을 막 벗어남)
+                        "3" -> -0.6f       // 전역 출발(두 역 사이)
                         else -> 0f
-                    },
+                    } * (if (inner) 1f else -1f),
                     statusText = name + when (r.trainSttus) {
                         "0" -> " 진입"; "1" -> " 도착"; "2" -> " 출발"
                         "3" -> " 접근 중"; else -> " 부근"
@@ -383,7 +392,17 @@ internal object BranchLive {
     // 지선에만 있는 역: 여기 있으면 종착역명이 어떻게 오든 지선 열차다
     private val BRANCH_ONLY = setOf("까치산", "신정네거리", "양천구청", "도림천")
 
-    /** 안전망 2단계: 지선 전용역의 열차는 종착역명 무관하게 표시 */
+    /**
+     * 안전망 2단계: 지선 전용역의 열차는 종착역명 무관하게 표시.
+     *
+     * ⚠ 방향 폴백은 **[destKind] 가 답을 준 다음**이다 — 종착역명이 가장 믿을 만하고,
+     * `updnLine` 은 그게 비어 있을 때만 본다. 이 순서를 바꾸면 지선 동작이 회귀한다.
+     *
+     * ⚠ `updnLine` 실값은 **`"0"`·`"1"`** 이다(v1.6.84 실호출). 종전의 `"상" in updnLine` ·
+     * `"하" in updnLine` 은 **한 번도 참이 된 적이 없는 죽은 판정**이었다 — 늘 마지막
+     * `else -> true` 로 떨어져 하행 열차도 신도림 방면으로 그렸다. `"0"` = 상행(신도림 방면) ·
+     * `"1"` = 하행(까치산 방면)으로 고친다(v1.6.85). `BranchLiveTest` 가 두 방향을 잠근다.
+     */
     internal fun branchTrainsLoose(rows: List<PositionRow>, strict: List<TrainMark>): List<TrainMark> {
         val have = strict.map { it.trainNo }.toSet()
         return rows.asSequence()
@@ -394,8 +413,8 @@ internal object BranchLive {
                 val up = when {
                     destKind(r.statnTnm) == 1 -> true
                     destKind(r.statnTnm) == -1 -> false
-                    "상" in r.updnLine -> true
-                    "하" in r.updnLine -> false
+                    r.updnLine.trim() == "0" -> true     // 상행 = 신도림 방면
+                    r.updnLine.trim() == "1" -> false    // 하행 = 까치산 방면
                     else -> true
                 }
                 TrainMark(r.trainNo, up, posOf(idx, if (up) 1f else -1f, r.trainSttus),

@@ -137,3 +137,27 @@ private fun legTime(raw: String, base: LocalDate): LocalDateTime? {
  */
 internal fun trainNumbers(raw: String): List<String> =
     raw.split('·').map { it.trim() }.filter { BundledTimetable.FOUR_DIGITS.matches(it) }
+
+/**
+ * 오늘 이 근무가 잡는 **네 자리 열번 전부**(전반 + 후반) — **본선·지선을 가리지 않는다**.
+ *
+ * [myTrainAt] 은 "지금 어느 사업인지"까지 따지느라 지선을 걸러 내지만, 지도의 **강조**는
+ * 그럴 필요가 없다. 사용자가 확정한 규칙은 하나다 — *"오늘 근무 열번이 어디에 있든 강조하라."*
+ * 지선 열번은 대개 지선 전용역에 있어 순환선 지도에 안 나타나지만, **신도림에 와 있으면
+ * 본선 역이라 그대로 잡힌다.** 그때 강조되는 편이 아무 말 없는 것보다 낫다.
+ *
+ * ⚠ 여기서도 **시각을 추정하지 않는다** — 열번 후보만 주고, 그중 실제로 API 에 살아 있는
+ * 것을 지도가 고른다(이 파일 위쪽 KDoc 의 그 결정 그대로다).
+ */
+fun dutyTrainNumbers(duty: DutyCode, date: LocalDate): List<String> {
+    val n = duty.number ?: return emptyList()
+    val holiday = Bundled.isHolidayTimetable(date)
+    val assign = when {
+        duty.isBranch -> RouteTable.forBranch(n, holiday)
+        duty.type == DutyType.MAIN_NIGHT ->
+            Bundled.comboOf(date)?.let { RouteTable.forMainNight(n, it) }
+        duty.type == DutyType.MAIN_DAY -> RouteTable.forMainDay(n, holiday)
+        else -> null
+    } ?: return emptyList()
+    return (trainNumbers(assign.firstHalf) + trainNumbers(assign.secondHalf)).distinct()
+}
