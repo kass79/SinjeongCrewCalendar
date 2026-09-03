@@ -505,6 +505,98 @@ class MenuTest {
         assertEquals(1, cells.count { it.isNotBlank() })   // 한 칸에 몰아넣고 사람에게 맡긴다
     }
 
+    // ── v1.6.85 머리글 공통 가드 ────────────────────────────
+    //
+    // 실서버 `menus/2026-08-31` 이 한 칸씩 밀려 있었다 — 조식 첫 줄에 `9월 1일(화) 9월` 이
+    // **메뉴 항목으로** 들어가 그 뒤가 통째로 밀린 것이다(v1.6.81 구 파서가 올린 문서).
+    // 가드는 `MenuTable.tidy` **한 곳**에만 있고 다섯 경로가 전부 거기를 지난다
+    // (사진 ML Kit · 사진 AI · PDF · hwp/hwpx · 붙여넣기 — `MenuTable.isHeaderLine` KDoc 의 표).
+
+    /** 【핵심 회귀】 표의 머리글·기간 줄은 **어느 경로로 들어와도** 메뉴 항목이 될 수 없다 */
+    @Test fun headerLines_neverBecomeMenuItems() {
+        val shapes = listOf(
+            "8월 31일(월)", "9월 1일(화)", "9월 1일(화) 9월", "8월 31일(월) 샌드위치",  // 날짜 머리칸
+            "9/1(화)", "8. 31.",
+            "월", "화", "수", "목", "금", "토", "일",                                 // 요일 한 글자
+            "구분", "구 분",                                                          // 구분 머리칸
+            "조식", "중식", "석식", "조식 (07:30 ~09:00)", "구분 (07:30 ~09:00)",      // 끼니 머리칸
+            "(07:30", "~09:00)", "(11:40 ~13:00)",                                   // 시간 조각·시간 줄
+            "※ 기 간 : ’26. 8. 31 ~ ‘26. 9. 06", "’26.8.31 ~ 9.6",                  // 안내 줄·기간 줄
+        )
+        shapes.forEach { assertTrue("걸러야 한다: $it", MenuTable.isHeaderLine(it)) }
+        // 칸 안에 줄로 섞여 들어와도 통째로 빠진다
+        assertEquals("", MenuTable.tidy(shapes.joinToString("\n")))
+        assertEquals(
+            "샌드위치\n두유",
+            MenuTable.tidy("구 분\n8월 31일(월)\n샌드위치\n두유\n(07:30\n~09:00)"),
+        )
+    }
+
+    /**
+     * 【핵심 회귀】 가드가 **진짜 메뉴를 지우지 않는다.**
+     *
+     * 실파일(2026-08-31 주 `식단표_0831.pdf`/`.hwp`) 21칸에서 그대로 뽑은 줄이다 — 별표·영문·
+     * 국 이름처럼 걸리기 쉬운 모양을 골랐다. 실파일 3경로 21칸을 가드 전/후로 대조해
+     * **차이 0건**임을 확인했다(docs 보고).
+     */
+    @Test fun realMenuItems_surviveTheHeaderGuard() {
+        val real = listOf(
+            "샌드위치", "두유", "누룽지", "포기김치", "잡곡밥", "깍두기",
+            "두부김치국", "달걀실파장국", "꼬치어묵국", "햄김치국",
+            "중화풍잡채덮밥", "꿔바로우찹쌀탕수육", "동그랑땡전*케찹", "새우까스*양파D",
+            "우엉호두조림*포기김치", "쌈무*부추생채", "연두부*양념장",
+        )
+        real.forEach { assertFalse("지우면 안 된다: $it", MenuTable.isHeaderLine(it)) }
+        assertEquals(real.joinToString("\n"), MenuTable.tidy(real.joinToString("\n")))
+    }
+
+    /**
+     * 사진·PDF 경로(좌표 배치기)에 머리칸 **부스러기**가 칸 안으로 떨어져도 항목이 되지 않는다.
+     *
+     * `(11:40`·`구 분` 은 요일·끼니 머리글 판정에 안 걸리는 모양이라 v1.6.84 까지는
+     * 그대로 메뉴가 됐다(실파일 붙여넣기 경로에서 실제로 그랬다).
+     */
+    @Test fun leakedHeaderFragments_areDroppedInTheCoordinatePath() {
+        val words = sampleTable().toMutableList()
+        words += word("(11:40", 185f, 200f)
+        words += word("~13:00)", 245f, 200f)
+        words += word("구 분", 200f, 230f)
+        val m = WeeklyMenu(LocalDate.of(2026, 8, 31), MenuOcr.toCells(words))
+        assertEquals(listOf("잡곡밥", "포기김치"), m.items(0, Meal.BREAKFAST))
+    }
+
+    /** 한글파일 경로: 내용 칸에 날짜 머리글이 섞여 들어와도 그 줄만 빠지고 메뉴는 남는다 */
+    @Test fun leakedDateHeader_isDroppedInTheDocumentPath() {
+        val t = normalTable().toMutableList()
+        t.removeAll { it.row == 1 && it.col == 1 }              // 월 조식 칸을 갈아 끼운다
+        t += dc(1, 1, "8월 31일(월)\n샌드위치\n두유")
+        assertEquals("샌드위치\n두유", MenuTable.cellsFromTable(t)!![0 * 3 + 0])
+    }
+
+    /** 붙여넣기 경로도 같은 가드를 지난다 — 시간 줄·`구 분`·기간 줄이 항목에서 빠진다 */
+    @Test fun leakedTimeAndPeriodLines_areDroppedInThePastePath() {
+        val text = "조식\n\n(07:30 ~09:00)\n구 분\n샌드위치\n두유\n\n" +
+            "※ 기 간 : ’26. 8. 31 ~ ‘26. 9. 06\n잡곡밥\n북어해장국"
+        val cells = MenuPaste.toCells(text)
+        assertEquals("샌드위치\n두유", cells[0 * 3 + 0])
+        assertEquals("잡곡밥\n북어해장국", cells[1 * 3 + 0])
+    }
+
+    /**
+     * 저장 전 경고(v1.6.85) — **막지 않고 한 번 더 묻는다.**
+     * 빈 칸과 "항목이 8개를 넘는 칸"은 둘 다 머리글이 새어 들어왔을 때의 증상이다.
+     */
+    @Test fun saveWarning_asksOnlyWhenSomethingLooksWrong() {
+        val full = WeeklyMenu(LocalDate.of(2026, 8, 31), List(WeeklyMenu.CELLS) { "잡곡밥\n북어국" })
+        assertNull(full.saveWarning())                                   // 21칸이 다 차고 항목도 적다
+        assertNotNull(full.withCell(0, Meal.BREAKFAST, "").saveWarning()) // 빈 칸 하나
+        val fat = (1..WeeklyMenu.MAX_ITEMS + 1).joinToString("\n") { "메뉴$it" }
+        assertNotNull(full.withCell(0, Meal.BREAKFAST, fat).saveWarning())
+        // 딱 8개는 안 묻는다 (경계값)
+        val eight = (1..WeeklyMenu.MAX_ITEMS).joinToString("\n") { "메뉴$it" }
+        assertNull(full.withCell(0, Meal.BREAKFAST, eight).saveWarning())
+    }
+
     /** 실파일 기간 문구(`※ 기 간 : ’26. 8. 31 ~ ‘26. 9. 06`) → 주 시작일 */
     @Test fun realPeriodLine_parsesWeekStart() {
         assertEquals(

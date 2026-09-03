@@ -86,8 +86,12 @@ interface MenuRepository {
     /** [from] 이후로 시작하는 주들 (주 시작일 → 21칸). 오래된 주는 [save] 가 청소한다 */
     fun observeFrom(from: LocalDate): Flow<Map<LocalDate, List<String>>>
 
-    /** 관리자 저장. 같은 주 문서가 있으면 통째로 덮어쓴다(화면이 먼저 확인을 받는다) */
-    suspend fun save(weekStart: LocalDate, cells: List<String>): AdminWriteResult =
+    /**
+     * 관리자 저장. 같은 주 문서가 있으면 통째로 덮어쓴다(화면이 먼저 확인을 받는다).
+     * @param source 21칸을 채운 경로(`pdf`/`hwp`/`photo`/`paste`/`manual`) — 저장할 때만 남기는
+     *   진단 값이다(v1.6.85). 읽는 쪽([observeFrom])은 `cells` 만 본다.
+     */
+    suspend fun save(weekStart: LocalDate, cells: List<String>, source: String): AdminWriteResult =
         AdminWriteResult.FAILED
 
     /** 이미 그 주 문서가 있나 — 편집 화면의 "덮어쓸까요?" 확인용 */

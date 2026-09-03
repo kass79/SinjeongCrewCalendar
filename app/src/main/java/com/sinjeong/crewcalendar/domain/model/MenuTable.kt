@@ -103,10 +103,81 @@ object MenuTable {
         return out
     }
 
-    /** 칸 안의 줄을 다듬는다 — 빈 줄·앞뒤 공백을 버리고, 규칙 상한([MAX_CELL])에서 자른다 */
+    /**
+     * 칸 안의 줄을 다듬는다 — 빈 줄·앞뒤 공백과 **머리글 줄**([isHeaderLine])을 버리고,
+     * 규칙 상한([MAX_CELL])에서 자른다.
+     *
+     * ⚠ **다섯 경로(사진 ML Kit · 사진 AI · PDF · hwp/hwpx · 붙여넣기)가 전부 여기를 지난다** —
+     * 머리글 가드를 이 한 곳에만 두는 이유다(v1.6.85). 경로마다 한 벌씩 두면 v1.6.82 가 겪은 것처럼
+     * 한쪽만 고쳐 어긋난다. 호출 그래프는 [isHeaderLine] 주석에.
+     */
     internal fun tidy(raw: String): String =
-        raw.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
+        raw.split('\n').map { it.trim() }.filterNot(::isHeaderLine)
             .joinToString("\n").take(MAX_CELL)
+
+    /** 머리글 줄에 붙는 시간·기간 부스러기 — `조식(07:30~09:00)` · `’26.8.31~9.6` */
+    private const val TIME_CHARS = "\\d:~()\\[\\].,\\-–—∼〜'’‘"
+
+    /** `9월 1일(화)` · `9/1(화)` · `8.31` 처럼 **날짜로 시작하는** 줄 */
+    private val DATE_HEAD = Regex("^\\d{1,2}[월./-]\\d{1,2}일?")
+
+    /** 줄 맨 앞의 머리글 낱말 — `구 분` · `조식` · `조식(07:30~09:00)` */
+    private val LABEL_HEAD = Regex("^(구분|조식|중식|석식|아침|점심|저녁)")
+
+    /** 글자 없이 숫자와 시간 기호뿐인 토막 — `(07:30` · `~09:00)` · `’26.8.31~9.6` */
+    private val TIME_TAIL = Regex("^[$TIME_CHARS]*$")
+
+    /** 시각(`07:30`)이나 기간(`~`)을 나타내는 표시가 줄에 들어 있나 */
+    private fun hasClock(s: String) = s.any { it == ':' || it == '~' || it == '∼' || it == '〜' }
+
+    /**
+     * 이 줄이 **표의 머리글·안내 줄**인가 — 어느 경로로 들어왔든 메뉴 항목이 될 수 없는 줄.
+     *
+     * ## 왜 이 가드가 있나 (v1.6.85)
+     *
+     * 실서버 `menus/2026-08-31` 이 한 칸씩 밀려 있었다. 조식 첫 줄에 `9월 1일(화) 9월` 이
+     * **메뉴 항목으로** 들어가 그 뒤가 통째로 밀린 것이다(v1.6.81 구 파서로 올린 문서 — 지금 파서의
+     * 구멍은 아니다). 파서가 아무리 정확해도 표 모양이 조금만 달라지면 머리칸은 다시 샐 수 있으므로,
+     * **마지막에 한 번 거르는 그물**을 둔다.
+     *
+     * ## 다섯 경로가 전부 [tidy] 를 지난다 (grep 전수 확인)
+     *
+     * | 경로 | 거쳐 가는 곳 |
+     * |---|---|
+     * | 사진 ML Kit | `MenuAdminScreen.readTable` → [MenuOcr.toCells] → `tidy` |
+     * | PDF 글자층 | `MenuPdf.read` → [MenuOcr.toCells] → `tidy` |
+     * | 사진 AI | `MenuAi.parse` → `tidy` |
+     * | hwp/hwpx | `MenuHwp`/`MenuHwpx` → [toCells] → [cellsFromTable] → `tidy` |
+     * | 붙여넣기 | `MenuPaste.toCells` → (탭)[cellsFromTable] / (목록)`walk` → 둘 다 `tidy` |
+     *
+     * ## 진짜 메뉴를 지우지 않는다
+     *
+     * 걸리는 것은 **날짜로 시작하는 줄 · 요일 한 글자 · 머리글 낱말+시간 · 숫자와 기호뿐인 줄 ·
+     * `※` 안내** 다섯 뿐이다. 실파일 21칸의 메뉴(`두부김치국`·`달걀실파장국`·`샌드위치`·
+     * `중화풍잡채덮밥` …)는 한 줄도 안 걸린다(`MenuTest` 로 잠갔다).
+     *
+     * ⚠ 날짜 머리글은 **뒤에 다른 글자가 붙어 있어도 줄째 버린다**(`8월 31일(월) 샌드위치`).
+     * 날짜 토막만 떼면 남은 글자가 진짜 메뉴인지 머리글 부스러기인지 알 방법이 없고,
+     * 잘못 남긴 한 줄이 다시 21칸을 밀어 버린다 — 한 줄을 잃는 쪽이 싸다.
+     */
+    internal fun isHeaderLine(line: String): Boolean {
+        // 공백을 전부 지우고 본다 — `구 분`·`8월 31일(월)` 처럼 표는 머리글 안에 공백을 넣는다.
+        // ⚠ 줄바꿈 없는 공백(U+00A0)은 `Char.isWhitespace()` 가 **false** 라 따로 적어 준다
+        //   (`MenuOcr.parseWeekStart` 가 겪은 것과 같은 함정).
+        val flat = line.filterNot { it.isWhitespace() || it == '\u00A0' }
+        if (flat.isEmpty()) return true
+        if (flat.startsWith("※")) return true
+        if (DATE_HEAD.containsMatchIn(flat)) return true
+        if (flat.length == 1 && flat in DAY_CHARS) return true
+        // `조식` 단독, 또는 `조식 (07:30~09:00)` 처럼 **시계가 붙은** 머리글.
+        // ⚠ 꼬리에 시계를 요구한다. 안 걸면 `조식0-1` 같은 진짜 항목까지 삼킨다(테스트가 잡았다).
+        LABEL_HEAD.find(flat)?.let { m ->
+            val tail = flat.substring(m.value.length)
+            if (tail.isEmpty() || (hasClock(tail) && TIME_TAIL.matches(tail))) return true
+        }
+        // `(07:30` · `~09:00)` · `’26.8.31~9.6` — 한글이 한 글자도 없는 시각·기간 토막
+        return TIME_TAIL.matches(flat) && flat.any { it.isDigit() } && hasClock(flat)
+    }
 
     /**
      * 이 칸이 요일 머리칸인가 → 0(월)~6(일), 아니면 -1.

@@ -55,10 +55,31 @@ data class WeeklyMenu(
     /** 채워진 칸 수 — 인식 정확도 보고와 편집 화면 안내에 쓴다 */
     val filledCells: Int get() = cells.count { it.isNotBlank() }
 
+    /**
+     * 저장 전에 관리자에게 **한 번 더 물어야 할 의심스러운 모양** — 없으면 null (v1.6.85).
+     *
+     * 막지는 않는다(관리자가 알고 넘길 수 있어야 한다). 두 증상 다 **머리글이 칸으로 새어
+     * 들어왔을 때** 나타나는 것이다 — 항목이 갑자기 불어나거나(머리글 한 줄이 더 붙는다),
+     * 21칸 중 일부가 빈 채로 뒤가 밀린다. 실서버 `menus/2026-08-31` 이 정확히 그 꼴이었다.
+     */
+    fun saveWarning(): String? {
+        val blank = cells.count { it.isBlank() }
+        val fat = cells.count { c -> c.lineSequence().count { it.isNotBlank() } > MAX_ITEMS }
+        if (blank == 0 && fat == 0) return null
+        return listOfNotNull(
+            blank.takeIf { it > 0 }?.let { "${CELLS}칸 중 ${it}칸이 비어 있습니다" },
+            fat.takeIf { it > 0 }
+                ?.let { "항목이 ${MAX_ITEMS}개를 넘는 칸이 ${it}개 있습니다 (머리글이 섞였을 수 있습니다)" },
+        ).joinToString(".\n") + ".\n이대로 저장할까요?"
+    }
+
     companion object {
         const val DAYS = 7
         const val MEALS = 3
         const val CELLS = DAYS * MEALS
+
+        /** 한 칸이 이보다 많은 항목을 가지면 머리글이 섞였다고 보고 [saveWarning] 이 묻는다 */
+        const val MAX_ITEMS = 8
 
         fun empty(weekStart: LocalDate) = WeeklyMenu(weekStart, List(CELLS) { "" })
 

@@ -87,11 +87,26 @@ class MenuAdminViewModel @Inject constructor(
     /** 인식 직후 몇 칸이 찼는지 — 화면 안내와 검증 보고에 쓴다 */
     var recognized by mutableStateOf<Int?>(null)
 
+    /**
+     * 21칸을 **마지막으로 채운 경로** — 저장할 때 `menus/{주}.source` 로 남기는 진단 값(v1.6.85).
+     *
+     * 밀린 문서가 어느 경로에서 나왔는지 서버에서 바로 알아보려는 것이다. 손으로만 고쳤으면
+     * [MANUAL] 그대로 남는다 — 인식 결과를 손질한 것은 그 경로의 결과이므로 [setCell] 은 안 건드린다.
+     */
+    var source by mutableStateOf(MANUAL)
+        private set
+
     fun shiftWeek(weeks: Long) { weekStart = weekStart.plusWeeks(weeks) }
     fun setCell(day: Int, meal: Meal, text: String) {
         cells = cells.toMutableList().also { it[day * WeeklyMenu.MEALS + meal.ordinal] = text }
     }
-    fun clearAll() { cells = List(WeeklyMenu.CELLS) { "" }; recognized = null }
+    fun clearAll() { cells = List(WeeklyMenu.CELLS) { "" }; recognized = null; source = MANUAL }
+
+    /**
+     * 저장 전에 한 번 더 물어야 할 **의심스러운 모양** — 없으면 null.
+     * 계산은 [WeeklyMenu.saveWarning] 에 있다(순수 함수라 유닛테스트가 그대로 잠근다).
+     */
+    fun saveWarning(): String? = WeeklyMenu(weekStart, cells).saveWarning()
 
     /**
      * 사진·PDF·**한글파일** 어느 것이든 여기 하나로 들어온다(v1.6.81 ④).
@@ -105,6 +120,7 @@ class MenuAdminViewModel @Inject constructor(
         result.onSuccess { (newCells, weekFromText, kind) ->
             cells = newCells
             recognized = newCells.count { it.isNotBlank() }
+            source = kind.source
             weekFromText?.let { weekStart = it }
             val what = when (kind) {
                 DocKind.HWP, DocKind.HWPX -> "한글파일에서"
@@ -133,6 +149,7 @@ class MenuAdminViewModel @Inject constructor(
         }
         cells = newCells
         recognized = filled
+        source = "paste"
         MenuOcr.parseWeekStart(text)?.let { weekStart = it }
         message = if (filled == WeeklyMenu.CELLS) "붙여넣기로 21칸을 모두 채웠습니다."
         else "붙여넣기로 21칸 중 ${filled}칸을 채웠습니다. 나머지는 눌러서 채우세요."
@@ -142,7 +159,7 @@ class MenuAdminViewModel @Inject constructor(
 
     fun save(onDone: () -> Unit) = viewModelScope.launch {
         busy = true
-        val r = repo.save(weekStart, cells)
+        val r = repo.save(weekStart, cells, source)
         busy = false
         message = when (r) {
             AdminWriteResult.OK -> "${weekStart.monthValue}월 ${weekStart.dayOfMonth}일 주 식단표를 올렸습니다."
@@ -151,10 +168,21 @@ class MenuAdminViewModel @Inject constructor(
         }
         if (r == AdminWriteResult.OK) onDone()
     }
+
+    companion object {
+        /** 아무 경로도 안 거치고 손으로만 채운 것 */
+        const val MANUAL = "manual"
+    }
 }
 
-/** 넣은 파일이 무엇인가. [PHOTO_AI] = 사진을 클라우드 AI 가 읽은 것(v1.6.82) */
-enum class DocKind { IMAGE, PHOTO_AI, PDF, HWP, HWPX }
+/**
+ * 넣은 파일이 무엇인가. [PHOTO_AI] = 사진을 클라우드 AI 가 읽은 것(v1.6.82).
+ * @param source `menus/{주}` 에 남기는 진단 값(v1.6.85) — 사진은 AI든 기기 인식이든 똑같이 `photo` 다
+ *   (관리자가 한 일은 "사진을 넣은 것" 하나이고, 그 안에서 어느 인식기가 이겼는지는 앱 사정이다).
+ */
+enum class DocKind(val source: String) {
+    IMAGE("photo"), PHOTO_AI("photo"), PDF("pdf"), HWP("hwp"), HWPX("hwp")
+}
 
 /**
  * **파일 앞머리 8바이트로 종류를 가른다**(v1.6.81 ④).
@@ -275,7 +303,14 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
     val scope = rememberCoroutineScope()
     var editing by remember { mutableStateOf<Pair<Int, Meal>?>(null) }
     var confirmOverwrite by remember { mutableStateOf(false) }
+    /** 저장 전 경고 문구(v1.6.85). null 이면 의심스러운 곳이 없다 — [MenuAdminViewModel.saveWarning] */
+    var confirmSuspect by remember { mutableStateOf<String?>(null) }
     var pasting by remember { mutableStateOf(false) }
+
+    // 경고 → 덮어쓰기 확인 → 저장. 두 확인이 한 줄로 이어지도록 여기 한 곳에만 둔다.
+    fun askOverwriteThenSave() {
+        scope.launch { if (vm.alreadyExists()) confirmOverwrite = true else vm.save(onBack) }
+    }
     // 촬영 결과를 받을 파일 — 캐시라 자동으로 청소된다. cache/share 와 섞지 않으려고 menu/ 로 나눈다.
     val shotUri = remember {
         val dir = File(ctx.cacheDir, "menu").apply { mkdirs() }
@@ -425,7 +460,10 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
 
             Spacer(Modifier.height(10.dp))
             Button(
-                onClick = { scope.launch { if (vm.alreadyExists()) confirmOverwrite = true else vm.save(onBack) } },
+                onClick = {
+                    val warn = vm.saveWarning()
+                    if (warn != null) confirmSuspect = warn else askOverwriteThenSave()
+                },
                 enabled = !vm.busy && vm.cells.any { it.isNotBlank() },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("저장하고 모두에게 보이기", fontWeight = FontWeight.ExtraBold) }
@@ -493,6 +531,21 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
                 ) { Text("채우기", fontWeight = FontWeight.ExtraBold) }
             },
             dismissButton = { TextButton(onClick = { pasting = false }) { Text("취소") } },
+        )
+    }
+
+    // ── 저장 경고 (v1.6.85) — 막지 않고 한 번 더 묻는다. 확인하면 덮어쓰기 확인으로 이어진다 ──
+    confirmSuspect?.let { warn ->
+        AlertDialog(
+            onDismissRequest = { confirmSuspect = null },
+            title = { Text("확인해 주세요") },
+            text = { Text(warn) },
+            confirmButton = {
+                TextButton(onClick = { confirmSuspect = null; askOverwriteThenSave() }) {
+                    Text("이대로 저장", fontWeight = FontWeight.ExtraBold)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmSuspect = null }) { Text("돌아가서 고치기") } },
         )
     }
 

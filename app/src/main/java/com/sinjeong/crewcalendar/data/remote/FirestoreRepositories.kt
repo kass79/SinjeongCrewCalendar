@@ -5,6 +5,7 @@ import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.FirebaseFirestoreException
+import com.sinjeong.crewcalendar.BuildConfig
 import com.sinjeong.crewcalendar.data.local.LocalScheduleRepository
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.model.Bundled
@@ -278,16 +279,28 @@ class FirestoreMenuRepository @Inject constructor() : MenuRepository {
         db.collection("menus").document(weekStart.toString()).get().await().exists()
     }.getOrDefault(false)
 
-    override suspend fun save(weekStart: LocalDate, cells: List<String>): AdminWriteResult {
+    override suspend fun save(
+        weekStart: LocalDate,
+        cells: List<String>,
+        source: String,
+    ): AdminWriteResult {
         if (!ensureAuth()) return AdminWriteResult.FAILED
+        val doc = db.collection("menus").document(weekStart.toString())
+        val base = mapOf(
+            "weekStart" to weekStart.toString(),
+            "cells" to cells,
+            "updatedAt" to FieldValue.serverTimestamp(),
+        )
         return runCatching {
-            db.collection("menus").document(weekStart.toString()).set(
-                mapOf(
-                    "weekStart" to weekStart.toString(),
-                    "cells" to cells,
-                    "updatedAt" to FieldValue.serverTimestamp(),
-                )
-            ).await()
+            // ⚠ **규칙 배포가 APK 보다 늦을 수 있다.** `menus` 절이 아직 3키만 허용하는 서버에서는
+            //   진단 필드(v1.6.85)를 실은 쓰기가 통째로 거부된다 — 그러면 관리자가 밀린 식단표를
+            //   고치려고 재업로드하는 바로 그 경로가 막힌다. 거부되면 **예전 3키로 한 번만** 되돌려 쓴다.
+            runCatching {
+                doc.set(base + mapOf("source" to source, "appVersion" to BuildConfig.VERSION_NAME)).await()
+            }.recoverCatching {
+                if (it.asWriteResult() != AdminWriteResult.DENIED) throw it
+                doc.set(base).await()
+            }.getOrThrow()
             // 지난 주는 절대 보여주지 않으므로(WeeklyMenu KDoc) 4주 넘은 문서는 쓸모가 없다.
             // 저장할 때 곁다리로 치운다 — 청소 전용 화면·워커를 따로 만들 이유가 없다.
             runCatching {

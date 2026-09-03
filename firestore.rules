@@ -155,6 +155,8 @@ service cloud.firestore {
 
     // ── menus/{주 시작일} — 구내식당 주간식단표 (v1.6.80) ─────────────────
     //  쓰기: FirestoreMenuRepository.save()  = weekStart/cells/updatedAt (3키)
+    //        + source/appVersion (v1.6.85 진단 2키, **선택**). 앱은 5키로 먼저 쓰고 거부되면
+    //        3키로 한 번 되돌려 쓴다 — 이 규칙 배포가 APK 설치보다 늦어도 저장이 살아 있다.
     //  읽기: observeFrom() = 문서ID(=주 시작일) 범위 쿼리
     //  삭제: save() 가 4주 넘은 문서를 곁다리로 치운다
     //
@@ -182,9 +184,20 @@ service cloud.firestore {
 
       allow read: if signedIn();
 
+      // 진단 필드 source/appVersion 은 **선택**이다(v1.6.85) — hasAll 에 넣지 마라.
+      //  넣으면 옛 APK(3키만 보내는 v1.6.84 이하)의 저장이 그날부터 전부 거부된다.
+      //  둘 다 사람이 읽는 짧은 꼬리표라 타입과 길이만 본다.
+      //  · source     : 'pdf'/'hwp'/'photo'/'paste'/'manual' — 밀린 문서가 어느 경로에서 나왔는지
+      //  · appVersion : BuildConfig.VERSION_NAME — 어느 빌드가 올렸는지
+      function tagOk(d, k) {
+        return !(k in d) || (d[k] is string && d[k].size() <= 20);
+      }
+
       allow create, update: if signedIn()
         && request.resource.data.keys().hasAll(['weekStart', 'cells', 'updatedAt'])
-        && request.resource.data.keys().hasOnly(['weekStart', 'cells', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['weekStart', 'cells', 'updatedAt', 'source', 'appVersion'])
+        && tagOk(request.resource.data, 'source')
+        && tagOk(request.resource.data, 'appVersion')
         && request.resource.data.weekStart is string
         && request.resource.data.weekStart.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         // 문서ID 와 내용이 반드시 일치 — 8/24 주 내용을 9/7 자리에 심는 유령 문서 차단

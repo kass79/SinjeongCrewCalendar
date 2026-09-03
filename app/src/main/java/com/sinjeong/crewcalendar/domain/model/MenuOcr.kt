@@ -190,7 +190,10 @@ object MenuOcr {
             buckets.getOrPut(col * WeeklyMenu.MEALS + row) { mutableListOf() }.add(w)
         }
 
-        return List(WeeklyMenu.CELLS) { i -> buckets[i]?.let(::joinCell) ?: "" }
+        // ⚠ **[MenuTable.tidy] 를 반드시 거친다**(v1.6.85). 다른 네 경로는 이미 지나가고 있었고
+        //   여기(사진 ML Kit · PDF 글자층)만 안 지나갔다 — 머리글 가드가 한 곳에만 있으려면
+        //   다섯 경로가 전부 그 한 곳을 지나야 한다. 칸 길이 상한(300자)도 여기서 같이 걸린다.
+        return List(WeeklyMenu.CELLS) { i -> buckets[i]?.let(::joinCell)?.let(MenuTable::tidy) ?: "" }
     }
 
     /**
