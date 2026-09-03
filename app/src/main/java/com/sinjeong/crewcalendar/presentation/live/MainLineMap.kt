@@ -388,12 +388,19 @@ private fun CabScreen(
 
 private val WEEKDAYS = listOf("월", "화", "수", "목", "금", "토", "일")
 
+/**
+ * 후보 열번 줄이기 — 지선 다이아는 한 근무가 **스무 개 넘는 열번**을 잡아서 그대로 이으면
+ * 헤더 한 줄을 통째로 먹는다(실측: `5668·5669·…·5527` 20개가 화면 세로를 다 채웠다).
+ */
+private fun shortNos(nos: List<String>): String =
+    nos.take(4).joinToString("·") + if (nos.size > 4) " 외 " + (nos.size - 4) + "개" else ""
+
 /** 내 열차 한 줄 — 헤더와 상태바가 같은 글을 쓴다. `null` = 후보조차 없다. */
 private fun mineLine(mineMark: MainTrainMark?, candidates: List<String>): String? = when {
     mineMark != null ->
         "내 열차 " + mineMark.trainNo + " · " + (if (mineMark.inner) "내선" else "외선") +
             " · " + mineMark.statusText
-    candidates.isNotEmpty() -> "내 열차 미검출 (운행 전/후) · " + candidates.joinToString("·")
+    candidates.isNotEmpty() -> "내 열차 미검출 (운행 전/후) · " + shortNos(candidates)
     else -> null
 }
 
@@ -477,7 +484,7 @@ private fun CabStatusBar(
                         big, Color(0xFFCFE3F5),
                     )
                 } else {
-                    Chip("오늘 열번 " + candidates.joinToString("·"), big, Color(0xFFCFE3F5))
+                    Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5))
                 }
             }
             else -> Chip("오늘 근무 열번: 없음", big, Dim)
