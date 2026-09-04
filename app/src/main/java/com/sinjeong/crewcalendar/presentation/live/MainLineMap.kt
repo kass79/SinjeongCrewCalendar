@@ -797,6 +797,8 @@ private class Lab(
     var pivot: Offset,
     val deg: Float,
     val leftAnchored: Boolean,
+    /** 빈자리를 못 찾아 **배지 위에** 그리는 라벨 — 역 이름은 절대 가리지 않는다는 약속. */
+    var over: Boolean = false,
 ) {
     /**
      * 돌려 놓은 글자 상자의 **네 꼭짓점**.
@@ -868,7 +870,6 @@ private fun DrawScope.layoutLabels(
     // 대신 깊이를 아껴야 한다 — 폰에서 루프 안쪽 높이가 ≈163dp 뿐인데 윗변·아랫변 라벨이
     // 양쪽에서 파고들기 때문이다(34dp 로 뒀을 때 가운데에서 서로 만났다).
     val gap = 30.dp.toPx()
-    val step = 11.dp.toPx()
     val placed = mutableListOf<Lab>()
 
     // **신도림·성수 먼저** → 윗변·아랫변(대각선) → 좌·우변(가로).
@@ -925,23 +926,38 @@ private fun DrawScope.layoutLabels(
             // 오른변은 차선이 오른쪽이라 왼쪽 끝을 붙여 오른쪽으로, 왼변은 그 반대.
             leftAnchored = onBottom || onRight,
         )
-        // 겹치면 그 변 안쪽으로 한 칸씩 민다(최대 3칸). 대부분 0칸에서 끝난다.
+        // 겹치면 그 변 안쪽으로 한 칸씩 민다. 대부분 0칸에서 끝난다.
         // 좌·우변은 위아래 **양쪽**이 비어 있으니 번갈아 밀어 본다(가까운 쪽이 막히면 반대쪽).
         // 윗변·아랫변은 바깥이 선이라 안쪽 한 방향뿐이다.
+        //
+        // ⚠ 좌·우변은 **촘촘히**(6dp) 보되 **역 간격의 절반(±36dp)까지만** 민다. 종전 11dp×14
+        // (±77dp)는 두 가지로 틀렸다 — 성기어서 배지 사이 빈틈을 놓쳤고(실측: 가로에서
+        // `강변`이 `건대입구` 위에 올라탔다), 이웃 역을 지나칠 만큼 멀어서 **순서가 뒤집혔다**
+        // (실측: `구의`가 `건대입구` 위로 올라가 앉았다 — 기관사에게는 틀린 그림이다).
+        // 윗변·아랫변은 종전 그대로 — 루프 안쪽 높이가 ≈163dp 뿐이라 더 깊이 밀면 맞은편과 만난다.
         val alternate = !(onTop || onBottom)
         val pad = 3.dp.toPx()
+        val step = if (alternate) 6.dp.toPx() else 11.dp.toPx()
+        val maxTries = if (alternate) 12 else 14
+        // 화면 밖으로 나가는 자리는 후보에서 뺀다.
+        val half = layout.size.height / 2f + pad
         var tries = 0
-        fun clashes(): Boolean {
+        fun ok(): Boolean {
+            if (lab.pivot.y < half || lab.pivot.y > size.height - half) return false
             val q = lab.quad(pad)
-            return obstacles.any { overlaps(it.quad(), q) } ||
-                placed.any { overlaps(it.quad(pad), q) }
+            return obstacles.none { overlaps(it.quad(), q) } &&
+                placed.none { overlaps(it.quad(pad), q) }
         }
-        while (tries < 14 && clashes()) {
+        while (tries < maxTries && !ok()) {
             tries++
             val d = if (alternate) (if (tries % 2 == 1) 1f else -1f) * ((tries + 1) / 2) * step
                     else tries * step
             lab.pivot = Offset(pivot.x + push.x * d, pivot.y + push.y * d)
         }
+        // 끝내 빈자리가 없으면 **제자리에 두고 배지 위에** 그린다([Lab.over]). 역 이름은
+        // 지도의 좌표계라서 자리를 옮기거나 숨기면 그림이 틀리고, 사용자 요구는
+        // *"텍스트가 겹쳐서 안 보이게 하는 일은 없도록"* 이다 — 가릴 거면 열번 쪽을 가린다.
+        if (tries == maxTries) { lab.pivot = pivot; lab.over = true }
         placed += lab
     }
     return placed
@@ -1060,13 +1076,14 @@ private fun DrawScope.drawCabLoop(
     }
 
     // 라벨 글자는 **11sp 아래로 내리지 않는다**(사용자: 가독성). 좁으면 겹침 회피로 푼다.
-    layoutLabels(tm, loop, start, occupied, labelSp, badgeRects).forEach { lab ->
-        rotate(lab.deg, pivot = lab.pivot) {
-            drawText(lab.layout, topLeft = Offset(
-                if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width,
-                lab.pivot.y - lab.layout.size.height / 2f))
-        }
+    fun draw(lab: Lab) = rotate(lab.deg, pivot = lab.pivot) {
+        drawText(lab.layout, topLeft = Offset(
+            if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width,
+            lab.pivot.y - lab.layout.size.height / 2f))
     }
+    // 빈자리를 못 찾은 라벨([Lab.over])만 배지 뒤로 미뤄 **위에** 그린다.
+    val labs = layoutLabels(tm, loop, start, occupied, labelSp, badgeRects)
+    labs.filterNot { it.over }.forEach { draw(it) }
 
     // ── 열차 배지 ────────────────────────────────────────────
     // 배지를 접은 열차도 **점은 남으므로** 탭 판정은 전원을 넣는다.
@@ -1074,6 +1091,7 @@ private fun DrawScope.drawCabLoop(
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 배지에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
     others.forEach { (t, c, _) -> drawBadge(tm, c, t.trainNo, false, big, pulse, badgeSp) }
+    labs.filter { it.over }.forEach { draw(it) }
     mineRows.forEach { (t, c, out) ->
         drawBadge(tm, c, t.trainNo, true, big, pulse, badgeSp)
         drawFlag(tm, c, out, t.destName, big)   // 배지 위 노란 행선 깃발
