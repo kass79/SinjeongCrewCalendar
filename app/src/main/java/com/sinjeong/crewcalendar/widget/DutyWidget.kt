@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.widget
 
 import android.content.Context
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -8,6 +9,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
+import androidx.glance.LocalContext
 import androidx.glance.LocalSize
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
@@ -29,7 +31,9 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import androidx.glance.unit.ColorProvider
 import com.sinjeong.crewcalendar.MainActivity
+import com.sinjeong.crewcalendar.util.dutyPalette
 
 /**
  * 오늘부터 7일 근무 스트립 홈 위젯.
@@ -54,7 +58,8 @@ class DutyWidget : GlanceAppWidget() {
      * 그 판을 고른다. 즉 각 판을 "제 크기에서 안 잘리게" 만들어 두면 그 이상에서도 안 잘린다.
      * 높이를 기준에 넣은 게 핵심이고, 덤으로 2x1(TINY) 구간이 생긴다.
      */
-    override val sizeMode = SizeMode.Responsive(setOf(TINY, MID_SHORT, MID, WIDE_SHORT, WIDE))
+    override val sizeMode =
+        SizeMode.Responsive(setOf(TINY, MID_SHORT, MID, FOUR_SHORT, FOUR, WIDE_SHORT, WIDE))
 
     companion object {
         /** 요일\|일자\|근무\|빨강\|타입\|시각 (직렬화는 [encodeStrip]/[decodeStrip]). 비면 빈 상태 */
@@ -63,14 +68,28 @@ class DutyWidget : GlanceAppWidget() {
         /** 예: "오늘 출근 07:47" (없으면 빈 문자열) */
         val KEY_SUB = stringPreferencesKey("today_sub")
 
-        /** 2x1 — 7칸 스트립이 안 들어간다. 오늘 근무 + 출근시각만 */
+        /*
+         * v1.6.88: 4x1 전용 판(FOUR)을 끼워 넣었다.
+         *
+         * `SizeMode.Responsive`에서 `LocalSize.current`는 **여기 적은 판 크기 중 하나**이지
+         * 위젯의 실폭이 아니다(에뮬 로그로 확인: 5개 판이 그대로 다 찍힌다). 그런데 폰 5열
+         * 그리드에서 4칸은 약 285dp라 340dp짜리 WIDE 에 못 닿고 **190dp짜리 MID 를 고른다** —
+         * 즉 3x1 과 4x1 이 같은 판을 쓰게 돼 둘을 구별할 수가 없었다.
+         * 260dp 판을 하나 끼우면 3칸(≈213dp)은 MID, 4칸(≈285dp)은 FOUR 로 갈린다.
+         */
+
+        /** 2x1 — 7칸 스트립이 안 들어간다. 오늘 근무 + 시각 한 줄만 */
         private val TINY = DpSize(120.dp, 44.dp)
 
-        /** 3x1 — 칸 27dp라 요일을 떼고 날짜만. 실측 Pixel 5열 그리드에서 3칸 = 약 200dp */
+        /** 3x1 — 오늘·내일·모레 3칸. 실측 Pixel 5열 그리드에서 3칸 = 약 213dp */
         private val MID_SHORT = DpSize(190.dp, 48.dp)
         private val MID = DpSize(190.dp, 84.dp)
 
-        /** 4x1 이상 — 칸 48dp라 "월 13"이 들어간다 */
+        /** 4x1(폰) — 7칸 스트립. 칸 37dp라 요일을 떼고 날짜만 */
+        private val FOUR_SHORT = DpSize(260.dp, 48.dp)
+        private val FOUR = DpSize(260.dp, 84.dp)
+
+        /** 4x1(펼침·태블릿) 이상 — 칸 48dp라 "월 13"이 들어간다 */
         private val WIDE_SHORT = DpSize(340.dp, 48.dp)
         private val WIDE = DpSize(340.dp, 84.dp)
     }
@@ -91,9 +110,15 @@ class DutyWidget : GlanceAppWidget() {
                 val sub = prefs[KEY_SUB].orEmpty()
 
                 val size = LocalSize.current
-                val strip = size.width >= MID_SHORT.width      // 7칸을 그릴 폭이 되나
+                // 어느 판을 그릴지는 **판 크기**로 정한다(= 런처가 실폭으로 이미 고른 결과).
+                // 글자 크기 판정만 배율을 먹인다(설계서 A-4): 배율이 커지면 같은 칸에 든 글자가
+                // 커져 잘리므로, 폭을 배율로 나눈 [effW]로 요일을 떼고([narrow]) 한 단계 줄인다([small]).
+                val fs = LocalContext.current.resources.configuration.fontScale.coerceIn(0.8f, 2f)
+                val effW = size.width / fs                     // 글자가 커진 만큼 "좁아진" 폭
+                val wide = size.width >= MID_SHORT.width       // 3칸 이상 그릴 폭이 되나
                 val tall = size.height >= MID.height           // 부제 한 줄이 더 들어가나
-                val narrow = size.width / 7 < 46.dp            // 칸이 좁으면 요일을 뗀다
+                val narrow = effW / 7 < 46.dp                  // 칸이 좁으면 요일을 뗀다
+                val small = fs >= 1.3f                         // 배율 1.3+ 는 글자 한 단계 축소
 
                 Column(
                     modifier = GlanceModifier
@@ -114,15 +139,21 @@ class DutyWidget : GlanceAppWidget() {
                                 maxLines = 1,
                                 style = TextStyle(
                                     color = GlanceTheme.colors.onSurfaceVariant,
-                                    fontSize = if (strip) 13.sp else 10.sp,
+                                    fontSize = if (!wide) (if (small) 8.5.sp else 10.sp)
+                                    else if (small) 11.5.sp else 13.sp,
                                 ),
                             )
                         }
                         return@Column
                     }
 
-                    if (!strip) {
-                        Compact(cells[0], sub)
+                    // 2x1(TINY) / 3x1(MID) / 4x1 이상(FOUR·WIDE)
+                    if (size.width < MID_SHORT.width) {
+                        Compact2(cells[0], sub, small)
+                        return@Column
+                    }
+                    if (size.width < FOUR_SHORT.width) {
+                        ThreeDays(cells.take(3), small, tall)
                         return@Column
                     }
 
@@ -133,7 +164,8 @@ class DutyWidget : GlanceAppWidget() {
                             maxLines = 1,
                             style = TextStyle(
                                 color = GlanceTheme.colors.onSurface,
-                                fontSize = if (narrow) 12.sp else 13.sp,
+                                fontSize = if (narrow) (if (small) 10.5.sp else 12.sp)
+                                else if (small) 11.5.sp else 13.sp,
                                 fontWeight = FontWeight.Bold,
                             ),
                             modifier = GlanceModifier.padding(start = 2.dp, bottom = 3.dp),
@@ -145,7 +177,7 @@ class DutyWidget : GlanceAppWidget() {
                     Row(modifier = GlanceModifier.fillMaxWidth()) {
                         cells.forEachIndexed { i, c ->
                             Box(modifier = GlanceModifier.defaultWeight().padding(horizontal = 1.dp)) {
-                                DayCell(c, i == 0, narrow, tall, GlanceModifier.fillMaxWidth())
+                                DayCell(c, i == 0, narrow, tall, small, GlanceModifier.fillMaxWidth())
                             }
                         }
                     }
@@ -154,40 +186,76 @@ class DutyWidget : GlanceAppWidget() {
         }
     }
 
-    /** 2x1 — 스트립 대신 오늘 근무와 출근시각만. 부제(`sub`)에 오늘/내일 구분이 이미 들어 있다. */
+    /**
+     * 2x1 — 오늘 근무(크게) + 시각 한 줄("출근 07:47"/"편승 12:36").
+     * 시각이 없으면 부제(`sub` — 오늘/내일 구분이 이미 들어 있다).
+     */
     @androidx.compose.runtime.Composable
-    private fun Compact(today: Cell, sub: String) {
-        Box(modifier = GlanceModifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    private fun Compact2(today: Cell, sub: String, small: Boolean) {
+        val pal = today.type?.let(::dutyPalette)
+        val bg = if (pal != null && pal.first != 0) ColorProvider(Color(pal.first)) else GlanceTheme.colors.surface
+        val fg = if (pal != null) ColorProvider(Color(pal.second)) else GlanceTheme.colors.onSurface
+        Box(
+            modifier = GlanceModifier.fillMaxSize().background(bg).cornerRadius(20.dp),
+            contentAlignment = Alignment.Center,
+        ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
                     today.duty.ifBlank { "·" },
                     maxLines = 1,
                     style = TextStyle(
-                        color = GlanceTheme.colors.onSurface,
-                        fontSize = 17.sp,
+                        color = fg,
+                        fontSize = if (small) 17.sp else 19.sp,
                         fontWeight = FontWeight.Bold,
                     ),
                 )
-                if (sub.isNotBlank()) Text(
-                    sub,
+                val line = today.time.ifBlank { sub }
+                if (line.isNotBlank()) Text(
+                    line,
                     maxLines = 1,
-                    style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 10.sp),
+                    style = TextStyle(color = fg, fontSize = if (small) 9.sp else 10.5.sp),
                 )
             }
         }
     }
 
+    /** 3x1 — 오늘·내일·모레 3칸. 칸이 넓으니 요일을 붙인다(narrow=false). */
     @androidx.compose.runtime.Composable
-    private fun DayCell(cell: Cell, isToday: Boolean, narrow: Boolean, tall: Boolean, modifier: GlanceModifier) {
-        // 오늘 칸은 primary 로 확실히 튀게. 나머지는 inverseOnSurface —
-        // 라이트에서 흰색에 가깝고(밝은 카드) 다크에서는 배경보다 밝은 회색이라 양쪽 다 산뜻하다.
-        val fg = if (isToday) GlanceTheme.colors.onPrimary else GlanceTheme.colors.onSurface
+    private fun ThreeDays(cells: List<Cell>, small: Boolean, tall: Boolean) {
+        Row(modifier = GlanceModifier.fillMaxWidth()) {
+            cells.forEachIndexed { i, c ->
+                Box(modifier = GlanceModifier.defaultWeight().padding(horizontal = 2.dp)) {
+                    DayCell(c, i == 0, narrow = false, tall = tall, small = small, GlanceModifier.fillMaxWidth())
+                }
+            }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun DayCell(
+        cell: Cell,
+        isToday: Boolean,
+        narrow: Boolean,
+        tall: Boolean,
+        small: Boolean,
+        modifier: GlanceModifier,
+    ) {
+        // 오늘 칸은 primary 로 확실히 튀게. 나머지는 **앱 달력과 같은 근무색**([dutyPalette], v1.6.88) —
+        // 타입을 모르는 옛 레코드나 ETC(배경 투명)는 종전 inverseOnSurface 로 떨어진다.
+        val pal = cell.type?.let(::dutyPalette)
+        val bgProvider = when {
+            isToday -> GlanceTheme.colors.primary
+            pal != null && pal.first != 0 -> ColorProvider(Color(pal.first))
+            else -> GlanceTheme.colors.inverseOnSurface
+        }
+        val fg = when {
+            isToday -> GlanceTheme.colors.onPrimary
+            pal != null -> ColorProvider(Color(pal.second))
+            else -> GlanceTheme.colors.onSurface
+        }
         Column(
             modifier = modifier
-                .background(
-                    if (isToday) GlanceTheme.colors.primary
-                    else GlanceTheme.colors.inverseOnSurface
-                )
+                .background(bgProvider)
                 .cornerRadius(10.dp)
                 .padding(vertical = if (tall) 4.dp else 2.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -199,7 +267,9 @@ class DutyWidget : GlanceAppWidget() {
                 maxLines = 1,
                 style = TextStyle(
                     color = if (cell.red && !isToday) GlanceTheme.colors.error else fg,
-                    fontSize = if (narrow) 9.sp else if (tall) 11.5.sp else 10.5.sp,
+                    fontSize = if (narrow) (if (small) 8.sp else 9.sp)
+                    else if (tall) (if (small) 10.sp else 11.5.sp)
+                    else if (small) 9.sp else 10.5.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
@@ -208,7 +278,9 @@ class DutyWidget : GlanceAppWidget() {
                 maxLines = 1,
                 style = TextStyle(
                     color = fg,
-                    fontSize = if (narrow) 11.sp else if (tall) 16.sp else 15.sp,
+                    fontSize = if (narrow) (if (small) 9.5.sp else 11.sp)
+                    else if (tall) (if (small) 14.5.sp else 16.sp)
+                    else if (small) 13.5.sp else 15.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
