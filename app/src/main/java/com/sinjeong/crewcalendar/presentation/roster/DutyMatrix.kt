@@ -344,7 +344,7 @@ private val NAME_W_SCALED = 50.dp
  *
  * ⚠ 넘길 값은 [DutyCode.type]이 아니라 **[DutyCode.colorType]** 이다 — 대행("충당 9" 꼴)은
  * 시각·행로표를 원래 근무에서 가져오되 색만 대기(노랑)로 되돌려야 한다.
- * 월 이미지(`MonthImage.dutyColors`)는 Compose 밖이라 Int 사본을 따로 들고 있다.
+ * 월 이미지·위젯(`util/DutyPalette.dutyPalette`)은 Compose 밖이라 Int 사본을 따로 들고 있다.
  */
 fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Color, Color> =
     when (type) {
