@@ -5,6 +5,7 @@ import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
+import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
 import com.sinjeong.crewcalendar.domain.model.trainNumbers
 import org.junit.Assert.assertEquals
@@ -168,6 +169,32 @@ class MyTrainTest {
             val d = DutyCode.parse(it)
             assertTrue(it + " 는 지선이어야 한다", d.isBranch)
             assertNull(myTrainAt(d, WED, at(WED, "09:00")))
+        }
+    }
+
+    // ── dutyTrainNumbers — 열번 후보 (지도 강조·달력 헤더의 근거) ──
+
+    /**
+     * v1.6.88 회귀 자물쇠. 잣대가 `isBranch` 였을 때 **운휴 `지휴5`·대기 `지대2` 가
+     * 같은 번호의 지5·지2 다이아 열번을 그대로 물고 나왔다** — 휴무일인데 달력 헤더에
+     * "오늘 열번 5560·5561 외 16개" 라고 적힌 실화면이 그것이다. 본선 휴무·대기는
+     * 원래 `type` 으로 갈라 놔서 멀쩡했고, 지선만 새고 있었다.
+     */
+    @Test
+    fun `운휴 대기는 열번 후보가 없다`() {
+        listOf("지휴5", "지대2", "휴5", "대3", "~", "연차").forEach {
+            val d = DutyCode.parse(it)
+            assertEquals(it + " 는 빈 목록이어야 한다", emptyList<String>(), dutyTrainNumbers(d, WED))
+        }
+    }
+
+    /** 반대쪽 — 실제로 열차를 잡는 근무는 후보가 있어야 한다(과잉 차단 방지). */
+    @Test
+    fun `지선 주간 야간과 본선 근무는 열번 후보가 있다`() {
+        listOf("지5", "지11", "5", "38").forEach {
+            val nos = dutyTrainNumbers(DutyCode.parse(it), WED)
+            assertTrue(it + " 는 비어 있으면 안 된다", nos.isNotEmpty())
+            assertTrue(it + " 는 네 자리 열번만이어야 한다", nos.all { n -> n.length == 4 && n.all(Char::isDigit) })
         }
     }
 }

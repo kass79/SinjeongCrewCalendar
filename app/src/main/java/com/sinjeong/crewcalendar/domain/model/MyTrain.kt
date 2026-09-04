@@ -148,12 +148,20 @@ internal fun trainNumbers(raw: String): List<String> =
  *
  * ⚠ 여기서도 **시각을 추정하지 않는다** — 열번 후보만 주고, 그중 실제로 API 에 살아 있는
  * 것을 지도가 고른다(이 파일 위쪽 KDoc 의 그 결정 그대로다).
+ *
+ * ⚠ 지선 잣대는 [DutyCode.isBranch] 가 **아니라 근무 종별**이다. 지선 계열엔 운휴(`지휴5`)·
+ * 대기(`지대2`)도 있고 이들도 `isBranch = true` 에 **번호까지 달려 있어서**, `isBranch` 로
+ * 판정하면 같은 번호의 **지N 다이아 열번이 그대로 딸려 나온다**(v1.6.88 에뮬 실측: 오늘이
+ * `지휴5` 인데 헤더에 "오늘 열번 5560·5561 외 16개"). 열차를 실제로 잡는 건 지선 주간
+ * (`지1~8` = [DutyType.BRANCH])·야간(`지10~14` = [DutyType.BRANCH_NIGHT]) 둘뿐이다.
+ * 본선 쪽은 원래 `type` 으로 갈라 놔서 휴무·대기가 `else` 로 빠져 있었다.
  */
 fun dutyTrainNumbers(duty: DutyCode, date: LocalDate): List<String> {
     val n = duty.number ?: return emptyList()
     val holiday = Bundled.isHolidayTimetable(date)
     val assign = when {
-        duty.isBranch -> RouteTable.forBranch(n, holiday)
+        duty.type == DutyType.BRANCH || duty.type == DutyType.BRANCH_NIGHT ->
+            RouteTable.forBranch(n, holiday)
         duty.type == DutyType.MAIN_NIGHT ->
             Bundled.comboOf(date)?.let { RouteTable.forMainNight(n, it) }
         duty.type == DutyType.MAIN_DAY -> RouteTable.forMainDay(n, holiday)
