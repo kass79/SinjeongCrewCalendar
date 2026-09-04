@@ -6,11 +6,13 @@ import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.model.Notice
 import com.sinjeong.crewcalendar.domain.model.countsAsRestDay
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import com.sinjeong.crewcalendar.domain.repository.MenuRepository
+import com.sinjeong.crewcalendar.domain.repository.NoticeRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.domain.usecase.GetMonthScheduleUseCase
 import com.sinjeong.crewcalendar.domain.usecase.SelectDutyPositionUseCase
@@ -106,6 +108,7 @@ class MainCalendarViewModel @Inject constructor(
     private val updateDay: UpdateDayUseCase,
     private val userRepo: UserRepository,
     menuRepo: MenuRepository,
+    noticeRepo: NoticeRepository,
     val themeController: ThemeController,
 ) : ViewModel() {
 
@@ -126,6 +129,17 @@ class MainCalendarViewModel @Inject constructor(
             .map { m -> m.mapValues { (start, cells) -> WeeklyMenu(start, cells) } }
             .catch { emit(emptyMap()) }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
+    /**
+     * 관리자 공지 (v1.6.89) — 기간 안의 것만, 최신순. 달력 맨 위 배너가 그중 1건을 그린다.
+     *
+     * 식단표와 같은 이유로 `uiState` 의 combine 에 안 끼운다 — 달력 계산과 아무 관계가 없고,
+     * 7갈래 배열을 인덱스로 꺼내는 자리라 한 갈래만 늘려도 전부 한 칸씩 밀 위험이 있다.
+     */
+    val notices: StateFlow<List<Notice>> =
+        noticeRepo.observeActive(LocalDate.now())
+            .catch { emit(emptyList()) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val month = MutableStateFlow(YearMonth.now())
     private val selectedDate = MutableStateFlow<LocalDate?>(null)

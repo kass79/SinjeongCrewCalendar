@@ -66,6 +66,7 @@ import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import com.sinjeong.crewcalendar.presentation.admin.AdminGate
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
 import com.sinjeong.crewcalendar.presentation.menu.MenuDialog
+import com.sinjeong.crewcalendar.presentation.notice.NoticeBanner
 import com.sinjeong.crewcalendar.presentation.roster.changedCorner
 import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
 import com.sinjeong.crewcalendar.presentation.settings.openSafetyApp
@@ -103,6 +104,7 @@ fun MainCalendarScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val menus by viewModel.menus.collectAsStateWithLifecycle()
+    val notices by viewModel.notices.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
@@ -250,6 +252,7 @@ fun MainCalendarScreen(
         Row(Modifier.padding(padding).fillMaxSize()) {
             // 펼침 비율 50:50 — "폴더 펼쳤을 때 화면 반반"(v1.6.11 사용자 선택). v1.6.10은 38:62
             Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
+                NoticeBanner(notices)   // 관리자 공지(v1.6.89). 볼 게 없으면 높이 0
                 WeekdayHeader()
 
                 if (state.isLoading) {
