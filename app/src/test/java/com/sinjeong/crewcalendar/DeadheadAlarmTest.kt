@@ -43,6 +43,21 @@ class DeadheadAlarmTest {
         assertEquals("양천구청역 7:30 도착", alarm.text)
     }
 
+    /**
+     * v1.6.88: 다섯째 칸에 **편승 열번 후보**가 실린다. 알람이 울릴 때 실시간 위치를 찾는 데 쓴다.
+     * 후보가 없으면 칸 자체를 안 쓴다 — 옛 4칸 기록과 **글자까지 똑같이** 남기려는 것이다.
+     */
+    @Test fun `5칸 레코드에 열번 후보가 실린다`() {
+        val a = DeadheadAlarm.Alarm(LocalTime.of(12, 36), "양천구청역 12:36 도착", listOf("5581", "5586"))
+        val s = DeadheadAlarm.encode(LocalDate.of(2026, 9, 6) to DeadheadAlarm.LEG_SECOND, a)
+        assertEquals(a, DeadheadAlarm.decode(s)!!.second)
+    }
+
+    /** 업데이트 전에 켜 둔 4칸 알람도 그대로 읽힌다(열번만 비어 있다). */
+    @Test fun `4칸 옛 레코드는 열번 없이 읽힌다`() {
+        assertEquals(emptyList<String>(), DeadheadAlarm.decode("2026-09-06|2|12:36|문구")!!.second.trainNos)
+    }
+
     /** 깨진 줄은 예외를 던지지 않고 그 줄만 버린다 — 목록 전체가 날아가면 안 된다. */
     @Test fun brokenEntries_areDroppedNotThrown() {
         listOf("", "쓰레기", "2026-09-04", "2026-09-04|2", "날짜아님|2|19:05|문구", "2026-09-04|2|25:99|문구")

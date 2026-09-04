@@ -687,6 +687,14 @@ internal object BranchLive {
     private suspend fun fetchPositions() =
         fetch("realtimePosition/0/100/${URLEncoder.encode("2호선", "UTF-8")}").map(::parsePositions)
 
+    /**
+     * 알람 발화 시 **1회**: 후보 열번 중 지금 API 에 살아 있는 첫 열차. 실패·없음 → null.
+     *
+     * 지도 폴링과 같은 키 로테이션을 타고 호출은 딱 한 번이다(하루 한도에 실질적 영향 없음).
+     */
+    suspend fun locate(trainNos: List<String>): PositionRow? =
+        fetchPositions().getOrNull()?.firstOrNull { it.trainNo in trainNos }
+
     private suspend fun fetchArrivals(station: String) =
         fetch("realtimeStationArrival/0/12/${URLEncoder.encode(station, "UTF-8")}").map(::parseArrivals)
 

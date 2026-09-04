@@ -61,6 +61,7 @@ import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
 import com.sinjeong.crewcalendar.domain.model.RouteTable
 import com.sinjeong.crewcalendar.domain.model.ShiftTeam
+import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import com.sinjeong.crewcalendar.presentation.admin.AdminGate
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
@@ -1271,6 +1272,8 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
     val ctx = LocalContext.current
     val leg = if (second) DeadheadAlarm.LEG_SECOND else DeadheadAlarm.LEG_FIRST
     val advice = remember(date, duty, second) { BundledTimetable.advise(duty, date, second) }
+    // 알람이 울릴 때 실시간 위치를 찾을 후보 열번(본선·지선 무관 — 지도와 같은 규칙)
+    val nos = remember(date, duty) { dutyTrainNumbers(duty, date) }
     val at = advice.at
     // **야간 근무의 후반사업은 익일 아침**이다(v1.6.73) — 예약·지남 판정·requestCode가 전부
     // 이 날짜를 쓴다. 근무일로 걸면 이미 지나간 아침이라 조용히 안 울린다(그게 이 판의 버그였다).
@@ -1287,7 +1290,7 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
         val cur = DeadheadAlarm.scheduledAt(ctx, fireDate, leg).takeIf { AlarmPermission.canExact(ctx) }
         booked = when {
             cur == null || at == null || past -> { if (cur != null) DeadheadAlarm.cancel(ctx, fireDate, leg); null }
-            cur != at -> if (DeadheadAlarm.schedule(ctx, fireDate, leg, at, advice.text)) at else null
+            cur != at -> if (DeadheadAlarm.schedule(ctx, fireDate, leg, at, advice.text, nos)) at else null
             else -> cur
         }
     }
@@ -1414,7 +1417,8 @@ private fun DeadheadAlarmChip(date: LocalDate, duty: DutyCode, second: Boolean) 
                 when {
                     permWarn != null -> AlarmPermission.openSettings(ctx)
                     on -> { DeadheadAlarm.cancel(ctx, fireDate, leg); booked = null }
-                    else -> booked = if (DeadheadAlarm.schedule(ctx, fireDate, leg, at, advice.text)) at else null
+                    else -> booked =
+                        if (DeadheadAlarm.schedule(ctx, fireDate, leg, at, advice.text, nos)) at else null
                 }
                 ask = false
             }) { Text(if (permWarn != null) "설정 열기" else if (on) "예약 해제" else "알림 예약") }

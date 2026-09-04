@@ -41,6 +41,14 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.sinjeong.crewcalendar.R
+import com.sinjeong.crewcalendar.domain.model.Line2Timetable
+import com.sinjeong.crewcalendar.presentation.live.BranchLive
+import com.sinjeong.crewcalendar.presentation.live.Line2TimetableLoader
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -70,14 +78,19 @@ object DeadheadAlarm {
     /** 소리를 반복할 최대 시간. 기본 알람앱들처럼 이만큼 지나면 저절로 멈춘다 */
     internal const val RING_MS = 90_000L
 
-    private const val KEY = "deadhead_alarms" // "yyyy-MM-dd|구간|HH:mm|문구" 집합
+    private const val KEY = "deadhead_alarms" // "yyyy-MM-dd|구간|HH:mm|문구[|열번,열번]" 집합
 
     /** 전반사업 = 1 / 후반사업 = 2. 같은 날짜에 두 건이 따로 걸린다(v1.6.29). */
     const val LEG_FIRST = 1
     const val LEG_SECOND = 2
 
-    /** 예약 1건 */
-    data class Alarm(val at: LocalTime, val text: String)
+    /**
+     * 예약 1건.
+     *
+     * [trainNos] = 그 근무가 잡는 편승 열번 후보(v1.6.88). 알람이 울릴 때 이 중 **지금 API 에
+     * 살아 있는 열차**를 찾아 알림 둘째 줄에 위치·지연을 덧붙인다. 비어 있으면 종전 그대로.
+     */
+    data class Alarm(val at: LocalTime, val text: String, val trainNos: List<String> = emptyList())
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
@@ -92,16 +105,23 @@ object DeadheadAlarm {
      * 알람이 통째로 사라지는데, 종전엔 [entries] 안에 묻혀 있어 테스트가 못 닿았다.
      */
     internal fun decode(s: String): Pair<Pair<LocalDate, Int>, Alarm>? = runCatching {
-        val p = s.split('|', limit = 4)
+        val p = s.split('|', limit = 5)
         val legacy = ':' in p[1]
         val leg = if (legacy) LEG_FIRST else p[1].toInt()
         val at = LocalTime.parse(if (legacy) p[1] else p[2])
-        (LocalDate.parse(p[0]) to leg) to Alarm(at, p.getOrElse(if (legacy) 2 else 3) { "" })
+        val nos = p.getOrNull(4)?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+        (LocalDate.parse(p[0]) to leg) to Alarm(at, p.getOrElse(if (legacy) 2 else 3) { "" }, nos)
     }.getOrNull()
 
-    /** [decode]의 짝. 쓸 때는 늘 새 4칸 형식이다 — 옛 3칸으로는 다시 안 쓴다. */
+    /**
+     * [decode]의 짝. 쓸 때는 늘 새 형식이다 — 옛 3칸으로는 다시 안 쓴다.
+     *
+     * ⚠ 열번 후보가 없으면 **다섯째 칸을 아예 안 붙인다.** 빈 칸을 붙이면 후보 없는 알람의
+     * 저장 문자열이 옛 4칸과 글자가 달라지고, 왕복을 값으로 못 박은 테스트가 깨진다.
+     */
     internal fun encode(key: Pair<LocalDate, Int>, a: Alarm) =
-        "${key.first}|${key.second}|${a.at}|${a.text}"
+        "${key.first}|${key.second}|${a.at}|${a.text}" +
+            if (a.trainNos.isEmpty()) "" else "|" + a.trainNos.joinToString(",")
 
     /** 지난 날짜는 읽을 때 걷어낸다 — 목록이 무한히 자라지 않게 */
     private fun entries(ctx: Context): Map<Pair<LocalDate, Int>, Alarm> =
@@ -120,8 +140,11 @@ object DeadheadAlarm {
         entries(ctx)[date to leg]?.at
 
     /** 예약(또는 시각 변경 재예약). 이미 지난 시각이면 아무것도 하지 않고 false */
-    fun schedule(ctx: Context, date: LocalDate, leg: Int, at: LocalTime, text: String): Boolean {
-        val a = Alarm(at, text)
+    fun schedule(
+        ctx: Context, date: LocalDate, leg: Int, at: LocalTime, text: String,
+        trainNos: List<String> = emptyList(),
+    ): Boolean {
+        val a = Alarm(at, text, trainNos)
         if (!arm(ctx, date, leg, a)) return false
         save(ctx, entries(ctx) + ((date to leg) to a))
         return true
@@ -143,7 +166,8 @@ object DeadheadAlarm {
             .putExtra("date", date.toString())
             .putExtra("leg", leg)
             .putExtra("at", a?.at?.toString())
-            .putExtra("text", a?.text),
+            .putExtra("text", a?.text)
+            .putExtra("nos", a?.trainNos?.joinToString(",")),
         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
 
@@ -161,18 +185,14 @@ object DeadheadAlarm {
         return true
     }
 
-    internal fun notifyNow(ctx: Context, dateStr: String?, leg: Int, at: String?, body: String?) {
-        val date = runCatching { LocalDate.parse(dateStr) }.getOrNull() ?: LocalDate.now()
-        save(ctx, entries(ctx) - (date to leg)) // 발송했으면 예약 해제 — 칩이 계속 "예약됨"으로 남지 않게
-        if (Build.VERSION.SDK_INT >= 33 &&
-            ActivityCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
-            != PackageManager.PERMISSION_GRANTED
-        ) return
-
-        // 문구는 예약할 때 계산해 둔 것을 그대로 쓴다 (지선 "도착" / 본선 "편승 탑승"이 갈린다)
-        val text = body?.takeIf { it.isNotBlank() } ?: "양천구청역 ${at.orEmpty()}"
-        val id = 1100 + (date.toEpochDay() % 100).toInt() + if (leg == LEG_SECOND) 200 else 0
-
+    /**
+     * 알림 한 벌. **갱신할 때 [text] 만 바꿔 다시 만든다** — 그래서 전체화면 인텐트도 여기서
+     * 함께 만든다([AlarmRingActivity] 가 인텐트의 `text` 를 화면에 그대로 쓰기 때문에,
+     * 밖에서 만들어 재활용하면 알람 화면에는 둘째 줄이 안 나온다).
+     *
+     * [quiet] = 갱신본(소리·진동을 다시 울리지 않는다).
+     */
+    private fun build(ctx: Context, id: Int, text: String, quiet: Boolean): Notification {
         // 전체화면 알람 화면. FLAG_ACTIVITY_NEW_TASK가 없으면 알림에서 못 띄운다.
         val ring = PendingIntent.getActivity(
             ctx, id,
@@ -202,13 +222,74 @@ object DeadheadAlarm {
             .addAction(0, "해제", dismiss)
             .setDeleteIntent(dismiss)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(quiet)
             // 안전장치: 시스템이 이 시간에 알림을 지우고 → 소리도 함께 끊긴다. 좀비 사운드가 생길 수 없다.
             .setTimeoutAfter(RING_MS)
             .build()
         // 폰 기본 알람처럼 "지울 때까지" 소리·진동 반복. 소리는 시스템이 재생하므로
         // MediaPlayer·포그라운드 서비스가 필요 없고, 알림이 사라지는 모든 경로에서 확실히 멈춘다.
         n.flags = n.flags or Notification.FLAG_INSISTENT
-        NotificationManagerCompat.from(ctx).notify(id, n)
+        return n
+    }
+
+    /**
+     * 그 알림이 **아직 떠 있나.**
+     *
+     * ⚠ [AlarmRingActivity] 는 뜨자마자 알림을 지우고 소리를 직접 낸다. 그 뒤에 같은 id로 다시
+     * `notify` 하면 **지운 알림이 되살아나** 소리가 겹치고 해제한 뒤에도 알림이 남는다.
+     * 그래서 갱신은 살아 있는 알림에만 한다(알람 화면이 떠 있으면 그 화면의 첫 줄로 충분하다).
+     */
+    private fun isLive(ctx: Context, id: Int) =
+        runCatching { NotificationManagerCompat.from(ctx).activeNotifications.any { it.id == id } }
+            .getOrDefault(false)
+
+    /**
+     * 알람 발화. 먼저 **예약할 때 계산해 둔 문구로 즉시** 알리고(표시를 늦추지 않는다), 열번
+     * 후보가 있으면 실시간 위치를 3초 안에 한 번만 물어 둘째 줄을 덧붙인다(v1.6.88).
+     * 실패·시간초과·못 찾음이면 첫 줄 그대로 — 예외는 전부 삼킨다.
+     *
+     * [done] 은 [DeadheadReceiver] 의 `goAsync()` 를 끝내는 콜백이다. **모든 갈래에서 한 번씩**
+     * 불러야 한다(안 부르면 브로드캐스트가 열린 채 남는다).
+     */
+    @OptIn(DelicateCoroutinesApi::class)
+    internal fun notifyNow(
+        ctx: Context, dateStr: String?, leg: Int, at: String?, body: String?,
+        nos: String? = null, done: () -> Unit = {},
+    ) {
+        val date = runCatching { LocalDate.parse(dateStr) }.getOrNull() ?: LocalDate.now()
+        save(ctx, entries(ctx) - (date to leg)) // 발송했으면 예약 해제 — 칩이 계속 "예약됨"으로 남지 않게
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ActivityCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) { done(); return }
+
+        // 문구는 예약할 때 계산해 둔 것을 그대로 쓴다 (지선 "도착" / 본선 "편승 탑승"이 갈린다)
+        val text = body?.takeIf { it.isNotBlank() } ?: "양천구청역 ${at.orEmpty()}"
+        val id = 1100 + (date.toEpochDay() % 100).toInt() + if (leg == LEG_SECOND) 200 else 0
+        NotificationManagerCompat.from(ctx).notify(id, build(ctx, id, text, quiet = false))
+
+        val candidates = nos.orEmpty().split(',').filter { it.isNotBlank() }
+        if (candidates.isEmpty()) { done(); return }
+        GlobalScope.launch(Dispatchers.IO) {
+            val line = runCatching {
+                withTimeoutOrNull(3_000) {
+                    val row = BranchLive.locate(candidates) ?: return@withTimeoutOrNull null
+                    val tt = Line2TimetableLoader.get(ctx)
+                    val (d, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
+                    val delay = tt?.delayMinutes(
+                        Line2Timetable.weekTagOf(d),
+                        Line2Timetable.inoutOf(row.updnLine.trim() == "0"),
+                        row.trainNo, row.statnNm, row.trainSttus, sec,
+                    )
+                    liveLine(row, delay)
+                }
+            }.getOrNull()
+            if (line != null && isLive(ctx, id)) {
+                NotificationManagerCompat.from(ctx)
+                    .notify(id, build(ctx, id, text + "\n" + line, quiet = true))
+            }
+            done()
+        }
     }
 }
 
@@ -320,13 +401,19 @@ class DeadheadReceiver : BroadcastReceiver() {
             // 알림의 [해제] 버튼 / 밀어서 지우기. 알림을 지우면 시스템이 소리도 함께 끊는다.
             DeadheadAlarm.ACTION_DISMISS ->
                 NotificationManagerCompat.from(context).cancel(intent.getIntExtra("id", 0))
-            DeadheadAlarm.ACTION -> DeadheadAlarm.notifyNow(
-                context,
-                intent.getStringExtra("date"),
-                intent.getIntExtra("leg", DeadheadAlarm.LEG_FIRST), // 옛 알람은 leg가 없다 → 전반
-                intent.getStringExtra("at"),
-                intent.getStringExtra("text"),
-            )
+            // 실시간 한 줄을 붙이는 동안(최대 3초) 브로드캐스트를 열어 둔다 — 알림 자체는
+            // 그보다 먼저 뜨고, 갱신이 끝나면 [PendingResult.finish] 로 닫는다.
+            DeadheadAlarm.ACTION -> {
+                val pr = goAsync()
+                DeadheadAlarm.notifyNow(
+                    context,
+                    intent.getStringExtra("date"),
+                    intent.getIntExtra("leg", DeadheadAlarm.LEG_FIRST), // 옛 알람은 leg가 없다 → 전반
+                    intent.getStringExtra("at"),
+                    intent.getStringExtra("text"),
+                    intent.getStringExtra("nos"),
+                ) { pr.finish() }
+            }
         }
     }
 }

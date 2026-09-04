@@ -49,6 +49,12 @@ class Line2TimetableTest {
         assertEquals(1, Line2Timetable.weekTagOf(LocalDate.of(2026, 9, 4)))
         assertEquals(3, Line2Timetable.weekTagOf(LocalDate.of(2026, 9, 25)))
     }
+    /** 알람 알림 둘째 줄 — 순수 함수라 여기서 잠근다(안드로이드를 안 부른다). */
+    @Test fun `알림 한 줄 문구`() {
+        val row = com.sinjeong.crewcalendar.presentation.live.PositionRow("1002", "홍대입구", "2333", "1", "성수", "2")
+        assertEquals("2333열차 지금 홍대입구 출발 · +2분 지연", com.sinjeong.crewcalendar.widget.liveLine(row, 2))
+        assertEquals("2333열차 지금 홍대입구 출발", com.sinjeong.crewcalendar.widget.liveLine(row, null))
+    }
     @Test fun `새벽 1시는 전날 25시`() {
         val (d, s) = Line2Timetable.serviceClock(LocalDateTime.of(2026, 9, 5, 1, 0))
         assertEquals(LocalDate.of(2026, 9, 4), d); assertEquals(25 * 3600, s)
