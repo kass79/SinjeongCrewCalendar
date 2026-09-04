@@ -12,11 +12,13 @@ import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
+import com.sinjeong.crewcalendar.domain.model.Notice
 import com.sinjeong.crewcalendar.domain.model.Schedule
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
 import com.sinjeong.crewcalendar.domain.repository.AdminWriteResult
 import com.sinjeong.crewcalendar.domain.repository.MenuRepository
+import com.sinjeong.crewcalendar.domain.repository.NoticeRepository
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
@@ -339,6 +341,82 @@ class FirestoreMenuRepository @Inject constructor() : MenuRepository {
     }
 }
 
+/**
+ * 관리자 공지 (v1.6.89). `notices/{id}` — 문서 하나가 공지 하나다.
+ *
+ * 식단표와 같은 구조지만 문서 ID 가 날짜가 아니라 자동 ID 다 — 같은 기간에 여러 건이 살 수 있고,
+ * 배너는 그중 최신 1건만 고른다.
+ */
+@Singleton
+class FirestoreNoticeRepository @Inject constructor() : NoticeRepository {
+    private val db get() = FirebaseFirestore.getInstance()
+
+    override fun observeActive(today: LocalDate): Flow<List<Notice>> = flow {
+        ensureAuth()
+        emitAll(callbackFlow {
+            // 서버에서 자를 수 있는 것은 **한쪽 끝뿐**이다 — Firestore 는 서로 다른 두 필드에
+            // 범위 조건을 동시에 걸지 못한다(to >= 오늘 && from <= 오늘). 끝난 공지만 서버에서
+            // 걷어내고 아직 시작 안 한 것은 아래에서 [Notice.isActive] 로 거른다.
+            val reg = runCatching {
+                db.collection("notices")
+                    .whereGreaterThanOrEqualTo("to", today.toString())
+                    .addSnapshotListener { snap, e ->
+                        // menus 와 같은 이유(v1.6.86 점검 #13) — 오류를 빈 목록으로 흘리면
+                        // 떠 있던 공지가 사라진다. 직전 값을 그대로 둔다.
+                        if (e != null) {
+                            Log.w("Firestore", "notices 구독 실패", e)
+                            return@addSnapshotListener
+                        }
+                        trySend(
+                            snap?.documents.orEmpty().mapNotNull { d ->
+                                val from = runCatching { LocalDate.parse(d.getString("from")) }
+                                    .getOrNull() ?: return@mapNotNull null
+                                val to = runCatching { LocalDate.parse(d.getString("to")) }
+                                    .getOrNull() ?: return@mapNotNull null
+                                Notice(
+                                    id = d.id,
+                                    title = d.getString("title").orEmpty(),
+                                    body = d.getString("body").orEmpty(),
+                                    from = from,
+                                    to = to,
+                                    // 방금 쓴 문서는 서버 타임스탬프가 아직 비어 있다(pending write).
+                                    createdAt = d.getTimestamp("createdAt")?.toDate()?.time ?: 0L,
+                                )
+                            }.filter { it.isActive(today) }.sortedByDescending { it.createdAt }
+                        )
+                    }
+            }.onFailure { Log.w("Firestore", "notices 구독 등록 실패", it) }.getOrNull()
+            awaitClose { reg?.remove() }
+        })
+    }
+
+    override suspend fun save(n: Notice): AdminWriteResult {
+        if (!ensureAuth()) return AdminWriteResult.FAILED
+        val col = db.collection("notices")
+        val doc = if (n.id.isBlank()) col.document() else col.document(n.id)
+        return runCatching {
+            doc.set(
+                mapOf(
+                    "title" to n.title,
+                    "body" to n.body,
+                    "from" to n.from.toString(),
+                    "to" to n.to.toString(),
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    // 규칙이 'admin' 만 받는다. 익명 인증이라 서버가 진짜 관리자인지는 못 가리고
+                    // (firestore.rules menus 절 주석) 모양만 맞춘다.
+                    "author" to "admin",
+                )
+            ).await()
+        }.fold({ AdminWriteResult.OK }, Throwable::asWriteResult)
+    }
+
+    override suspend fun delete(id: String): AdminWriteResult {
+        if (!ensureAuth()) return AdminWriteResult.FAILED
+        return runCatching { db.collection("notices").document(id).delete().await() }
+            .fold({ AdminWriteResult.OK }, Throwable::asWriteResult)
+    }
+}
+
 /** 오프라인(로컬) 모드용 — 공유 데이터 없음 */
 @Singleton
 class LocalRosterRepository @Inject constructor() : RosterRepository {
@@ -351,4 +429,10 @@ class LocalRosterRepository @Inject constructor() : RosterRepository {
 @Singleton
 class LocalMenuRepository @Inject constructor() : MenuRepository {
     override fun observeFrom(from: LocalDate): Flow<Map<LocalDate, List<String>>> = flowOf(emptyMap())
+}
+
+/** 오프라인(로컬) 모드용 — 공지도 서버가 있어야 공유된다 */
+@Singleton
+class LocalNoticeRepository @Inject constructor() : NoticeRepository {
+    override fun observeActive(today: LocalDate): Flow<List<Notice>> = flowOf(emptyList())
 }

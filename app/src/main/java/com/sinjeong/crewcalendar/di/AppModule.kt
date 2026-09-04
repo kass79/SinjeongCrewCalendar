@@ -57,6 +57,13 @@ object RepositoryModule {
         remote: Provider<com.sinjeong.crewcalendar.data.remote.FirestoreMenuRepository>,
     ): MenuRepository = if (firebaseOn(context)) remote.get() else local
 
+    @Provides @Singleton
+    fun noticeRepo(
+        @ApplicationContext context: Context,
+        local: com.sinjeong.crewcalendar.data.remote.LocalNoticeRepository,
+        remote: Provider<com.sinjeong.crewcalendar.data.remote.FirestoreNoticeRepository>,
+    ): NoticeRepository = if (firebaseOn(context)) remote.get() else local
+
     @Provides @Singleton fun patternRepo(impl: LocalPatternRepository): PatternRepository = impl
     @Provides @Singleton fun snapshotRepo(impl: LocalSnapshotRepository): SnapshotRepository = impl
     @Provides @Singleton fun mateRepo(impl: LocalMateRepository): MateRepository = impl

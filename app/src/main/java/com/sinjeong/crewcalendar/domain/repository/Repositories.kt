@@ -108,3 +108,18 @@ interface RosterRepository {
     suspend fun adminDelete(uid: String): AdminWriteResult = AdminWriteResult.FAILED
 }
 
+
+/**
+ * 관리자 공지 (v1.6.89). `notices/{id}` — 문서 하나가 공지 하나다.
+ *
+ * 식단표([MenuRepository])와 같은 모양이고 오프라인 캐시를 따로 두지 않는 이유도 같다 —
+ * Firestore SDK 의 로컬 영속화가 마지막 스냅샷을 그대로 돌려준다.
+ */
+interface NoticeRepository {
+    /** 오늘 기간 안의 공지(최신순). 오류 시 직전 값 유지(식단표와 같은 규칙) */
+    fun observeActive(today: LocalDate): Flow<List<Notice>>
+
+    /** 관리자 저장. [Notice.id] 가 비면 새 문서(자동 ID). 서버 미연동이면 FAILED */
+    suspend fun save(n: Notice): AdminWriteResult = AdminWriteResult.FAILED
+    suspend fun delete(id: String): AdminWriteResult = AdminWriteResult.FAILED
+}
