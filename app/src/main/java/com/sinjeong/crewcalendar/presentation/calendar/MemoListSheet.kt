@@ -4,6 +4,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -21,6 +23,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -29,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.usecase.WeeklyHours
 import com.sinjeong.crewcalendar.presentation.roster.dutyCellColors
 import com.sinjeong.crewcalendar.presentation.theme.LocalDutyColors
 import java.time.LocalDate
@@ -53,7 +57,7 @@ fun memoFirstLine(memo: String): String =
  *
  * 목록 자체는 `state.days`(그 달 전체)를 그대로 거른다 — 새 저장소도, 새 쿼리도 없다.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MemoListSheet(
     month: YearMonth,
@@ -61,7 +65,6 @@ fun MemoListSheet(
     onPick: (LocalDate) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val duty = LocalDutyColors.current
     val rows = days.filter { it.memo.isNotBlank() }.sortedBy { it.date }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -79,6 +82,27 @@ fun MemoListSheet(
                     fontSize = 12.sp, fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+            // 주52시간 — 그 달의 주별 근무시간(월~일, 52.0h 초과는 빨강). 달력 상태에서 파생이라
+            // 근무변경·메모를 저장하면 곧바로 다시 계산된다(저장소·쿼리 없음).
+            // `FlowRow` 라 글자배율을 키우면 잘리지 않고 스스로 아랫줄로 접힌다.
+            val weeks = remember(month, days) { WeeklyHours.compute(month, days) }
+            FlowRow(
+                Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                weeks.forEach { w ->
+                    val over = w.minutes > WeeklyHours.LIMIT_MIN
+                    val tail =
+                        if (w.excluded.isEmpty()) "" else " (${w.excluded.joinToString("·")} 미포함)"
+                    Text(
+                        WeeklyHours.label(w) + tail,
+                        fontSize = 12.5.sp,
+                        fontWeight = if (over) FontWeight.ExtraBold else FontWeight.Bold,
+                        color = if (over) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
             if (rows.isEmpty()) {
                 Text(
