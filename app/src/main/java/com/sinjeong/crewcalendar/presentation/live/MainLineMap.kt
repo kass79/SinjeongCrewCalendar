@@ -962,15 +962,46 @@ private fun DrawScope.drawCabLoop(
         return Offset(p.x + nIn.x * badgeOff * dir, p.y + nIn.y * badgeOff * dir) to
             Offset(nIn.x * dir, nIn.y * dir)
     }
-    val spots = trains.map { (t, pos) -> Triple(t, spot(t, pos).first, spot(t, pos).second) }
-    // ⚠ 배지를 **장애물로 넘겨** 역 이름이 그 자리를 피해 가게 한다. 안 그러면 배지가
-    // 역 이름을 덮는다(실측: `구의`·`강변`이 3046·2011 배지 밑에 깔렸다).
+    // ⚠ 배지 상자 크기는 **가장 넓은 열번("0000")으로** 잰다 — 실제 열번마다 재면 상자가
+    // 들쭉날쭉해져 겹침 판정과 그린 결과가 어긋난다.
     val bw = tm.measure("0000", TextStyle(fontSize = badgeSp.sp,
         fontWeight = FontWeight.ExtraBold))
     val bhw = (bw.size.width + (if (big) 18 else 15).dp.toPx()) / 2f
     val bhh = (bw.size.height + (if (big) 12 else 10).dp.toPx()) / 2f
-    val badgeRects = spots.map { (_, c, _) ->
-        Rect(c.x - bhw, c.y - bhh, c.x + bhw, c.y + bhh)
+
+    /*
+     * ── 배지끼리 겹침 0 (v1.6.88) ────────────────────────────
+     * 같은 차선에 열차가 몰리면 배지가 그대로 포개졌다(실측: 합정 모서리에 7366·8401·2403,
+     * 사당 근처에 6378·2384·2382). 겹치면 **자기 차선 바깥쪽**(내선은 더 안쪽, 외선은 더
+     * 바깥쪽 — 반대편 차선을 절대 침범하지 않는다)으로 `배지 높이 + 2dp` 씩 **최대 2단**
+     * 계단으로 민다. 그래도 자리가 없거나 계단이 화면 밖으로 나가면 **배지를 접고 점만
+     * 남긴다** — 겹쳐 놓아 둘 다 못 읽게 하느니 하나만 읽히는 편이 낫다.
+     *
+     * 내 열차는 **맨 먼저** 자리를 잡아(빈 판이라 늘 0단) 밀리지도 숨지도 않는다. 그리기는
+     * 여전히 맨 나중이라 무엇 위에도 얹힌다.
+     * 필터(내선/외선)를 켜면 한 차선만 쓰니 계단이 거의 안 생긴다 — 전체 모드용 장치다.
+     */
+    val stepPx = 2f * bhh + 2.dp.toPx()
+    val badgeRects = mutableListOf<Rect>()
+    /** 그릴 배지 — (열차, 중심, 바깥 방향). 접힌 배지는 여기 없다. */
+    val spots = mutableListOf<Triple<MainTrainMark, Offset, Offset>>()
+    /** 탭 판정·툴팁이 쓸 중심 — 접힌 배지도 점 자리로 남는다. */
+    val centers = mutableMapOf<String, Offset>()
+    for ((t, pos) in trains.sortedByDescending { it.first.trainNo == mineNo }) {
+        val (base, out) = spot(t, pos)
+        centers[t.trainNo] = base
+        for (s in 0..2) {
+            val c = Offset(base.x + out.x * stepPx * s, base.y + out.y * stepPx * s)
+            val r = Rect(c.x - bhw, c.y - bhh, c.x + bhw, c.y + bhh)
+            // 밀어낸 배지가 화면 밖으로 나가면 그 단은 없는 셈 친다(0단은 [margin] 이 챙긴다).
+            if (s > 0 && (r.left < 0f || r.top < 0f ||
+                    r.right > size.width || r.bottom > size.height)) continue
+            if (badgeRects.any { it.overlaps(r) }) continue
+            badgeRects += r
+            spots += Triple(t, c, out)
+            centers[t.trainNo] = c
+            break
+        }
     }
 
     // 라벨 글자는 **11sp 아래로 내리지 않는다**(사용자: 가독성). 좁으면 겹침 회피로 푼다.
@@ -983,7 +1014,8 @@ private fun DrawScope.drawCabLoop(
     }
 
     // ── 열차 배지 ────────────────────────────────────────────
-    val hits = spots.map { (t, c, _) -> c to t.trainNo }
+    // 배지를 접은 열차도 **점은 남으므로** 탭 판정은 전원을 넣는다.
+    val hits = trains.map { (t, _) -> centers.getValue(t.trainNo) to t.trainNo }
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 배지에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
     others.forEach { (t, c, _) -> drawBadge(tm, c, t.trainNo, false, big, pulse, badgeSp) }
@@ -993,11 +1025,11 @@ private fun DrawScope.drawCabLoop(
     }
 
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
-    picked?.let { no ->
-        trains.firstOrNull { it.first.trainNo == no }?.let { (t, pos) ->
-            drawTip(tm, spot(t, pos).first, t, no == mineNo)
+    picked?.let { no -> centers[no]?.let { c ->
+        trains.firstOrNull { it.first.trainNo == no }?.let { (t, _) ->
+            drawTip(tm, c, t, no == mineNo)
         }
-    }
+    } }
     return hits
 }
 
