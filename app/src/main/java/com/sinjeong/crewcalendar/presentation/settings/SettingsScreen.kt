@@ -435,7 +435,15 @@ fun SettingsScreen(
         AlertDialog(
             onDismissRequest = { confirmLogout = false },
             title = { Text("로그아웃") },
-            text = { Text("로그인 정보만 지워집니다. 근무기록·메모는 폰에 남습니다.") },
+            // signOut() 은 이름·사번만 지운다 — 근무기록·메모는 사번과 묶여 있지 않은
+            // 기기 저장분이라, 다른 사번으로 로그인해도 같은 기록이 그대로 보인다.
+            // 사용자에게 놀라움이 되지 않게 미리 적는다(v1.6.86 점검 #11).
+            text = {
+                Text(
+                    "로그인 정보만 지워집니다. 근무기록·메모는 폰에 남습니다. " +
+                        "다른 사번으로 로그인해도 이 기록이 그대로 보입니다.",
+                )
+            },
             confirmButton = {
                 TextButton(onClick = { viewModel.logout(); confirmLogout = false }) { Text("로그아웃") }
             },
