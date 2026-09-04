@@ -333,7 +333,9 @@ object BundledTimetable {
         val tokens = assign.secondHalf.split('·').map { it.trim() }
         val head = tokens.firstOrNull { FOUR_DIGITS.matches(it) } ?: return Advice(
             null,
-            "후반사업이 \"${tokens.first()}\"(으)로 시작해 어디서 열차를 잡는지 표에 없습니다. 알람을 걸지 않습니다.",
+            // `split('·')` 은 빈 문자열을 돌려줄 수 있어(`secondHalf` 가 빈 칸이거나 "·"로 시작)
+            // 문구가 `""(으)로 시작해` 로 깨졌다 — 그때는 "빈 칸"으로 읽는다(v1.6.86 점검 #8).
+            "후반사업이 \"${tokens.first().ifBlank { "빈 칸" }}\"(으)로 시작해 어디서 열차를 잡는지 표에 없습니다. 알람을 걸지 않습니다.",
             nextDay = true,
         )
         // 갈래 판정은 [boardingPlace] 한 벌뿐이다 — 내 열번 판정(MyTrain)도 같은 것을 부른다.
