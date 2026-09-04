@@ -74,6 +74,7 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
@@ -578,27 +579,31 @@ private fun CabStatusBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Chip("2호선", big, LoopGreen)
+        // ⚠ 정보 칩에 [weight] 를 준다. 없으면 줄이 화면보다 길어져 **오른쪽 필터 칩이
+        // 잘린다**(실측: 폴드 펼침 700dp 에서 `전체` 가 통째로 안 보였다). 잘린 정보는
+        // 헤더 줄에 그대로 다시 나오지만, 못 누르는 단추는 없는 단추다.
+        val shrink = Modifier.weight(1f, fill = false)
         when {
             // ⚠ 오류는 **열차가 하나도 없을 때만** 말한다. 스냅샷의 `error` 는 지선 카드가 쓰는
             // 양천구청 **도착** API 실패까지 합쳐 온 값이라(위치 API 는 멀쩡할 수 있다), 그대로
             // 띄우면 열차 14대를 그려 놓고 "정보를 못 받았어요"라고 말하게 된다(v1.6.84 실측).
-            error != null && !hasTrains -> Chip(error, big, Color(0xFFE9A23B))
+            error != null && !hasTrains -> Chip(error, big, Color(0xFFE9A23B), modifier = shrink)
             mineMark != null -> {
                 Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true)
-                Chip(mineMark.destName + "행", big, MineYellow)
+                Chip(mineMark.destName + "행", big, MineYellow, modifier = shrink)
                 Chip(if (mineMark.inner) "↻ 내선" else "↺ 외선", big, BadgeSky)
             }
             candidates.isNotEmpty() -> {
-                Chip("내 열차 미검출 (운행 전/후)", big, Dim)
+                Chip("내 열차 미검출 (운행 전/후)", big, Dim, modifier = shrink)
                 // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
                 if (mine != null && !mine.riding && mine.startAt != null) {
                     Chip(
                         "다음 " + mine.nos.first() + " " + fmt(mine.startAt) +
                             (if (mine.nextDay) " (익일)" else ""),
-                        big, Color(0xFFCFE3F5),
+                        big, Color(0xFFCFE3F5), modifier = shrink,
                     )
                 } else {
-                    Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5))
+                    Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5), modifier = shrink)
                 }
             }
             else -> Chip("오늘 근무 열번: 없음", big, Dim)
@@ -615,8 +620,10 @@ private fun fmt(t: LocalTime) = "%02d:%02d".format(t.hour, t.minute)
 
 @Composable
 private fun Chip(
-    text: String, big: Boolean, tint: Color, fill: Boolean = false, onClick: (() -> Unit)? = null,
+    text: String, big: Boolean, tint: Color, fill: Boolean = false,
+    modifier: Modifier = Modifier, onClick: (() -> Unit)? = null,
 ) = Surface(
+    modifier = modifier,
     color = if (fill) tint else tint.copy(alpha = 0.12f),
     shape = RoundedCornerShape(50),
     border = BorderStroke(1.dp, tint.copy(alpha = 0.85f)),
@@ -625,6 +632,7 @@ private fun Chip(
         text,
         fontSize = if (big) 14.sp else 11.5.sp, fontWeight = FontWeight.Bold,
         color = if (fill) MineInk else tint,
+        maxLines = 1, overflow = TextOverflow.Ellipsis,
         // 누를 수 있는 칩만 클릭 영역을 만든다 — 나머지는 종전대로 그냥 글씨다.
         modifier = Modifier
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
