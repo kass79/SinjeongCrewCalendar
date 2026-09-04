@@ -335,6 +335,24 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     val favKeys = remember(mates) {
         mates.filter { it.favGroup != null }.map { mateKey(it.name, it.group) }.toSet()
     }
+    /**
+     * 이름+소속 → **사번**. ★즐겨찾기 행이 근무변경을 받으려면 이 값이 있어야 한다.
+     *
+     * [Mate]는 사번을 저장하지 않는다(이름·소속·offset·★그룹뿐). 그래서 ★ 목록은 `uid = null`인
+     * 행을 만들었고, [MatrixRow]의 `overrides`는 `p.uid`로만 조회되므로
+     * **동료의 근무변경이 ★즐겨찾기 화면에서만 통째로 사라졌다.** 게다가 빈 칸이 되는 게 아니라
+     * 조용히 **원래 교번값**으로 그려져 틀린 근무가 됐다 — 에뮬 실측(2026-09-04, 박희수):
+     * `전체`에서는 `~`(근무변경 표시 있음), ★즐겨찾기에서는 `지7`(표시 없음).
+     * 사용자 신고 *"로그인하면 다른 동료 근무가 보이지 않는것"* 의 정체다.
+     *
+     * ⚠ **사번을 [Mate]에 넣어 저장하지 않는다.** 저장하면 그 값이 낡는다(재가입·사번 정정 때
+     * 갱신할 길이 없고, 저장 키는 여전히 이름+소속이다). `users` 명단이 사번의 단일 출처이므로
+     * **매번 거기서 되찾는다** — 명단에 없는 사람(수동등록·내장명단)은 종전대로 `null`이고,
+     * 그건 서버에 근무변경이 있을 수 없는 사람이라 맞는 값이다.
+     */
+    val uidByKey = remember(liveUsers) {
+        liveUsers.associate { mateKey(it.name, it.group) to it.uid }
+    }
 
     // 소속 칩용 전체 명단 (종전 동료근무와 같은 합성 규칙).
     // 우선순위: 나 → 로그인 근무자(실데이터) → 수동등록 동료 → 내장 명단.
@@ -382,7 +400,13 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                 .filter { favFilter == null || it.favGroup == favFilter }
                 .filter { mateKey(it.name, it.group) != me?.key }
                 .sortedWith(compareBy({ it.favGroup == null }, { it.favGroup?.ordinal ?: 9 }, { it.name }))
-                .map { MatrixPerson(it.name, it.group, it.patternOffset) }
+                // `uid`를 반드시 실어 보낸다 — 이게 없으면 이 화면에서만 근무변경이 사라진다([uidByKey])
+                .map {
+                    MatrixPerson(
+                        it.name, it.group, it.patternOffset,
+                        uid = uidByKey[mateKey(it.name, it.group)],
+                    )
+                }
     } else {
         // `category == null` = 전체(필터 없음). 한 줄로 두 경우를 다 본다 — 소속 칩은 필터일 뿐이다.
         // 전체일 땐 소속이 섞이므로 정렬 키에 소속을 끼워 같은 소속끼리 붙여 놓는다.
