@@ -4,10 +4,11 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -44,7 +45,6 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -89,6 +89,7 @@ import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -96,6 +97,7 @@ import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.math.PI
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -403,15 +405,53 @@ private fun CabScreen(
                     eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
                         it.trainNo == mineMark?.trainNo
                 }
-                // 열차마다 자리를 부드럽게 옮긴다(등속 보간은 안 한다 — 파일 KDoc)
-                val placed = drawn.map { t ->
-                    key(t.trainNo) {
-                        val p by animateFloatAsState(
-                            t.stationIdx + t.offset,
-                            tween(1500, easing = LinearEasing), label = "m" + t.trainNo,
-                        )
-                        t to p
+                // ── 열차 이동 (v1.6.88) ────────────────────────────────
+                // 열번마다 [Animatable] 하나. 새 스냅샷이 오면 **1초 tween** 으로 그 자리까지
+                // 옮기고, 다음 스냅샷이 올 때까지 시간표의 **역간 소요시간** 속도로 다음 역
+                // **95% 지점까지만** 기어간다. 절대 다음 역을 넘지 않는다 — 넘으면 있지도 않은
+                // 도착을 그리게 된다. 시간표에 없는 열번이면 120초로 본다.
+                //
+                // ⚠ 장부는 **거른 목록이 아니라 전체 목록**으로 돌린다. 필터를 껐다 켤 때마다
+                // 애니메이션이 버려지면 열차가 제자리에서 다시 튄다.
+                // ⚠ `LaunchedEffect(trains)` 는 리스트가 **값으로 같으면 다시 안 돈다** — 폴링
+                // 눈금(2초)마다 스냅샷을 갈아 끼워도 내용이 같으면 기어가던 것이 안 끊긴다.
+                val anims = remember { mutableMapOf<String, Animatable<Float, AnimationVector1D>>() }
+                LaunchedEffect(trains) {
+                    // 사라진 열차(운행 종료·오류로 빈 스냅샷)는 장부에서도 지운다
+                    anims.keys.retainAll(trains.map { it.trainNo }.toSet())
+                    trains.forEach { t ->
+                        val target = t.stationIdx + t.offset
+                        val a = anims.getOrPut(t.trainNo) { Animatable(target) }
+                        // 순환선이라 42.9 → 0.2 는 **뒤로 42.7 이 아니라 앞으로 0.3** 이다.
+                        // 반 바퀴를 넘는 차이는 ±43 을 더해 "펼친" 좌표로 옮기고, 그릴 때 접는다.
+                        val diff = target - a.value
+                        val goal = when {
+                            diff > LOOP_N / 2f -> target - LOOP_N
+                            diff < -LOOP_N / 2f -> target + LOOP_N
+                            else -> target
+                        }
+                        launch {
+                            a.animateTo(goal, tween(1000, easing = LinearEasing))
+                            val seg = tt?.segmentSeconds(
+                                weekTag, Line2Timetable.inoutOf(t.inner), t.trainNo, t.statnNm,
+                            ) ?: 120
+                            val dir = if (t.inner) 1f else -1f
+                            val nextStop = if (t.inner) floor(goal) + 1f else ceil(goal) - 1f
+                            val creepTo = nextStop - dir * 0.05f
+                            val remain = abs(creepTo - a.value)
+                            if (remain > 0.01f) a.animateTo(
+                                creepTo,
+                                tween(
+                                    (seg * 1000 * remain).toInt().coerceIn(1000, 240_000),
+                                    easing = LinearEasing,
+                                ),
+                            )
+                        }
                     }
+                }
+                val placed = drawn.map { t ->
+                    val a = anims.getOrPut(t.trainNo) { Animatable(t.stationIdx + t.offset) }
+                    t to (((a.value % LOOP_N) + LOOP_N) % LOOP_N)
                 }
                 var hit by remember { mutableStateOf<List<Pair<Offset, String>>>(emptyList()) }
                 Canvas(
