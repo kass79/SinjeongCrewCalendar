@@ -7,10 +7,6 @@ import android.util.Log
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -436,12 +432,6 @@ private fun CabScreen(
                 LocalDensity provides Density(d.density, d.fontScale.coerceAtMost(1.15f))
             ) {
                 val tm = rememberTextMeasurer()
-                val infinite = rememberInfiniteTransition(label = "loop")
-                val pulse by infinite.animateFloat(
-                    0f, 1f,
-                    infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
-                    label = "pulse",
-                )
                 // 방향 필터 — **내 열차는 어느 모드에서든 그린다**(사용자 확정).
                 val drawn = trains.filter {
                     eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
@@ -506,7 +496,7 @@ private fun CabScreen(
                         }
                     }
                 ) {
-                    hit = drawCabLoop(tm, placed, mineMark?.trainNo, pulse, big, picked,
+                    hit = drawCabLoop(tm, placed, mineMark?.trainNo, big, picked,
                         labelSp, badgeSp)
                 }
             }
@@ -989,7 +979,6 @@ private fun DrawScope.drawCabLoop(
     tm: TextMeasurer,
     trains: List<Pair<MainTrainMark, Float>>,
     mineNo: String?,
-    pulse: Float,
     big: Boolean,
     picked: String?,
     /** 역 이름 크기 — 방향 필터가 켜져 있으면 커진다([CabScreen]) */
@@ -1052,6 +1041,27 @@ private fun DrawScope.drawCabLoop(
         return Offset(p.x + nIn.x * badgeOff * dir, p.y + nIn.y * badgeOff * dir) to
             Offset(nIn.x * dir, nIn.y * dir)
     }
+
+    /*
+     * ── 내 열차 = 증기기관차 (v1.6.90) ─────────────────────────────
+     * 사용자: *"본인 열차와 신정지선 신도림행 가는 열차만이라도 은하철도999로 만들어줘!
+     * 방향이 헷갈려!"* — 배지는 어느 쪽으로 가는지를 못 말한다.
+     *
+     * 배지를 **없애고** 그 자리에 기관차를 놓는다. 열번은 몸통 안에 들어가므로 상자는 여전히
+     * 하나다([Loco] 규칙 1 — 기관차 밑에 배지를 또 다는 것은 틀린 규칙이다).
+     * 차선(내선 안 / 외선 밖)도 그대로다 — 방향은 이제 **머리**가 말한다.
+     * 다른 열차는 배지 그대로다(사용자: *"만이라도"*).
+     */
+    val locoScale = if (big) 54f / LOCO_LEN else 1f
+    fun headingAt(t: MainTrainMark, pos: Float): Heading {
+        val (_, tan) = loop.at(loop.sOfPos(pos - start))
+        return headingFor(tan.x, tan.y, t.inner)
+    }
+    val mineHeading = mineNo
+        ?.let { no -> trains.firstOrNull { it.first.trainNo == no } }
+        ?.let { (t, pos) -> headingAt(t, pos) }
+        ?: Heading.RIGHT
+
     // ⚠ 배지 상자 크기는 **가장 넓은 열번("0000")으로** 잰다 — 실제 열번마다 재면 상자가
     // 들쭉날쭉해져 겹침 판정과 그린 결과가 어긋난다.
     val bw = tm.measure("0000", TextStyle(fontSize = badgeSp.sp,
@@ -1078,11 +1088,22 @@ private fun DrawScope.drawCabLoop(
     /** 탭 판정·툴팁이 쓸 중심 — 접힌 배지도 점 자리로 남는다. */
     val centers = mutableMapOf<String, Offset>()
     for ((t, pos) in trains.sortedByDescending { it.first.trainNo == mineNo }) {
-        val (base, out) = spot(t, pos)
+        val isMine = t.trainNo == mineNo
+        // 기관차 반폭·반높이 — 원점에 놓은 상자가 그대로 반지름이다.
+        val half = locoBox(Offset.Zero, mineHeading, locoScale)
+        val (base0, out) = spot(t, pos)
+        // 기관차는 배지보다 커서 [margin] 을 넘길 수 있다(윗변 외선이 가장 아슬아슬하다) —
+        // 내 열차만 화면 안으로 붙인다. 몇 dp 밀릴 뿐이라 차선은 그대로 읽힌다.
+        val base = if (!isMine) base0 else Offset(
+            base0.x.coerceIn(half.right, (size.width - half.right).coerceAtLeast(half.right)),
+            base0.y.coerceIn(half.bottom, (size.height - half.bottom).coerceAtLeast(half.bottom)),
+        )
         centers[t.trainNo] = base
         for (s in 0..2) {
             val c = Offset(base.x + out.x * stepPx * s, base.y + out.y * stepPx * s)
-            val r = Rect(c.x - bhw, c.y - bhh, c.x + bhw, c.y + bhh)
+            // 겹침 회피(배지 계단·역명 SAT)가 보는 상자 — 내 열차는 **기관차 상자**다.
+            val r = if (isMine) locoBox(c, mineHeading, locoScale)
+            else Rect(c.x - bhw, c.y - bhh, c.x + bhw, c.y + bhh)
             // 밀어낸 배지가 화면 밖으로 나가면 그 단은 없는 셈 친다(0단은 [margin] 이 챙긴다).
             if (s > 0 && (r.left < 0f || r.top < 0f ||
                     r.right > size.width || r.bottom > size.height)) continue
@@ -1116,11 +1137,21 @@ private fun DrawScope.drawCabLoop(
     val hits = trains.map { (t, _) -> centers.getValue(t.trainNo) to t.trainNo }
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 배지에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
-    others.forEach { (t, c, _) -> drawBadge(tm, c, t.trainNo, false, big, pulse, badgeSp) }
+    others.forEach { (t, c, _) -> drawBadge(tm, c, t.trainNo, big, badgeSp) }
     labs.filter { it.over }.forEach { draw(it) }
     mineRows.forEach { (t, c, out) ->
-        drawBadge(tm, c, t.trainNo, true, big, pulse, badgeSp)
-        drawFlag(tm, c, out, t.destName, big)   // 배지 위 노란 행선 깃발
+        /*
+         * ⚠ 종전 노란 배지의 **펄스 테두리는 없앴다.** 반투명 노랑을 남색 위에 깔면 기관차
+         * 뒤에 **탁한 회색 상자**가 생겨(실측) 도리어 열번이 흐려졌다. 기관차는 모양·노랑·
+         * 행선 깃발 셋으로 이미 남의 배지와 안 헷갈린다.
+         */
+        // 열번은 **몸통 안**에 있다 — 배지를 따로 달지 않는다.
+        drawLoco(c, mineHeading, locoScale, MineYellow, CabNavy, t.trainNo, MineInk, tm,
+            smoke = true)
+        // 깃대는 **기관차 몸통을 지나서** 시작한다 — 배지 시절 길이(26dp)로는 깃발이 바퀴
+        // 위에 얹혀 열번과 겹쳐 보였다(실측). 몸통 반높이 + 여유.
+        drawFlag(tm, c, out, t.destName, big,
+            LOCO_BOX_H / 2f * locoScale * 1.dp.toPx() + (if (big) 20 else 16).dp.toPx())
     }
 
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
@@ -1132,39 +1163,35 @@ private fun DrawScope.drawCabLoop(
     return hits
 }
 
-/** 열번 배지 — 옅은 하늘색(내 열차는 노랑) 둥근 사각형 + 진한 글씨. */
+/**
+ * 열번 배지 — 옅은 하늘색 둥근 사각형 + 진한 글씨.
+ *
+ * ⚠ v1.6.90 부터 **남의 열차 전용**이다. 내 열차는 배지가 아니라 [drawLoco] 고, 노란 몸통·
+ * 빨간 글씨·펄스 테두리가 통째로 그쪽으로 옮겨 갔다.
+ */
 private fun DrawScope.drawBadge(
-    tm: TextMeasurer, c: Offset, no: String, mine: Boolean, big: Boolean, pulse: Float,
-    badgeSp: Float,
+    tm: TextMeasurer, c: Offset, no: String, big: Boolean, badgeSp: Float,
 ) {
     val lab = tm.measure(no, TextStyle(
-        fontSize = badgeSp.sp, fontWeight = FontWeight.ExtraBold,
-        color = if (mine) MineInk else BadgeInk))
+        fontSize = badgeSp.sp, fontWeight = FontWeight.ExtraBold, color = BadgeInk))
     val w = lab.size.width + (if (big) 14 else 11).dp.toPx()
     val h = lab.size.height + (if (big) 8 else 6).dp.toPx()
     val tl = Offset(c.x - w / 2f, c.y - h / 2f)
-    if (mine) {
-        // 은은한 펄스 — 반투명 노란 테두리가 커지며 사라진다
-        val g = pulse * (if (big) 16 else 12).dp.toPx()
-        drawRoundRect(MineYellow.copy(alpha = (1f - pulse) * 0.5f),
-            topLeft = Offset(tl.x - g, tl.y - g), size = Size(w + 2 * g, h + 2 * g),
-            cornerRadius = CornerRadius(6.dp.toPx() + g))
-    }
     drawRoundRect(CabNavy, topLeft = Offset(tl.x - 2.dp.toPx(), tl.y - 2.dp.toPx()),
         size = Size(w + 4.dp.toPx(), h + 4.dp.toPx()), cornerRadius = CornerRadius(7.dp.toPx()))
-    drawRoundRect(if (mine) MineYellow else BadgeSky, topLeft = tl, size = Size(w, h),
+    drawRoundRect(BadgeSky, topLeft = tl, size = Size(w, h),
         cornerRadius = CornerRadius(5.dp.toPx()))
-    if (mine) drawRoundRect(Color.White, topLeft = tl, size = Size(w, h),
-        cornerRadius = CornerRadius(5.dp.toPx()), style = Stroke(width = 1.5.dp.toPx()))
     drawText(lab, topLeft = Offset(c.x - lab.size.width / 2f, c.y - lab.size.height / 2f))
 }
 
-/** 내 열차 배지 위의 **노란 행선 깃발** — 짧은 깃대 + 노란 조각. */
+/**
+ * 내 열차 위의 **노란 행선 깃발** — 짧은 깃대 + 노란 조각.
+ * @param pole 깃대 길이. 기관차 몸통을 지나야 깃발이 열번을 안 가린다.
+ */
 private fun DrawScope.drawFlag(
-    tm: TextMeasurer, badge: Offset, out: Offset, dest: String, big: Boolean,
+    tm: TextMeasurer, badge: Offset, out: Offset, dest: String, big: Boolean, pole: Float,
 ) {
     if (dest.isBlank()) return
-    val pole = (if (big) 32 else 26).dp.toPx()
     val lab = tm.measure(dest + "행", TextStyle(
         fontSize = (if (big) 12f else 9.5f).sp, fontWeight = FontWeight.Bold, color = MineInk))
     val w = lab.size.width + 10.dp.toPx()

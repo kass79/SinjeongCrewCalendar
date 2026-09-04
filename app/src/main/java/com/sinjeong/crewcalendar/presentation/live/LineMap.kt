@@ -88,9 +88,11 @@ import kotlin.math.floor
  *  1. 남색 바탕(#0E2A47) 고정 — 앱 테마(라이트/다크)와 **무관**하다.
  *  2. 굵은 초록 가로선 하나에 5역을 붙인다. 역 = 흰 점, **열차가 서 있는 역 = 빨간 점**.
  *  3. **신도림**은 이름 주황 +2sp 굵게 · 점 1.5배 + 흰 테두리 — 본선의 신도림·성수와 같은 규칙.
- *  4. 열차 = 하늘색 열번 배지. **신도림행은 선 위 차선 · 까치산행은 선 아래 차선**(본선이
- *     내선을 선 안쪽, 외선을 바깥쪽에 두는 것과 같은 발상 — 방향을 자리로 말한다).
- *  5. **내 열차**는 노란 배지 + 빨간 글씨 + 노란 행선 깃발, 그리고 **맨 나중에** 그린다.
+ *  4. **신도림행은 선 위 차선 · 까치산행은 선 아래 차선**(본선이 내선을 선 안쪽, 외선을
+ *     바깥쪽에 두는 것과 같은 발상 — 방향을 자리로 말한다).
+ *  5. **내 열차**는 노란색 + 빨간 글씨 + 노란 행선 깃발, 그리고 **맨 나중에** 그린다.
+ *  6. v1.6.90 — **신도림행은 증기기관차**([drawLoco], 하늘색 몸통 / 내 열차는 노란 몸통),
+ *     까치산행은 하늘색 열번 배지 그대로. 어느 쪽이든 **열번은 아이콘 안**에 있다.
  *
  * ## v1.6.43~87 에서 넘어온, 손대지 않은 것
  *
@@ -99,7 +101,6 @@ import kotlin.math.floor
  * 입고 열차/기지 회송 · 정차 판정([holding]). 아래 KDoc 에 남은 실측 근거들이 그 증거다.
  *
  * 종전 그림에서 **빠진 것**(사용자가 시안에서 확인한 대로):
- *  · 증기기관차 아이콘·동륜·연기 — 배지 하나로 바뀌었다(본선과 같은 표기).
  *  · 상·하 두 선로와 건넘선(까치산 단선·도림천 X) — 선 하나 + 위/아래 차선으로 접었다.
  *  · 진행 셰브런·셔머·`↻ 회차` 배지 — 회차 상태는 내 열차 한 줄(헤더 밑)이 말한다.
  */
@@ -329,10 +330,20 @@ private fun LineMapCard(
                 val badgeSp = if (big) 11.5f else 9f
                 // 배지 한 칸 높이 = 차선 한 단. 계단식 회피가 **한 단**이므로 차선은 두 칸이다.
                 val badgeH = if (big) 21.dp else 17.dp
-                val laneH = badgeH * 2f + 2.dp
+                /*
+                 * **신도림행은 증기기관차**(v1.6.90). 사용자: *"신정지선 신도림행 가는 열차
+                 * 만이라도 은하철도999로 만들어줘! 방향이 헷갈려!"*
+                 * 열번은 배지가 아니라 기관차 **몸통 안**에 들어간다([Loco] 규칙 1 — 기관차 밑에
+                 * 배지를 또 다는 것은 틀린 규칙이다). 까치산행은 배지 그대로다(*"만이라도"*).
+                 * 위 차선만 기관차 칸이라 그만큼 높아진다 — 아래 차선은 종전 높이.
+                 */
+                val locoScale = if (big) 54f / LOCO_LEN else 1f
+                val locoH = (LOCO_BOX_H * locoScale).dp
+                val upLaneH = locoH * 2f + 2.dp
+                val dnLaneH = badgeH * 2f + 2.dp
                 val nameH = if (big) 21.dp else 18.dp
                 // 위 차선(신도림행) → 선 → 역명 → 아래 차선(까치산행).
-                val canvasH = laneH + 2.dp + LINE_H + 2.dp + nameH + 2.dp + laneH
+                val canvasH = upLaneH + 2.dp + LINE_H + 2.dp + nameH + 2.dp + dnLaneH
 
                 Column(Modifier.padding(vertical = 4.dp)) {
                     BranchHeader(nowMillis, big, onRefresh)
@@ -420,16 +431,22 @@ private fun LineMapCard(
                     }
 
                     Canvas(Modifier.fillMaxWidth().height(canvasH)) {
-                        val laneP = laneH.toPx()
+                        val laneP = upLaneH.toPx()
                         val badgeP = badgeH.toPx()
+                        val locoP = locoH.toPx()
                         val lineP = LINE_H.toPx()
                         val stepP = badgeP + 2.dp.toPx()
+                        val upStepP = locoP + 2.dp.toPx()
                         val lineY = laneP + 2.dp.toPx() + lineP / 2f
                         val nameTop = lineY + lineP / 2f + 2.dp.toPx()
                         val dnTop = nameTop + nameH.toPx() + 2.dp.toPx()
-                        /** 차선 행 중심 y. `r=0`은 선에 붙은 행, `r=1`은 계단식으로 한 단 물러난 행. */
+                        /**
+                         * 차선 행 중심 y. `r=0`은 선에 붙은 행, `r=1`은 계단식으로 한 단 물러난 행.
+                         * 위 차선은 **기관차 칸**, 아래 차선은 배지 칸이라 단 높이가 다르다.
+                         */
                         fun rowY(up: Boolean, r: Int) =
-                            if (up) laneP - badgeP / 2f - r * stepP else dnTop + badgeP / 2f + r * stepP
+                            if (up) laneP - locoP / 2f - r * upStepP
+                            else dnTop + badgeP / 2f + r * stepP
 
                         val pad = 16.dp.toPx()
                         // 역 화면 위치 = 구간 실측시간 비율(상·하행 평균). 표시만 변환(위치 계산은 0~4 유지)
@@ -526,19 +543,22 @@ private fun LineMapCard(
                         val probe = tm.measure("0000", TextStyle(
                             fontSize = badgeSp.sp, fontWeight = FontWeight.ExtraBold))
                         val bw = probe.size.width + (if (big) 14 else 11).dp.toPx()
+                        val locoW = LOCO_BOX_W * locoScale * 1.dp.toPx()
                         val boxes = ArrayList<Rect>()
                         /**
-                         * 빈 자리를 찾아 배지 중심을 돌려준다. 두 단 다 막혔으면 `null`(= 점만).
+                         * 빈 자리를 찾아 중심을 돌려준다. 두 단 다 막혔으면 `null`(= 점만).
+                         * 위 차선은 **기관차 상자**, 아래 차선은 배지 상자로 잰다.
                          * ⚠ 가장자리 물림에 **남색 테두리 2dp 를 더해** 잰다 — 종착역(까치산·신도림)
                          * 배지가 딱 반폭까지만 물러나면 테두리가 카드 밖으로 잘린다.
                          */
                         fun place(x: Float, up: Boolean): Offset? {
-                            val edge = bw / 2f + 2.dp.toPx()
+                            val w = if (up) locoW else bw
+                            val h = if (up) locoP else badgeP
+                            val edge = w / 2f + 2.dp.toPx()
                             val cx = x.coerceIn(edge, (size.width - edge).coerceAtLeast(edge))
                             for (r in 0..1) {
                                 val cy = rowY(up, r)
-                                val rect = Rect(cx - bw / 2f, cy - badgeP / 2f,
-                                    cx + bw / 2f, cy + badgeP / 2f)
+                                val rect = Rect(cx - w / 2f, cy - h / 2f, cx + w / 2f, cy + h / 2f)
                                 if (boxes.none { it.overlaps(rect) }) { boxes += rect; return Offset(cx, cy) }
                             }
                             return null
@@ -554,6 +574,15 @@ private fun LineMapCard(
 
                         /** 배지를 접은 열차 — 그래도 **어디 있는지는** 선 위 점으로 남긴다. */
                         fun dotOnly(x: Float) = drawCircle(BadgeSky, 2.5.dp.toPx(), Offset(x, lineY))
+                        /**
+                         * 신도림행 기관차 — 신도림이 오른쪽 끝이라 머리는 늘 오른쪽이다
+                         * ([headingFor] 가 정한다). 열번은 몸통 안.
+                         */
+                        fun loco(c: Offset, no: String, mine: Boolean) = drawLoco(
+                            c, headingFor(1f, 0f, true), locoScale,
+                            if (mine) MineYellow else BadgeSky, CabNavy,
+                            no, if (mine) MineInk else BadgeInk, tm, smoke = true,
+                        )
 
                         runnerSpots.forEach { (no, pos, c) ->
                             if (c == null) dotOnly(xOf(pos))
@@ -561,13 +590,16 @@ private fun LineMapCard(
                         }
                         spots.filter { it.first.trainNo != mineNo }.forEach { (t, pos, c) ->
                             if (c == null) dotOnly(xOf(pos))
+                            else if (t.toSindorim) loco(c, t.trainNo, false)
                             else drawNoBadge(tm, c, t.trainNo, false, bw, badgeP, badgeSp)
                         }
-                        // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 배지에 가리면 "표시가 안 된다"는 말이 된다.
+                        // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 표시에 가리면 "표시가 안 된다"는 말이 된다.
                         spots.firstOrNull { it.first.trainNo == mineNo }?.let { (t, pos, c) ->
                             if (c == null) dotOnly(xOf(pos)) else {
-                                drawNoBadge(tm, c, t.trainNo, true, bw, badgeP, badgeSp)
-                                drawDestFlag(tm, c, bw, destOf(t.toSindorim), big)
+                                if (t.toSindorim) loco(c, t.trainNo, true)
+                                else drawNoBadge(tm, c, t.trainNo, true, bw, badgeP, badgeSp)
+                                drawDestFlag(tm, c, if (t.toSindorim) locoW else bw,
+                                    destOf(t.toSindorim), big)
                             }
                         }
 
