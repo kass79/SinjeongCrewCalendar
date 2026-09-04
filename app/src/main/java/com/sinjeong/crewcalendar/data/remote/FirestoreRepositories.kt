@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.data.remote
 
+import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
 import com.google.firebase.firestore.FieldValue
@@ -162,42 +163,61 @@ class FirestoreRosterRepository @Inject constructor() : RosterRepository {
     override fun observeUsers(): Flow<List<RosterEntry>> = flow {
         ensureAuth()
         emitAll(callbackFlow {
-            val reg = db.collection("users").addSnapshotListener { snap, _ ->
-                trySend(snap?.documents?.mapNotNull { d ->
-                    val name = d.getString("name") ?: return@mapNotNull null
-                    val group =
-                        if (d.getString("role") == CrewRole.CONDUCTOR.name) CrewGroup.MAIN_CONDUCTOR
-                        // 옛 관제 전용 id(bundled-control42)도 4조2교대로 되읽힌다(v1.6.60, `Bundled.groupFor`)
-                        else Bundled.groupFor(d.getString("patternId")) ?: CrewGroup.BRANCH
-                    RosterEntry(
-                        d.id, name, group, (d.getLong("patternOffset") ?: 0L).toInt(),
-                        addedBy = d.getString("addedBy"),
-                    )
-                } ?: emptyList())
-            }
-            awaitClose { reg.remove() }
+            // 리스너 등록 자체가 던지는 경우(초기화 실패 등)도 흐름을 죽이지 않고 로그만 남긴다.
+            val reg = runCatching {
+                db.collection("users").addSnapshotListener { snap, e ->
+                    // 구독 오류를 삼키지 않는다(v1.6.86 점검 #13). 종전엔 `snap == null` 이 그대로
+                    // `emptyList()` 로 흘러 **명단이 통째로 빈 화면**이 됐다 — 규칙 거부·오프라인도
+                    // 그렇게 보였다. 이제는 로그만 남기고 **직전 값을 그대로 둔다**
+                    // (첫 스냅샷 전이면 아무것도 emit 안 하니 화면은 종전처럼 로딩/빈 상태).
+                    if (e != null) {
+                        Log.w("Firestore", "users 구독 실패", e)
+                        return@addSnapshotListener
+                    }
+                    trySend(snap?.documents?.mapNotNull { d ->
+                        val name = d.getString("name") ?: return@mapNotNull null
+                        val group =
+                            if (d.getString("role") == CrewRole.CONDUCTOR.name) CrewGroup.MAIN_CONDUCTOR
+                            // 옛 관제 전용 id(bundled-control42)도 4조2교대로 되읽힌다(v1.6.60, `Bundled.groupFor`)
+                            else Bundled.groupFor(d.getString("patternId")) ?: CrewGroup.BRANCH
+                        RosterEntry(
+                            d.id, name, group, (d.getLong("patternOffset") ?: 0L).toInt(),
+                            addedBy = d.getString("addedBy"),
+                        )
+                    } ?: emptyList())
+                }
+            }.onFailure { Log.w("Firestore", "users 구독 등록 실패", it) }.getOrNull()
+            awaitClose { reg?.remove() }
         })
     }
 
     override fun observeMonthOverrides(month: YearMonth): Flow<Map<String, Map<LocalDate, String>>> = flow {
         ensureAuth()
         emitAll(callbackFlow {
-            val reg = db.collection("rosterOverrides")
-                .whereGreaterThanOrEqualTo("date", month.atDay(1).toString())
-                .whereLessThanOrEqualTo("date", month.atEndOfMonth().toString())
-                .addSnapshotListener { snap, _ ->
-                    val map = snap?.documents.orEmpty()
-                        .groupBy { it.getString("uid") ?: "" }
-                        .mapValues { (_, docs) ->
-                            docs.mapNotNull { d ->
-                                runCatching {
-                                    LocalDate.parse(d.getString("date")) to (d.getString("dutyRaw") ?: "")
-                                }.getOrNull()
-                            }.toMap()
+            val reg = runCatching {
+                db.collection("rosterOverrides")
+                    .whereGreaterThanOrEqualTo("date", month.atDay(1).toString())
+                    .whereLessThanOrEqualTo("date", month.atEndOfMonth().toString())
+                    .addSnapshotListener { snap, e ->
+                        // 위 observeUsers 와 같은 이유(v1.6.86 점검 #13) — 오류를 빈 맵으로 덮어쓰면
+                        // 동료 격자의 근무변경이 통째로 사라진다.
+                        if (e != null) {
+                            Log.w("Firestore", "rosterOverrides 구독 실패", e)
+                            return@addSnapshotListener
                         }
-                    trySend(map)
-                }
-            awaitClose { reg.remove() }
+                        val map = snap?.documents.orEmpty()
+                            .groupBy { it.getString("uid") ?: "" }
+                            .mapValues { (_, docs) ->
+                                docs.mapNotNull { d ->
+                                    runCatching {
+                                        LocalDate.parse(d.getString("date")) to (d.getString("dutyRaw") ?: "")
+                                    }.getOrNull()
+                                }.toMap()
+                            }
+                        trySend(map)
+                    }
+            }.onFailure { Log.w("Firestore", "rosterOverrides 구독 등록 실패", it) }.getOrNull()
+            awaitClose { reg?.remove() }
         })
     }
 
@@ -256,22 +276,29 @@ class FirestoreMenuRepository @Inject constructor() : MenuRepository {
         ensureAuth()
         emitAll(callbackFlow {
             // 문서 ID 가 곧 날짜라 필드 대신 문서ID 범위로 자른다 — 색인이 따로 필요 없다.
-            val reg = db.collection("menus")
-                .whereGreaterThanOrEqualTo(FieldPath.documentId(), from.toString())
-                .addSnapshotListener { snap, _ ->
-                    trySend(
-                        snap?.documents.orEmpty().mapNotNull { d ->
-                            val date = runCatching { LocalDate.parse(d.id) }.getOrNull()
-                                ?: return@mapNotNull null
-                            @Suppress("UNCHECKED_CAST")
-                            val cells = (d.get("cells") as? List<*>)?.map { it as? String ?: "" }
-                                ?: return@mapNotNull null
-                            if (cells.size != WeeklyMenu.CELLS) return@mapNotNull null
-                            date to cells
-                        }.toMap()
-                    )
-                }
-            awaitClose { reg.remove() }
+            val reg = runCatching {
+                db.collection("menus")
+                    .whereGreaterThanOrEqualTo(FieldPath.documentId(), from.toString())
+                    .addSnapshotListener { snap, e ->
+                        // 같은 이유(v1.6.86 점검 #13) — 오류를 빈 맵으로 흘리면 식단표가 "없음"으로 보인다.
+                        if (e != null) {
+                            Log.w("Firestore", "menus 구독 실패", e)
+                            return@addSnapshotListener
+                        }
+                        trySend(
+                            snap?.documents.orEmpty().mapNotNull { d ->
+                                val date = runCatching { LocalDate.parse(d.id) }.getOrNull()
+                                    ?: return@mapNotNull null
+                                @Suppress("UNCHECKED_CAST")
+                                val cells = (d.get("cells") as? List<*>)?.map { it as? String ?: "" }
+                                    ?: return@mapNotNull null
+                                if (cells.size != WeeklyMenu.CELLS) return@mapNotNull null
+                                date to cells
+                            }.toMap()
+                        )
+                    }
+            }.onFailure { Log.w("Firestore", "menus 구독 등록 실패", it) }.getOrNull()
+            awaitClose { reg?.remove() }
         })
     }
 
