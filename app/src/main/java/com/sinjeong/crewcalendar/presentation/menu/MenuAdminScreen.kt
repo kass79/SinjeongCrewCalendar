@@ -482,7 +482,12 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
                 Text("${date.monthValue}/${date.dayOfMonth}(${WeeklyMenu.DAY_LABELS[d]}) ${meal.label}")
             },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // M3 AlertDialog 의 text 슬롯은 스스로 스크롤하지 않는다 — 키보드가 올라오거나
+                // 글자 배율을 키우면 입력칸 아래가 잘려 [확인]이 안 보였다(v1.6.86 점검 #9).
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
                         "메뉴 한 줄에 하나씩. 엔터로 줄을 바꿉니다.",
                         style = MaterialTheme.typography.labelSmall,
@@ -509,7 +514,11 @@ fun MenuAdminScreen(onBack: () -> Unit, vm: MenuAdminViewModel = hiltViewModel()
             onDismissRequest = { pasting = false },
             title = { Text("글자 붙여넣기") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // 위 편집 다이얼로그와 같은 이유(v1.6.86 점검 #9) — 안내문이 길어 더 잘 잘린다.
+                Column(
+                    Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     Text(
                         "한글파일·PDF·문자에서 표를 복사해 붙여넣으세요. 표를 통째로 복사한 것(탭이 " +
                             "들어간 글자)이 가장 잘 나뉩니다. 목록만 있을 때는 칸과 칸 사이를 " +
