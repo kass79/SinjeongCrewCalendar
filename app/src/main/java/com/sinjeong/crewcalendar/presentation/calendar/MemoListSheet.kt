@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -114,7 +115,9 @@ private fun MemoRow(day: DaySchedule, onClick: () -> Unit) {
             color = if (day.holidayName != null || day.date.dayOfWeek.value == 7) duty.sunday
             else MaterialTheme.colorScheme.onSurface,
             maxLines = 1, softWrap = false,
-            modifier = Modifier.width(62.dp),
+            // 글자 배율 1.5배에서 "12일 (수)"가 62dp에 안 들어가 잘렸다(v1.6.86 점검 #4).
+            // 고정폭 대신 최소폭 — 배율이 커지면 칸이 같이 늘어난다.
+            modifier = Modifier.widthIn(min = 62.dp),
         )
         // 근무 — 달력 칸과 **같은 색 규칙**(dutyCellColors)이라 색으로도 같은 날을 찾는다.
         Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
