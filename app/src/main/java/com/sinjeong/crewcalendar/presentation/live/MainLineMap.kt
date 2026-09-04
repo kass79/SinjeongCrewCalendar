@@ -198,6 +198,15 @@ private val BadgeSky = Color(0xFFA9DCF5)
 private val BadgeInk = Color(0xFF0A2036)
 private val MineYellow = Color(0xFFFFE14D)
 private val MineInk = Color(0xFFB3261E)
+
+/**
+ * **신도림·성수** — 사용자(기관사) 확정: *"신도림역, 성수역이 중요하니까 조금 더 크게 다른
+ * 색상으로"*. 둘 다 지선이 갈라지는 역이라 승무원에게 기준점이다.
+ *
+ * 주황이다 — 내 열차 노랑([MineYellow])·열차 서 있는 역 빨강([StationRed])과 안 헷갈린다.
+ */
+private val KeyOrange = Color(0xFFFFB74D)
+private val KEY_STATIONS = setOf("신도림", "성수")
 private val Dim = Color(0xFF8FA9C4)
 private const val TAG = "BranchLive"
 
@@ -837,16 +846,33 @@ private fun DrawScope.layoutLabels(
     val step = 11.dp.toPx()
     val placed = mutableListOf<Lab>()
 
-    // 윗변·아랫변(대각선) 먼저 → 좌·우변(가로). 밀려나는 쪽이 소수가 되게 하는 순서다.
-    val order = (0 until LOOP_N).sortedBy { k -> if (k < TOP_N || k in (TOP_N + RIGHT_N) until (TOP_N + RIGHT_N + BOTTOM_N)) 0 else 1 }
+    // **신도림·성수 먼저** → 윗변·아랫변(대각선) → 좌·우변(가로).
+    // 먼저 놓는 쪽이 자리를 지킨다 — 두 중요 역은 아무 라벨에도 안 밀리고, 나머지가 피해 간다.
+    // (배지에는 여전히 비켜선다. 배지는 이미 자리가 정해진 장애물이라 그 위에 겹쳐 놓으면
+    //  주황 이름이 배지 밑에 깔린다.)
+    // 그다음이 대각선인 건 밀려나는 쪽이 소수가 되게 하는 종전 순서 그대로다.
+    val order = (0 until LOOP_N).sortedBy { k ->
+        when {
+            Line2Stations.MAIN[(k + start) % LOOP_N] in KEY_STATIONS -> 0
+            k < TOP_N || k in (TOP_N + RIGHT_N) until (TOP_N + RIGHT_N + BOTTOM_N) -> 1
+            else -> 2
+        }
+    }
 
     for (k in order) {
         val name = Line2Stations.MAIN[(k + start) % LOOP_N]
         val red = k in occupied
+        val key = name in KEY_STATIONS
         val layout = tm.measure(name, TextStyle(
-            fontSize = sizeSp.sp,
-            fontWeight = if (red) FontWeight.ExtraBold else FontWeight.Medium,
-            color = if (red) Color(0xFFFFD9D4) else Color.White))
+            // 중요 역만 +2sp·굵게·주황(사용자 확정). 열차가 서 있어도 주황이 이긴다 —
+            // 빨간 점이 이미 그 말을 하고 있다.
+            fontSize = (if (key) sizeSp + 2f else sizeSp).sp,
+            fontWeight = if (key || red) FontWeight.ExtraBold else FontWeight.Medium,
+            color = when {
+                key -> KeyOrange
+                red -> Color(0xFFFFD9D4)
+                else -> Color.White
+            }))
         val (p, _) = loop.at(loop.sOf(k))
         val onTop = k < TOP_N
         val onRight = k in TOP_N until (TOP_N + RIGHT_N)
@@ -948,8 +974,12 @@ private fun DrawScope.drawCabLoop(
     for (k in 0 until LOOP_N) {
         val (p, _) = loop.at(loop.sOf(k))
         val red = k in occupied
-        drawCircle(if (red) StationRed else StationWhite, (if (big) 5f else 4f).dp.toPx(), p)
-        if (red) drawCircle(Color.White.copy(alpha = 0.55f), (if (big) 5f else 4f).dp.toPx(), p,
+        // 신도림·성수는 지름 1.5배 + 흰 테두리 — 이름과 같은 주황이라 멀리서도 짚인다.
+        val key = Line2Stations.MAIN[(k + start) % LOOP_N] in KEY_STATIONS
+        val rad = (if (big) 5f else 4f).dp.toPx() * (if (key) 1.5f else 1f)
+        drawCircle(if (red) StationRed else if (key) KeyOrange else StationWhite, rad, p)
+        if (key || red) drawCircle(
+            if (key) Color.White else Color.White.copy(alpha = 0.55f), rad, p,
             style = Stroke(width = 1.5.dp.toPx()))
     }
     // ── 열차 자리를 **라벨보다 먼저** 잡는다 ────────────────
