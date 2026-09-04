@@ -934,30 +934,49 @@ private fun DrawScope.layoutLabels(
         // (±77dp)는 두 가지로 틀렸다 — 성기어서 배지 사이 빈틈을 놓쳤고(실측: 가로에서
         // `강변`이 `건대입구` 위에 올라탔다), 이웃 역을 지나칠 만큼 멀어서 **순서가 뒤집혔다**
         // (실측: `구의`가 `건대입구` 위로 올라가 앉았다 — 기관사에게는 틀린 그림이다).
-        // 윗변·아랫변은 종전 그대로 — 루프 안쪽 높이가 ≈163dp 뿐이라 더 깊이 밀면 맞은편과 만난다.
+        //
+        // ⚠ 윗변·아랫변은 **루프 세로 한가운데까지** 밀 수 있게 열어 뒀다(횟수 상한은 사실상
+        // 안전장치). 종전 14칸(154dp)은 폰 기준이라 **폴드 펼침에서 모자랐다** — 펼침은 윗변
+        // 17역이 30dp 간격으로 붙는데 안쪽 높이는 ≈530dp 라, 열어 주면 부채꼴로 다 펴진다
+        // (실측: 14칸에서는 `을지로4가`·`동대문역사문화공원`·`상왕십리`가 서로 포갰다).
         val alternate = !(onTop || onBottom)
         val pad = 3.dp.toPx()
         val step = if (alternate) 6.dp.toPx() else 11.dp.toPx()
-        val maxTries = if (alternate) 12 else 14
-        // 화면 밖으로 나가는 자리는 후보에서 뺀다.
+        val maxTries = if (alternate) 12 else 48
         val half = layout.size.height / 2f + pad
-        var tries = 0
-        fun ok(): Boolean {
-            if (lab.pivot.y < half || lab.pivot.y > size.height - half) return false
-            val q = lab.quad(pad)
-            return obstacles.none { overlaps(it.quad(), q) } &&
-                placed.none { overlaps(it.quad(pad), q) }
+        fun inBounds(): Boolean {
+            val y = lab.pivot.y
+            // 화면 밖으로 나가는 자리는 후보에서 뺀다.
+            if (y < half || y > size.height - half) return false
+            // 윗변·아랫변은 가운데를 넘지 않는다 — 넘으면 맞은편 변 라벨과 만난다.
+            return when {
+                onTop -> y <= size.height / 2f
+                onBottom -> y >= size.height / 2f
+                else -> true
+            }
         }
-        while (tries < maxTries && !ok()) {
-            tries++
-            val d = if (alternate) (if (tries % 2 == 1) 1f else -1f) * ((tries + 1) / 2) * step
-                    else tries * step
-            lab.pivot = Offset(pivot.x + push.x * d, pivot.y + push.y * d)
+        fun search(withBadges: Boolean): Boolean {
+            lab.pivot = pivot
+            var t = 0
+            while (t < maxTries) {
+                val q = lab.quad(pad)
+                if (inBounds() && placed.none { overlaps(it.quad(pad), q) } &&
+                    (!withBadges || obstacles.none { overlaps(it.quad(), q) })) return true
+                t++
+                val d = if (alternate) (if (t % 2 == 1) 1f else -1f) * ((t + 1) / 2) * step
+                        else t * step
+                // ⚠ 가로로 흘리는 건 **모서리 회피용**이지 이동 수단이 아니다 — 여덟 칸에서
+                // 멈춘다. 안 그러면 깊이 밀린 긴 이름이 루프 반대편 변까지 건너간다
+                // (실측: 펼침에서 `동대문역사문화공원`이 왼쪽 세로변 위로 올라탔다).
+                val dx = if (d > 8f * step) 8f * step else d
+                lab.pivot = Offset(pivot.x + push.x * dx, pivot.y + push.y * d)
+            }
+            return false
         }
-        // 끝내 빈자리가 없으면 **제자리에 두고 배지 위에** 그린다([Lab.over]). 역 이름은
-        // 지도의 좌표계라서 자리를 옮기거나 숨기면 그림이 틀리고, 사용자 요구는
-        // *"텍스트가 겹쳐서 안 보이게 하는 일은 없도록"* 이다 — 가릴 거면 열번 쪽을 가린다.
-        if (tries == maxTries) { lab.pivot = pivot; lab.over = true }
+        // 1차는 배지까지 피한다. 못 찾으면 2차 — **배지는 포기하고 라벨끼리만** 안 겹치게 잡고
+        // 그 라벨은 배지 **위에** 그린다([Lab.over]). 사용자 요구가
+        // *"텍스트가 겹쳐서 안 보이게 하는 일은 없도록"* 이라, 가릴 거면 열번 쪽을 가린다.
+        if (!search(true)) { lab.over = true; if (!search(false)) lab.pivot = pivot }
         placed += lab
     }
     return placed
@@ -1077,9 +1096,16 @@ private fun DrawScope.drawCabLoop(
 
     // 라벨 글자는 **11sp 아래로 내리지 않는다**(사용자: 가독성). 좁으면 겹침 회피로 푼다.
     fun draw(lab: Lab) = rotate(lab.deg, pivot = lab.pivot) {
-        drawText(lab.layout, topLeft = Offset(
-            if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width,
-            lab.pivot.y - lab.layout.size.height / 2f))
+        val x = if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width
+        val y = lab.pivot.y - lab.layout.size.height / 2f
+        // 배지 위에 얹히는 라벨은 **바탕을 깔아** 하늘색 배지 위에서도 읽히게 한다.
+        if (lab.over) drawRoundRect(
+            CabNavy.copy(alpha = 0.85f),
+            topLeft = Offset(x - 3.dp.toPx(), y - 1.dp.toPx()),
+            size = Size(
+                lab.layout.size.width + 6.dp.toPx(), lab.layout.size.height + 2.dp.toPx()),
+            cornerRadius = CornerRadius(4.dp.toPx()))
+        drawText(lab.layout, topLeft = Offset(x, y))
     }
     // 빈자리를 못 찾은 라벨([Lab.over])만 배지 뒤로 미뤄 **위에** 그린다.
     val labs = layoutLabels(tm, loop, start, occupied, labelSp, badgeRects)
