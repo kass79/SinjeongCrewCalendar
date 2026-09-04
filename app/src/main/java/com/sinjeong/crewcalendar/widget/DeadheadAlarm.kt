@@ -81,29 +81,38 @@ object DeadheadAlarm {
 
     private fun prefs(ctx: Context) = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
 
+    /**
+     * 저장 문자열 한 줄 → (날짜·구간) to [Alarm]. 못 읽으면 null(그 줄만 버린다).
+     *
+     * v1.6.29에서 `"날짜|시각|문구"` → `"날짜|구간|시각|문구"`로 늘렸다. 옛 저장분은 둘째 칸이
+     * 시각(`:` 포함)이라 그것으로 구분해 **전반**으로 읽는다 — 업데이트 전에 켜 둔 알람도
+     * 그대로 살아난다.
+     *
+     * `Context`를 안 쓰는 순수 함수로 뽑아 뒀다(v1.6.86 점검 #12) — 이 왕복이 깨지면 켜 둔
+     * 알람이 통째로 사라지는데, 종전엔 [entries] 안에 묻혀 있어 테스트가 못 닿았다.
+     */
+    internal fun decode(s: String): Pair<Pair<LocalDate, Int>, Alarm>? = runCatching {
+        val p = s.split('|', limit = 4)
+        val legacy = ':' in p[1]
+        val leg = if (legacy) LEG_FIRST else p[1].toInt()
+        val at = LocalTime.parse(if (legacy) p[1] else p[2])
+        (LocalDate.parse(p[0]) to leg) to Alarm(at, p.getOrElse(if (legacy) 2 else 3) { "" })
+    }.getOrNull()
+
+    /** [decode]의 짝. 쓸 때는 늘 새 4칸 형식이다 — 옛 3칸으로는 다시 안 쓴다. */
+    internal fun encode(key: Pair<LocalDate, Int>, a: Alarm) =
+        "${key.first}|${key.second}|${a.at}|${a.text}"
+
     /** 지난 날짜는 읽을 때 걷어낸다 — 목록이 무한히 자라지 않게 */
     private fun entries(ctx: Context): Map<Pair<LocalDate, Int>, Alarm> =
         prefs(ctx).getStringSet(KEY, emptySet()).orEmpty()
-            .mapNotNull { s ->
-                runCatching {
-                    // v1.6.29에서 "날짜|시각|문구" → "날짜|구간|시각|문구"로 늘렸다.
-                    // 옛 저장분은 둘째 칸이 시각(`:` 포함)이라 그것으로 구분해 전반으로 읽는다.
-                    val p = s.split('|', limit = 4)
-                    val legacy = ':' in p[1]
-                    val leg = if (legacy) LEG_FIRST else p[1].toInt()
-                    val at = LocalTime.parse(if (legacy) p[1] else p[2])
-                    (LocalDate.parse(p[0]) to leg) to Alarm(at, p.getOrElse(if (legacy) 2 else 3) { "" })
-                }.getOrNull()
-            }
+            .mapNotNull(::decode)
             .filter { it.first.first >= LocalDate.now() }
             .toMap()
 
     private fun save(ctx: Context, m: Map<Pair<LocalDate, Int>, Alarm>) =
         prefs(ctx).edit()
-            .putStringSet(
-                KEY,
-                m.map { (k, v) -> "${k.first}|${k.second}|${v.at}|${v.text}" }.toSet(),
-            )
+            .putStringSet(KEY, m.map { (k, v) -> encode(k, v) }.toSet())
             .apply()
 
     /** 그 날짜·구간에 예약된 시각 (없으면 null) — 상세시트 칩 상태가 이 값 하나로 정해진다 */
