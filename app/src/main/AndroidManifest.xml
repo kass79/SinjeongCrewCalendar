@@ -17,7 +17,10 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- 구글 캘린더 동기화는 Calendar REST API(인터넷)로 하며 CalendarContract를 쓰지 않으므로
          READ_CALENDAR/WRITE_CALENDAR는 필요 없습니다. VIBRATE도 호출부 0건이라 제거(v1.6.18). -->
-    <!-- 출근 1시간 전 브리핑: 정확 알람(12~13 기본허용, 14+는 setWindow 폴백) + 부팅 후 재등록 -->
+    <!-- 출근 1시간 전 브리핑: 정확 알람(12~13 기본허용, 14+는 사용자가 켜야 함).
+         권한이 없으면 부정확 창으로 대신 걸지 않고 **아예 예약하지 않는다**(v1.6.32 —
+         setWindow 폴백은 Doze에서 통째로 밀려 "예약됨인데 안 울림"을 만들었다).
+         부팅 후에는 BriefingReceiver 가 BOOT_COMPLETED 를 받아 다시 등록한다. -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 편승 알람을 잠금화면 위 전체화면으로 띄운다(v1.6.32). 14+는 사용자가 끌 수 있고,

@@ -399,9 +399,9 @@ fun WeatherChip(modifier: Modifier = Modifier) {
     // v1.6.36 에뮬 확인에서 정규식 하나(ICU 문법)로 실제 FATAL 이 났다.
     //
     // **key 에 설정값을 넣지 마라(v1.6.68에서 일부러 뺐다).** 설정은 NavHost 의 다른 목적지고
-    // (MainActivity: 탭 이동이 `popUpTo(startDestination){saveState}` + `restoreState`),
-    // 달력 목적지는 탭을 옮기는 순간 백스택에서 빠지며 **dispose 된다** — restoreState 가 되살리는 건
-    // rememberSaveable/ViewModel 이지 composition 이 아니다. 그래서 달력으로 돌아오면 이 블록이
+    // (MainActivity: 탭 이동이 `popUpTo(startDestination)` + `launchSingleTop` — 저장·복원은
+    // v1.6.68에서 뺐다), 달력 목적지는 탭을 옮기는 순간 백스택에서 빠지며 **dispose 된다**.
+    // 탭을 오가도 살아남는 건 ViewModel 이지 composition 이 아니다. 그래서 달력으로 돌아오면 이 블록이
     // 처음부터 다시 돌고, [gridOf] 가 설정을 새로 읽어 격자가 바뀌면 [WxCache] 가 알아서 값을 버린다.
     // key 를 늘리면 매 컴포지션마다 SharedPreferences 를 읽으면서 얻는 건 하나도 없다.
     LaunchedEffect(granted) {
