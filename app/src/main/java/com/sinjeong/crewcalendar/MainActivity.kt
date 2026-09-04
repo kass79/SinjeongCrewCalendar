@@ -5,7 +5,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.height
@@ -43,7 +42,6 @@ import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
 import com.sinjeong.crewcalendar.presentation.menu.MenuAdminScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
-import com.sinjeong.crewcalendar.presentation.timetable.DeadheadScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
@@ -171,7 +169,8 @@ private fun AppRoot() {
             composable(Tab.Calendar.route) {
                 MainCalendarScreen(onOpenMenuAdmin = { nav.navigate("menuAdmin") })
             }
-            composable("deadhead") { DeadheadScreen(onBack = { nav.popBackStack() }) }
+            // "deadhead" 라우트·DeadheadScreen 은 v1.6.86에서 삭제. 편승시각표는 달력 상세시트의
+            // 전체화면 행로표(`fullTimetable = "tt_deadhead"`)로 이미 대체돼 navigate 호출이 0건이었다.
             composable(Tab.Mates.route) { MatesScreen() }
             composable(Tab.Settings.route) {
                 SettingsScreen(
@@ -184,17 +183,5 @@ private fun AppRoot() {
             composable("admin") { AdminScreen(onBack = { nav.popBackStack() }) }
             composable("menuAdmin") { MenuAdminScreen(onBack = { nav.popBackStack() }) }
         }
-    }
-}
-
-/** 후속 구현 예정 화면 자리 */
-@Composable
-private fun PlaceholderScreen(title: String) {
-    Box {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleLarge,
-            modifier = Modifier.padding(24.dp),
-        )
     }
 }

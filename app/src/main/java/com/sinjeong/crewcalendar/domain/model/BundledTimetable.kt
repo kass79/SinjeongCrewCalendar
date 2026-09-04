@@ -5,8 +5,7 @@ import java.time.LocalTime
 
 /** 신정지선(양천구청역) 신도림행 외선 시각표 — 편승 참고용. 시 -> 분 목록 (평일/휴일). */
 object BundledTimetable {
-    val TITLE = "신정지선 편승시각표"
-    val SUBTITLE = "양천구청역 · 신도림행(외선)"
+    // TITLE·SUBTITLE 은 v1.6.86에서 삭제 — 유일한 소비자였던 DeadheadScreen 이 같이 사라졌다.
     data class Row(val hour: Int, val weekday: List<Int>, val holiday: List<Int>)
     val ROWS: List<Row> = listOf(
         Row(5,  listOf(36,52), listOf(36,52)),

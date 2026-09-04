@@ -94,8 +94,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun MainCalendarScreen(
-    onOpenTimetable: () -> Unit = {},
-    onOpenDeadhead: () -> Unit = {},
+    // onOpenTimetable/onOpenDeadhead 파라미터는 v1.6.86에서 삭제 — 호출부가 기본값만 쓰고
+    // 본문에선 CalendarGrid 에 새 람다를 따로 넘겨(전체화면 행로표) 한 번도 안 읽혔다.
     /** 식단표가 비었을 때 관리자에게만 보이는 "올리기" 버튼이 여기로 간다(v1.6.80) */
     onOpenMenuAdmin: () -> Unit = {},
     viewModel: MainCalendarViewModel = hiltViewModel(),
