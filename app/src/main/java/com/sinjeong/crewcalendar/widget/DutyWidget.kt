@@ -57,7 +57,7 @@ class DutyWidget : GlanceAppWidget() {
     override val sizeMode = SizeMode.Responsive(setOf(TINY, MID_SHORT, MID, WIDE_SHORT, WIDE))
 
     companion object {
-        /** "화|28|5|0;수|29|휴3|1;…" — 요일|일자|근무|빨강(일요일·공휴일). 비면 빈 상태 */
+        /** 요일\|일자\|근무\|빨강\|타입\|시각 (직렬화는 [encodeStrip]/[decodeStrip]). 비면 빈 상태 */
         val KEY_WEEK = stringPreferencesKey("week_strip")
 
         /** 예: "오늘 출근 07:47" (없으면 빈 문자열) */
@@ -75,8 +75,6 @@ class DutyWidget : GlanceAppWidget() {
         private val WIDE = DpSize(340.dp, 84.dp)
     }
 
-    private data class Cell(val dow: String, val day: String, val duty: String, val red: Boolean)
-
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             // 앱과 **같은 강조색**을 쓴다(v1.6.41). 인자 없는 `GlanceTheme`는 Android 12+ 에서
@@ -89,10 +87,7 @@ class DutyWidget : GlanceAppWidget() {
                 ),
             ) {
                 val prefs = currentState<androidx.datastore.preferences.core.Preferences>()
-                val cells = prefs[KEY_WEEK].orEmpty().split(";").mapNotNull { rec ->
-                    val p = rec.split("|")
-                    if (p.size == 4) Cell(p[0], p[1], p[2], p[3] == "1") else null
-                }
+                val cells = decodeStrip(prefs[KEY_WEEK].orEmpty())
                 val sub = prefs[KEY_SUB].orEmpty()
 
                 val size = LocalSize.current

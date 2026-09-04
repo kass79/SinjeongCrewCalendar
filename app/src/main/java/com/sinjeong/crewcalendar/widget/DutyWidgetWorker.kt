@@ -40,13 +40,21 @@ class DutyWidgetWorker @AssistedInject constructor(
         val byDate = days.associateBy { it.date }
 
         val dow = DateTimeFormatter.ofPattern("E", Locale.KOREAN)
-        val strip = week.joinToString(";") { date ->
+        fun hhmm(h: Int, m: Int) = "%02d:%02d".format(h % 24, m)
+        val cells = week.map { date ->
             val d = byDate[date]
             val red = date.dayOfWeek == DayOfWeek.SUNDAY || d?.holidayName != null
-            // 구분자와 충돌할 값은 애초에 없지만, 들어와도 파싱이 깨지지 않게 제거
-            val duty = d?.duty?.display.orEmpty().replace(Regex("[|;]"), "")
-            "${date.format(dow)}|${date.dayOfMonth}|$duty|${if (red) 1 else 0}"
+            val signOn = d?.signOn?.split(":")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.size == 2 }
+            val time = when {
+                signOn != null -> "출근 " + hhmm(signOn[0], signOn[1])
+                d != null -> runCatching {
+                    com.sinjeong.crewcalendar.domain.model.BundledTimetable.advise(d.duty, date).at
+                }.getOrNull()?.let { "편승 " + hhmm(it.hour, it.minute) }.orEmpty()
+                else -> ""
+            }
+            Cell(date.format(dow), date.dayOfMonth.toString(), d?.duty?.display.orEmpty(), red, d?.duty?.type, time)
         }
+        val strip = encodeStrip(cells)
         // 근무 미선택·로그아웃이면 빈 문자열 → 위젯이 빈 상태 문구를 그린다
         val hasDuty = week.any { byDate[it]?.duty?.display?.isNotBlank() == true }
 
