@@ -74,6 +74,9 @@ import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WeatherChip
 import com.sinjeong.crewcalendar.widget.AlarmPermission
 import com.sinjeong.crewcalendar.widget.DeadheadAlarm
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -107,6 +110,7 @@ fun MainCalendarScreen(
         ThemeMode.SYSTEM -> systemDark
     }
     val snackbar = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
     var fullTimetable by remember { mutableStateOf<Pair<String, String>?>(null) }  // (asset, title)
     // 침실배정표(v1.6.74) — 열려 있는 조합. null이면 닫힘. 처음엔 오늘 조합으로 열고 칩으로 갈아탄다.
@@ -207,12 +211,19 @@ fun MainCalendarScreen(
                         )
                     }
                     IconButton(
+                        // PNG 그리기는 6주 달력 1080x~1100px 비트맵이라 **UI 스레드에서 하면 안 된다**
+                        // (v1.6.86 점검 #3) — IO로 옮기고, 실패하면 조용히 넘기지 말고 스낵바로 알린다.
+                        // 공유 시트 띄우기(`shareMonthImage`)는 Activity 호출이라 메인에 남긴다.
                         onClick = {
-                            runCatching {
-                                val uri = com.sinjeong.crewcalendar.util.renderMonthImage(
-                                    context, state.month, state.days, state.user?.name ?: "내",
-                                )
-                                com.sinjeong.crewcalendar.util.shareMonthImage(context, uri)
+                            scope.launch {
+                                runCatching {
+                                    val uri = withContext(Dispatchers.IO) {
+                                        com.sinjeong.crewcalendar.util.renderMonthImage(
+                                            context, state.month, state.days, state.user?.name ?: "내",
+                                        )
+                                    }
+                                    com.sinjeong.crewcalendar.util.shareMonthImage(context, uri)
+                                }.onFailure { snackbar.showSnackbar("공유하지 못했습니다") }
                             }
                         },
                         modifier = Modifier.size(36.dp),
