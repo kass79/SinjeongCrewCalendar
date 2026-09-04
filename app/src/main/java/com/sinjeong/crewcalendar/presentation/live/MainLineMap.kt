@@ -488,22 +488,28 @@ private val WEEKDAYS = listOf("월", "화", "수", "목", "금", "토", "일")
 /**
  * 후보 열번 줄이기 — 지선 다이아는 한 근무가 **스무 개 넘는 열번**을 잡아서 그대로 이으면
  * 헤더 한 줄을 통째로 먹는다(실측: `5668·5669·…·5527` 20개가 화면 세로를 다 채웠다).
+ *
+ * v1.6.88 에서 헤더·상태바가 **한 줄**이 되며 넷 → 둘로 줄였다. 넘쳐서 `Ellipsis` 가 걸리면
+ * 뒤의 `외 N개` 부터 잘려 **몇 대인지도 모르게** 되기 때문이다.
  */
 private fun shortNos(nos: List<String>): String =
-    nos.take(4).joinToString("·") + if (nos.size > 4) " 외 " + (nos.size - 4) + "개" else ""
+    nos.take(2).joinToString("·") + if (nos.size > 2) " 외 " + (nos.size - 2) + "개" else ""
 
 /**
- * 내 열차 한 줄 — 헤더와 상태바가 같은 글을 쓴다. `null` = 후보조차 없다.
+ * 헤더 한 줄의 **앞 토막** — 잘리면 안 되는 것들. `null` = 후보 열번조차 없다.
+ *
+ * 열번·방향·지연·다음 역을 앞에 둔다(사용자 요청: *"노선 공간을 조금 더"* → 헤더가 한 줄이
+ * 되면서 넘칠 수 있는데, 잘려도 되는 건 **현재 역·상태**뿐이다 — 그건 지도에 빨간 점으로도
+ * 나온다).
  *
  * [delay]·[nextSec] 는 [Line2Timetable] 이 준 값이고 **시간표에 열번이 없으면 null** 이라
  * 그 두 토막만 조용히 빠진다(없는 값을 지어내지 않는다 — [MyTrain] KDoc 과 같은 규칙).
  */
-private fun mineLine(
+private fun mineHead(
     mineMark: MainTrainMark?, candidates: List<String>, delay: Int?, nextSec: Int?,
 ): String? = when {
     mineMark != null ->
         "내 열차 " + mineMark.trainNo + " · " + (if (mineMark.inner) "내선" else "외선") +
-            " · " + mineMark.statusText +
             delay?.let {
                 when {
                     it > 0 -> " · +${it}분 지연"
@@ -514,11 +520,31 @@ private fun mineLine(
             nextSec?.let {
                 if (it <= 0) " · 곧 도착" else " · 다음 역 ${(it + 59) / 60}분 후"
             }.orEmpty()
-    candidates.isNotEmpty() -> "내 열차 미검출 (운행 전/후) · " + shortNos(candidates)
+    candidates.isNotEmpty() -> "내 열차 미검출(운행 전/후)"
     else -> null
 }
 
-/** 좌: 소제목 · 우: 날짜 + 큰 노란 디지털 시계, 그 아래 내 열차 한 줄. */
+/** 헤더 한 줄의 **뒤 토막** — 자리가 모자라면 여기부터 `Ellipsis` 로 잘린다. */
+private fun mineTail(mineMark: MainTrainMark?, candidates: List<String>): String = when {
+    // ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(MyTrain KDoc).
+    // API 가 준 역명(statnNm)과 상태(trainSttus)만 그대로 옮긴다.
+    mineMark != null -> mineMark.statusText
+    candidates.isNotEmpty() -> "오늘 열번 " + shortNos(candidates)
+    else -> ""
+}
+
+/**
+ * 헤더 **한 줄** (v1.6.88) — `2호선 실시간 · 09/04(금) 10:08:57 · 내 열차 2039 · 외선 ·
+ * +2분 지연 · 다음 역 3분 후 · 동대문역사문화공원 진입`, 오른쪽 끝에 닫기 X.
+ *
+ * 사용자(기관사) 요청: *"위쪽 헤더는 1줄로, 텍스트 크기를 한 단계씩만 더 줄여서 노선 공간을
+ * 조금 더 확보"*. 두 줄(제목+큰 시계 / 내 열차)을 한 줄로 접고 글자를 2sp 씩 내렸다.
+ *
+ * ⚠ 줄 높이는 이제 **닫기 단추가 정한다** — 기본 [IconButton] 은 48dp 라 글자를 줄여도
+ * 높이가 안 줄었다. 36dp 로 묶어 실제로 12dp 를 지도에 돌려준다.
+ * ⚠ 뒤 토막에만 [weight] 를 준다. `weight` 는 무게 없는 형제들을 **먼저** 재고 남은 자리를
+ * 주므로, 이렇게 두면 앞 토막과 닫기 X 가 자리를 먼저 가져가고 넘치는 건 뒤 토막뿐이다.
+ */
 @Composable
 private fun CabHeader(
     nowMillis: Long, mineMark: MainTrainMark?, candidates: List<String>,
@@ -527,40 +553,43 @@ private fun CabHeader(
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
     }
+    val sp = (if (big) 12f else 9.5f).sp
+    val mineColor = if (mineMark != null) MineYellow else Dim
     Row(
-        Modifier.fillMaxWidth().padding(start = 16.dp, top = 3.dp, end = 2.dp, bottom = 0.dp),
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
-            "2호선 실시간",
-            fontSize = if (big) 20.sp else 16.sp, fontWeight = FontWeight.Bold,
-            color = Color.White, modifier = Modifier.weight(1f),
+            "2호선 실시간 · ",
+            fontSize = sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1,
         )
-        Column(horizontalAlignment = Alignment.End) {
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    "%02d/%02d (%s)".format(
-                        t.monthValue, t.dayOfMonth, WEEKDAYS[t.dayOfWeek.value - 1]),
-                    fontSize = if (big) 15.sp else 12.sp, color = Dim,
-                    modifier = Modifier.padding(end = 10.dp, bottom = 3.dp),
-                )
-                Text(
-                    "%02d:%02d:%02d".format(t.hour, t.minute, t.second),
-                    fontSize = if (big) 30.sp else 22.sp, fontWeight = FontWeight.Bold,
-                    color = MineYellow,
-                )
-            }
-            // ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(MyTrain KDoc).
-            // API 가 준 역명(statnNm)과 상태(trainSttus)만 그대로 옮긴다.
-            mineLine(mineMark, candidates, delay, nextSec)?.let {
-                Text(
-                    it,
-                    fontSize = if (big) 14.sp else 11.5.sp, fontWeight = FontWeight.Bold,
-                    color = if (mineMark != null) MineYellow else Dim,
-                )
-            }
+        Text(
+            "%02d/%02d(%s) ".format(t.monthValue, t.dayOfMonth, WEEKDAYS[t.dayOfWeek.value - 1]),
+            fontSize = sp, color = Dim, maxLines = 1,
+        )
+        // 시계는 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
+        Text(
+            "%02d:%02d:%02d".format(t.hour, t.minute, t.second),
+            fontSize = (if (big) 14f else 11.5f).sp, fontWeight = FontWeight.Bold,
+            color = MineYellow, maxLines = 1,
+        )
+        mineHead(mineMark, candidates, delay, nextSec)?.let {
+            Text(
+                " · $it",
+                fontSize = sp, fontWeight = FontWeight.Bold, color = mineColor,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
         }
-        IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "닫기", tint = Color.White) }
+        val tail = mineTail(mineMark, candidates)
+        Text(
+            if (tail.isEmpty()) "" else " · $tail",
+            fontSize = sp, fontWeight = FontWeight.Bold, color = mineColor,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
+            Icon(Icons.Default.Close, "닫기", Modifier.size(20.dp), tint = Color.White)
+        }
     }
 }
 
