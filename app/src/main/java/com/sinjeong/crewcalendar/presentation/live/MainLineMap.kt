@@ -595,7 +595,14 @@ private fun CabHeader(
 
 /* ────────────────────────── 하단 상태바 ────────────────────────── */
 
-/** 사진의 버튼 줄 — 알약 칩. ⚠ **편성번호·전방/후방은 데이터가 없어 넣지 않는다.** */
+/**
+ * 사진의 버튼 줄 — 알약 칩. ⚠ **편성번호·전방/후방은 데이터가 없어 넣지 않는다.**
+ *
+ * v1.6.88 에서 **한 줄**로 못 박았다(사용자: *"아래쪽 헤더도 1줄"*):
+ * `[2호선] [내 열번 2039 / 오늘 열번 …] ─── [내선][외선][전체]`.
+ * 지운 것 — `내 열차 미검출`(헤더 줄과 같은 말) · `행선`(지도의 노란 깃발) ·
+ * `↻ 내선`(바로 옆 필터 칩이 이미 켜져 있다). 셋 다 **다른 데서 이미 말하고 있다.**
+ */
 @Composable
 private fun CabStatusBar(
     mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
@@ -603,9 +610,9 @@ private fun CabStatusBar(
     filter: DirFilter, onFilter: (DirFilter) -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
+        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Chip("2호선", big, LoopGreen)
         // ⚠ 정보 칩에 [weight] 를 준다. 없으면 줄이 화면보다 길어져 **오른쪽 필터 칩이
@@ -617,24 +624,16 @@ private fun CabStatusBar(
             // 양천구청 **도착** API 실패까지 합쳐 온 값이라(위치 API 는 멀쩡할 수 있다), 그대로
             // 띄우면 열차 14대를 그려 놓고 "정보를 못 받았어요"라고 말하게 된다(v1.6.84 실측).
             error != null && !hasTrains -> Chip(error, big, Color(0xFFE9A23B), modifier = shrink)
-            mineMark != null -> {
-                Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true)
-                Chip(mineMark.destName + "행", big, MineYellow, modifier = shrink)
-                Chip(if (mineMark.inner) "↻ 내선" else "↺ 외선", big, BadgeSky)
-            }
-            candidates.isNotEmpty() -> {
-                Chip("내 열차 미검출 (운행 전/후)", big, Dim, modifier = shrink)
-                // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
-                if (mine != null && !mine.riding && mine.startAt != null) {
-                    Chip(
-                        "다음 " + mine.nos.first() + " " + fmt(mine.startAt) +
-                            (if (mine.nextDay) " (익일)" else ""),
-                        big, Color(0xFFCFE3F5), modifier = shrink,
-                    )
-                } else {
-                    Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5), modifier = shrink)
-                }
-            }
+            mineMark != null -> Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true)
+            // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
+            mine != null && !mine.riding && mine.startAt != null && candidates.isNotEmpty() ->
+                Chip(
+                    "다음 " + mine.nos.first() + " " + fmt(mine.startAt) +
+                        (if (mine.nextDay) " (익일)" else ""),
+                    big, Color(0xFFCFE3F5), modifier = shrink,
+                )
+            candidates.isNotEmpty() ->
+                Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5), modifier = shrink)
             else -> Chip("오늘 근무 열번: 없음", big, Dim)
         }
         // 오른쪽 끝에 방향 필터. 기본은 내 열차 방향이라 처음 열면 이미 한쪽이 켜져 있다.
@@ -659,7 +658,8 @@ private fun Chip(
 ) {
     Text(
         text,
-        fontSize = if (big) 14.sp else 11.5.sp, fontWeight = FontWeight.Bold,
+        // v1.6.88 한 단계 축소(14→12.5 / 11.5→10) — 상태바 한 줄에 필터까지 다 들어가야 한다.
+        fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
         color = if (fill) MineInk else tint,
         maxLines = 1, overflow = TextOverflow.Ellipsis,
         // 누를 수 있는 칩만 클릭 영역을 만든다 — 나머지는 종전대로 그냥 글씨다.
