@@ -35,6 +35,11 @@ class WeeklyHoursTest {
         assertEquals(WeeklyHours.minutesOf(d(2026, 9, 4, "1")), WeeklyHours.minutesOf(d(2026, 9, 4, "충당 1")))
     }
 
+    @Test fun `휴일 운휴 다이아는 0`() {       // 2026-09-20(일) 26번 — 휴일 행로표·시각표에 없다(달력도 `운휴`)
+        assertEquals(0, WeeklyHours.minutesOf(d(2026, 9, 20, "26")))
+        assertEquals(9 * 60 + 55, WeeklyHours.minutesOf(d(2026, 9, 21, "26")))  // 평일은 계 그대로
+    }
+
     @Test fun `교육은 미정`() { assertNull(WeeklyHours.minutesOf(d(2026, 9, 4, "교육"))) }
 
     @Test fun `야간은 시작일 주에 전부`() {         // 2026-09-09(수) 야간 44(평평) → 그 주에 계 전부, 9/10(~)은 0
