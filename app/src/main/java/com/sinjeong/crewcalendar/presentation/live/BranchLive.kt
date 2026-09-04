@@ -115,6 +115,10 @@ internal data class MainTrainMark(
     val statusText: String,
     /** 종착역명 원본(꼬리 포함) — 툴팁에 그대로 보여 준다 */
     val destName: String,
+    /** API 가 준 현재 역명(정규화 후) — 시간표 대조용. [statusText] 는 상태 낱말이 붙어 못 쓴다 */
+    val statnNm: String = "",
+    /** API 원본 상태 코드 `0진입 1도착 2출발 3전역출발` — 시간표의 어느 시각에 견줄지 고른다 */
+    val trainSttus: String = "",
 )
 
 /** 화면 한 벌 */
@@ -357,6 +361,8 @@ internal object BranchLive {
                         "3" -> " 접근 중"; else -> " 부근"
                     },
                     destName = Line2Stations.norm(r.statnTnm),
+                    statnNm = name,
+                    trainSttus = r.trainSttus,
                 )
             }
             .distinctBy { it.trainNo }
