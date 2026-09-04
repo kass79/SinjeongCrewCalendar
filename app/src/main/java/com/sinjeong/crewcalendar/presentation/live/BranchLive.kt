@@ -443,8 +443,19 @@ internal object BranchLive {
             TrainMark(r.trainNo, toSindorim, posv.coerceIn(0f, 4f), "양천구청 ${r.etaSec}초 전")
         }.distinctBy { it.trainNo }
 
-    /** 본선 → 신도림 입고 열차: 남은 역 수 × 110초로 ETA 근사 */
-    private val MAINLINE_AWAY = mapOf("대림" to 1, "구로디지털단지" to 2, "신대방" to 3, "신림" to 4)
+    /**
+     * 본선 → 신도림 입고 열차: **남은 역 수 × 110초**로 ETA 근사.
+     *
+     * ⚠ v1.6.91 에서 신림(4역)까지였던 것을 **사당(8역)까지** 늘렸다. 창만 900초로 넓히면
+     * 아무것도 안 바뀐다 — 4역이면 최대 440초라 종전 600초 창에 **이미 다 들어왔다.**
+     * 15분(900초)을 실제로 채우려면 8역(880초)까지 봐야 한다(사용자: *"15분 이내로 .."*).
+     * 역 순서는 [Line2Stations.MAIN] 기준: 사당 → 낙성대 → 서울대입구 → 봉천 → 신림 →
+     * 신대방 → 구로디지털단지 → 대림 → 신도림.
+     */
+    private val MAINLINE_AWAY = mapOf(
+        "대림" to 1, "구로디지털단지" to 2, "신대방" to 3, "신림" to 4,
+        "봉천" to 5, "서울대입구" to 6, "낙성대" to 7, "사당" to 8,
+    )
 
     internal fun inboundFromPositions(rows: List<PositionRow>): List<InboundTrain> =
         rows.asSequence()
@@ -455,7 +466,9 @@ internal object BranchLive {
                 InboundTrain(r.trainNo,
                     (away * 110 - if (r.trainSttus == "2") 40 else 0).coerceAtLeast(30))
             }
-            .filter { it.etaSec <= 600 }
+            // 15분(900초) 이내만 남긴다. ⚠ v1.6.91 에서 10분 → **15분** — 사용자 요청
+            // *"입고 열차정보 없앤건 아니지? 15분 이내로 .."*. 칩 문구는 그대로다.
+            .filter { it.etaSec <= 900 }
             .distinctBy { it.trainNo }
             .sortedBy { it.etaSec }
             .toList()

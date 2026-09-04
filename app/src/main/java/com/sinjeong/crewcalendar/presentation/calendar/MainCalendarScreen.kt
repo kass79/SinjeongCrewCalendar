@@ -1088,15 +1088,20 @@ private fun DayDetailContent(
             }
             if (routeAsset != null) {
                 // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로.
-                // 접힘은 폭을 키워 세로를 벌고 넘치는 폭은 가로 스크롤 — 펼침은 이미 커서 1f 유지.
-                // 본선 원본이 ~2.1:1로 지선(~1.41:1)보다 납작해 같은 배율이면 세로가 덜 커진다 → 본선만 1.8배(v1.6.8)
-                val zoom = if (!compact) 1f else if (day.duty.isBranch) 1.5f else 1.8f
-                // 펼침은 폭을 더 못 키우니(가로 스크롤 나면 "한눈에"가 깨짐) 세로만 1.4배 늘려 줄 높이를 번다(v1.6.10)
+                //
+                // ⚠ **v1.6.8 결정을 v1.6.91 에서 뒤집었다.** 그땐 접힘에서 폭을 1.5~1.8배로 키워
+                // 세로를 벌고 넘치는 폭을 **가로 스크롤**로 넘겼는데, 실기기에서는 표 오른쪽이
+                // 잘려 보였다 — 사용자 *"행로표 짤리게 보이게 하지 말아죠..한눈에 가독성있게"*.
+                // 이제 **폭은 늘 1f**(가로 스크롤 없음)이고, 줄 높이는 `vStretch` 로만 번다.
+                // 본선 원본이 ~2.1:1 로 지선(~1.41:1)보다 납작해 같은 값이면 세로가 덜 커지므로
+                // 본선을 더 늘린다. 탭하면 전체화면(핀치 확대)은 그대로다.
+                val vStretch =
+                    if (!compact) 1.4f else if (day.duty.isBranch) 1.45f else 1.7f
                 RouteImageInline(
                     routeAsset,
                     bleed = if (compact) 15.dp else 10.dp,
-                    zoom = zoom,
-                    vStretch = if (compact) 1f else 1.4f,
+                    zoom = 1f,
+                    vStretch = vStretch,
                 ) { showRoute = true }
             } else {
                 if (row != null) {

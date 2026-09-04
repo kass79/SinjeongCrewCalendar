@@ -566,6 +566,29 @@ class BranchLiveTest {
     }
 
     /**
+     * **입고 안내 창 15분** (v1.6.91, 사용자 *"입고 열차정보 … 15분 이내로 .."*).
+     *
+     * ⚠ 창을 900초로 넓히는 것만으로는 아무것도 안 바뀐다 — 종전 후보가 신림(4역=440초)까지라
+     * 600초 창에 **이미 다 들어왔다.** 그래서 사당(8역=880초)까지 후보를 늘렸고, 이 테스트가
+     * 그 끝을 잠근다. 사당보다 먼 방배는 여전히 안 잡힌다(근사 오차가 커진다).
+     */
+    @Test
+    fun `입고 안내는 사당 8역까지 15분 창에 들어온다`() {
+        val far = """
+        {"errorMessage":{"status":200,"code":"INFO-000","message":"정상","total":3},"realtimePositionList":[
+        {"subwayId":"1002","subwayNm":"2호선","statnNm":"사당","trainNo":"4302","updnLine":"0","statnTid":"1002000234","statnTnm":"신도림","trainSttus":"1"},
+        {"subwayId":"1002","subwayNm":"2호선","statnNm":"봉천","trainNo":"4304","updnLine":"0","statnTid":"1002000234","statnTnm":"신도림","trainSttus":"1"},
+        {"subwayId":"1002","subwayNm":"2호선","statnNm":"방배","trainNo":"4306","updnLine":"0","statnTid":"1002000234","statnTnm":"신도림","trainSttus":"1"}
+        ]}
+        """.trimIndent()
+        val inbound = BranchLive.inboundFromPositions(BranchLive.parsePositions(far))
+        // 가까운 순. 방배(9역)는 후보 밖이라 아예 없다.
+        assertEquals(listOf("4304", "4302"), inbound.map { it.trainNo })
+        assertEquals(5 * 110, inbound[0].etaSec)
+        assertEquals(8 * 110, inbound[1].etaSec)   // 880초 — 15분(900초) 창 안
+    }
+
+    /**
      * 회송 열번(`59xx`)은 지선 선로를 타도 **승객이 못 탄다** — 편승 지도에서 뺀다.
      * 근거는 행로표(`RouteTable`): 지선 야간 다이아 꼬리 `5901`~`5907`(막차 입고)과
      * 본선 다이아 전반 첫 열번 `5922`·`5930`·`5949`·`5961`(신정기지 출고)이 전부 회송이다.
