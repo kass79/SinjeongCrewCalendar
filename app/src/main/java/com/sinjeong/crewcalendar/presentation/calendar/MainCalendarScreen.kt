@@ -1470,7 +1470,8 @@ private fun RoomChip(room: BundledRooms.Room, modifier: Modifier = Modifier) {
 private fun KvRow(key: String, value: String, sub: Boolean = false) {
     Row {
         Text(
-            key, modifier = Modifier.width(82.dp),
+            // 글자 배율 1.5배에서 키가 82dp를 넘어 잘렸다(v1.6.86 점검 #4) — 최소폭으로.
+            key, modifier = Modifier.widthIn(min = 82.dp),
             style = if (sub) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
