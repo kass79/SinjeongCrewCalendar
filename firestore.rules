@@ -219,7 +219,7 @@ service cloud.firestore {
     //    author 를 'admin' 으로 박아 둔 것도 권한이 아니라 스키마 고정이다.
     //
     // 진단 필드가 없어 6키를 hasAll+hasOnly 로 못 박았다 — menus 가 source/appVersion 을
-    // 선택으로 둔 것과 달리 이 컴렉션은 첫 버전부터 6키로 고정이다.
+    // 선택으로 둔 것과 달리 이 컬렉션은 첫 버전부터 6키로 고정이다.
     // (나중에 필드를 늘리면 **규칙을 먼저 배포**해야 새 APK 의 쓰기가 안 막힌다.)
     match /notices/{id} {
 
