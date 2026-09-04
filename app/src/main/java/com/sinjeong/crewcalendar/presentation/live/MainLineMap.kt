@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,6 +64,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
@@ -81,6 +83,7 @@ import androidx.compose.ui.window.DialogProperties
 import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
+import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.MyTrain
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
@@ -236,6 +239,16 @@ private const val LOOP_N = TOP_N + RIGHT_N + BOTTOM_N + LEFT_N   // 43
 private const val DIAG = -35f
 
 /**
+ * 방향 필터 — 한쪽만 그리면 배지가 반으로 줄어 역명·열번을 크게 쓸 수 있다.
+ *
+ * 기본값은 **내 열차 방향**이다(사용자 확정). 아직 아무 칩도 안 눌렀으면 상태는 `null` 이고
+ * 그릴 때만 내 열차에서 방향을 꺼내 쓴다 — 칩을 한 번 누르면 그 뒤로는 내 열차가 바뀌어도
+ * 사용자가 고른 값이 이긴다. (회전·접힘에서 초기값으로 돌아가는 건 `rememberSaveable`
+ * 함정 때문에 **알고 둔 대가** — 파일 KDoc 참고.)
+ */
+internal enum class DirFilter(val label: String) { INNER("내선"), OUTER("외선"), ALL("전체") }
+
+/**
  * 전체화면 순환선 지도.
  *
  * @param duty 오늘 근무 — 내 열번 판정에 쓴다. **본선·지선을 가리지 않는다**(사용자 확정).
@@ -246,6 +259,8 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
     var snap by remember { mutableStateOf(Snapshot()) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var picked by remember { mutableStateOf<String?>(null) }
+    // null = 아직 사용자가 칩을 안 눌렀다 → 아래에서 내 열차 방향으로 정한다
+    var filter by remember { mutableStateOf<DirFilter?>(null) }
 
     DisposableEffect(Unit) {
         Log.i(TAG, "본선 지도 열림 — 폴링 시작")
@@ -277,6 +292,9 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
     val mineMark = remember(candidates, shown) {
         candidates.firstNotNullOfOrNull { no -> shown.firstOrNull { it.trainNo == no } }
     }
+    val eff = filter
+        ?: mineMark?.let { if (it.inner) DirFilter.INNER else DirFilter.OUTER }
+        ?: DirFilter.ALL
 
     // ⚠ `decorFitsSystemWindows = false` 가 있어야 다이얼로그에 인셋이 **전달된다**. 없으면
     // 아래 `windowInsetsPadding` 이 0 을 받아 무효가 되고, 돌린 내용의 한쪽이 상태바·제스처바
@@ -319,11 +337,11 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
                             .graphicsLayer { rotationZ = 90f },
                     ) {
                         CabScreen(ch, inset, now, shown, mine, mineMark, candidates,
-                            snap.error, picked, { picked = it }, onDismiss)
+                            snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss)
                     }
                 } else {
                     CabScreen(ch, inset, now, shown, mine, mineMark, candidates,
-                        snap.error, picked, { picked = it }, onDismiss)
+                        snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss)
                 }
             }
         }
@@ -335,12 +353,37 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
 private fun CabScreen(
     ch: Dp, inset: PaddingValues, nowMillis: Long,
     trains: List<MainTrainMark>, mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
-    error: String?, picked: String?, onPick: (String?) -> Unit, onDismiss: () -> Unit,
+    error: String?, picked: String?, onPick: (String?) -> Unit,
+    eff: DirFilter, onFilter: (DirFilter) -> Unit, onDismiss: () -> Unit,
 ) {
     // 폴드 펼침처럼 세로가 넉넉하면 글자를 키운다(사진처럼 시원하게).
     val big = ch >= 480.dp
+    // 한 방향만 그리면 배지가 반으로 줄어드니 글자를 키운다. 겹침은 [layoutLabels] 가
+    // **측정값으로** 판정하므로 이 두 값만 바꿔도 회피가 따라온다.
+    val filtered = eff != DirFilter.ALL
+    val labelSp = if (filtered) (if (big) 16f else 13.5f) else (if (big) 14f else 11.5f)
+    val badgeSp = if (filtered) (if (big) 14.5f else 12f) else (if (big) 13f else 10.5f)
+
+    val ctx = LocalContext.current
+    val tt = remember { Line2TimetableLoader.get(ctx) }
+    val weekTag = remember(nowMillis / 60_000) {
+        Line2Timetable.weekTagOf(Line2Timetable.serviceClock(LocalDateTime.now()).first)
+    }
+    // 내 열차의 지연·다음 역 — 시간표만 보므로 **API 호출이 늘지 않는다**. 15초마다 다시 센다.
+    val (delay, nextSec) = remember(
+        mineMark?.trainNo, mineMark?.statnNm, mineMark?.trainSttus, tt, nowMillis / 15_000,
+    ) {
+        val m = mineMark; val t = tt
+        if (m == null || t == null) null to null else {
+            val (d, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
+            val w = Line2Timetable.weekTagOf(d); val io = Line2Timetable.inoutOf(m.inner)
+            val dl = t.delayMinutes(w, io, m.trainNo, m.statnNm, m.trainSttus, sec)
+            dl to dl?.let { t.secondsToNextStop(w, io, m.trainNo, m.statnNm, it, sec) }
+        }
+    }
+
     Column(Modifier.fillMaxSize().padding(inset)) {
-        CabHeader(nowMillis, mineMark, candidates, big, onDismiss)
+        CabHeader(nowMillis, mineMark, candidates, delay, nextSec, big, onDismiss)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             val d = LocalDensity.current
             // 지도 안 글자배율 상한 — 그림은 dp, 글자만 sp라 배율을 키우면 역 이름이 넘친다.
@@ -355,8 +398,13 @@ private fun CabScreen(
                     infiniteRepeatable(tween(1600, easing = LinearEasing), RepeatMode.Restart),
                     label = "pulse",
                 )
+                // 방향 필터 — **내 열차는 어느 모드에서든 그린다**(사용자 확정).
+                val drawn = trains.filter {
+                    eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
+                        it.trainNo == mineMark?.trainNo
+                }
                 // 열차마다 자리를 부드럽게 옮긴다(등속 보간은 안 한다 — 파일 KDoc)
-                val placed = trains.map { t ->
+                val placed = drawn.map { t ->
                     key(t.trainNo) {
                         val p by animateFloatAsState(
                             t.stationIdx + t.offset,
@@ -376,11 +424,12 @@ private fun CabScreen(
                         }
                     }
                 ) {
-                    hit = drawCabLoop(tm, placed, mineMark?.trainNo, pulse, big, picked)
+                    hit = drawCabLoop(tm, placed, mineMark?.trainNo, pulse, big, picked,
+                        labelSp, badgeSp)
                 }
             }
         }
-        CabStatusBar(mine, mineMark, candidates, error, trains.isNotEmpty(), big)
+        CabStatusBar(mine, mineMark, candidates, error, trains.isNotEmpty(), big, eff, onFilter)
     }
 }
 
@@ -395,11 +444,28 @@ private val WEEKDAYS = listOf("월", "화", "수", "목", "금", "토", "일")
 private fun shortNos(nos: List<String>): String =
     nos.take(4).joinToString("·") + if (nos.size > 4) " 외 " + (nos.size - 4) + "개" else ""
 
-/** 내 열차 한 줄 — 헤더와 상태바가 같은 글을 쓴다. `null` = 후보조차 없다. */
-private fun mineLine(mineMark: MainTrainMark?, candidates: List<String>): String? = when {
+/**
+ * 내 열차 한 줄 — 헤더와 상태바가 같은 글을 쓴다. `null` = 후보조차 없다.
+ *
+ * [delay]·[nextSec] 는 [Line2Timetable] 이 준 값이고 **시간표에 열번이 없으면 null** 이라
+ * 그 두 토막만 조용히 빠진다(없는 값을 지어내지 않는다 — [MyTrain] KDoc 과 같은 규칙).
+ */
+private fun mineLine(
+    mineMark: MainTrainMark?, candidates: List<String>, delay: Int?, nextSec: Int?,
+): String? = when {
     mineMark != null ->
         "내 열차 " + mineMark.trainNo + " · " + (if (mineMark.inner) "내선" else "외선") +
-            " · " + mineMark.statusText
+            " · " + mineMark.statusText +
+            delay?.let {
+                when {
+                    it > 0 -> " · +${it}분 지연"
+                    it < 0 -> " · ${-it}분 빠름"
+                    else -> " · 정시"
+                }
+            }.orEmpty() +
+            nextSec?.let {
+                if (it <= 0) " · 곧 도착" else " · 다음 역 ${(it + 59) / 60}분 후"
+            }.orEmpty()
     candidates.isNotEmpty() -> "내 열차 미검출 (운행 전/후) · " + shortNos(candidates)
     else -> null
 }
@@ -408,7 +474,7 @@ private fun mineLine(mineMark: MainTrainMark?, candidates: List<String>): String
 @Composable
 private fun CabHeader(
     nowMillis: Long, mineMark: MainTrainMark?, candidates: List<String>,
-    big: Boolean, onDismiss: () -> Unit,
+    delay: Int?, nextSec: Int?, big: Boolean, onDismiss: () -> Unit,
 ) {
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
@@ -438,7 +504,7 @@ private fun CabHeader(
             }
             // ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(MyTrain KDoc).
             // API 가 준 역명(statnNm)과 상태(trainSttus)만 그대로 옮긴다.
-            mineLine(mineMark, candidates)?.let {
+            mineLine(mineMark, candidates, delay, nextSec)?.let {
                 Text(
                     it,
                     fontSize = if (big) 14.sp else 11.5.sp, fontWeight = FontWeight.Bold,
@@ -457,6 +523,7 @@ private fun CabHeader(
 private fun CabStatusBar(
     mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
     error: String?, hasTrains: Boolean, big: Boolean,
+    filter: DirFilter, onFilter: (DirFilter) -> Unit,
 ) {
     Row(
         Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 5.dp),
@@ -489,13 +556,20 @@ private fun CabStatusBar(
             }
             else -> Chip("오늘 근무 열번: 없음", big, Dim)
         }
+        // 오른쪽 끝에 방향 필터. 기본은 내 열차 방향이라 처음 열면 이미 한쪽이 켜져 있다.
+        Spacer(Modifier.weight(1f))
+        DirFilter.entries.forEach { f ->
+            Chip(f.label, big, BadgeSky, fill = f == filter) { onFilter(f) }
+        }
     }
 }
 
 private fun fmt(t: LocalTime) = "%02d:%02d".format(t.hour, t.minute)
 
 @Composable
-private fun Chip(text: String, big: Boolean, tint: Color, fill: Boolean = false) = Surface(
+private fun Chip(
+    text: String, big: Boolean, tint: Color, fill: Boolean = false, onClick: (() -> Unit)? = null,
+) = Surface(
     color = if (fill) tint else tint.copy(alpha = 0.12f),
     shape = RoundedCornerShape(50),
     border = BorderStroke(1.dp, tint.copy(alpha = 0.85f)),
@@ -504,7 +578,10 @@ private fun Chip(text: String, big: Boolean, tint: Color, fill: Boolean = false)
         text,
         fontSize = if (big) 14.sp else 11.5.sp, fontWeight = FontWeight.Bold,
         color = if (fill) MineInk else tint,
-        modifier = Modifier.padding(horizontal = 11.dp, vertical = 4.dp),
+        // 누를 수 있는 칩만 클릭 영역을 만든다 — 나머지는 종전대로 그냥 글씨다.
+        modifier = Modifier
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+            .padding(horizontal = 11.dp, vertical = 4.dp),
     )
 }
 
@@ -745,6 +822,10 @@ private fun DrawScope.drawCabLoop(
     pulse: Float,
     big: Boolean,
     picked: String?,
+    /** 역 이름 크기 — 방향 필터가 켜져 있으면 커진다([CabScreen]) */
+    labelSp: Float,
+    /** 열번 배지 크기 — 같은 이유로 커진다. **재는 곳과 그리는 곳이 같은 값을 써야** 한다 */
+    badgeSp: Float,
 ): List<Pair<Offset, String>> {
     val m = margin(big).toPx()
     val ln = lane(big).toPx()
@@ -800,7 +881,7 @@ private fun DrawScope.drawCabLoop(
     val spots = trains.map { (t, pos) -> Triple(t, spot(t, pos).first, spot(t, pos).second) }
     // ⚠ 배지를 **장애물로 넘겨** 역 이름이 그 자리를 피해 가게 한다. 안 그러면 배지가
     // 역 이름을 덮는다(실측: `구의`·`강변`이 3046·2011 배지 밑에 깔렸다).
-    val bw = tm.measure("0000", TextStyle(fontSize = (if (big) 13f else 10.5f).sp,
+    val bw = tm.measure("0000", TextStyle(fontSize = badgeSp.sp,
         fontWeight = FontWeight.ExtraBold))
     val bhw = (bw.size.width + (if (big) 18 else 15).dp.toPx()) / 2f
     val bhh = (bw.size.height + (if (big) 12 else 10).dp.toPx()) / 2f
@@ -809,7 +890,7 @@ private fun DrawScope.drawCabLoop(
     }
 
     // 라벨 글자는 **11sp 아래로 내리지 않는다**(사용자: 가독성). 좁으면 겹침 회피로 푼다.
-    layoutLabels(tm, loop, start, occupied, if (big) 13f else 11f, badgeRects).forEach { lab ->
+    layoutLabels(tm, loop, start, occupied, labelSp, badgeRects).forEach { lab ->
         rotate(lab.deg, pivot = lab.pivot) {
             drawText(lab.layout, topLeft = Offset(
                 if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width,
@@ -821,9 +902,9 @@ private fun DrawScope.drawCabLoop(
     val hits = spots.map { (t, c, _) -> c to t.trainNo }
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 배지에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
-    others.forEach { (t, c, _) -> drawBadge(tm, c, t.trainNo, false, big, pulse) }
+    others.forEach { (t, c, _) -> drawBadge(tm, c, t.trainNo, false, big, pulse, badgeSp) }
     mineRows.forEach { (t, c, out) ->
-        drawBadge(tm, c, t.trainNo, true, big, pulse)
+        drawBadge(tm, c, t.trainNo, true, big, pulse, badgeSp)
         drawFlag(tm, c, out, t.destName, big)   // 배지 위 노란 행선 깃발
     }
 
@@ -839,9 +920,10 @@ private fun DrawScope.drawCabLoop(
 /** 열번 배지 — 옅은 하늘색(내 열차는 노랑) 둥근 사각형 + 진한 글씨. */
 private fun DrawScope.drawBadge(
     tm: TextMeasurer, c: Offset, no: String, mine: Boolean, big: Boolean, pulse: Float,
+    badgeSp: Float,
 ) {
     val lab = tm.measure(no, TextStyle(
-        fontSize = (if (big) 13f else 10.5f).sp, fontWeight = FontWeight.ExtraBold,
+        fontSize = badgeSp.sp, fontWeight = FontWeight.ExtraBold,
         color = if (mine) MineInk else BadgeInk))
     val w = lab.size.width + (if (big) 14 else 11).dp.toPx()
     val h = lab.size.height + (if (big) 8 else 6).dp.toPx()
