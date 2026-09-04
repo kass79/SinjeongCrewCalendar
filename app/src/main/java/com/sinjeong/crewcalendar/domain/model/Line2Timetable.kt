@@ -33,6 +33,10 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
      *
      * `0 진입 → 도착 30초 전 · 1 도착 → ARRIVETIME · 2 출발 → LEFTTIME · 3 전역출발 → 직전 역 LEFTTIME`.
      * 한쪽 시각이 없으면(−1) 다른 쪽으로 대체하고, 둘 다 없거나 열번·역을 모르면 `null`(표시 생략).
+     *
+     * ⚠ **|지연| > [SANE_DELAY_MIN] 분이면 `null`.** 그만한 지연은 2호선에서 나오지 않는다 —
+     * 나왔다면 기기 시계가 틀렸거나(GMT 에뮬 실측 "534분 빠름") 시간표 판이 다이아와 어긋난
+     * 것이고, 둘 다 숫자를 보여 주는 쪽이 안 보여 주는 쪽보다 나쁘다.
      */
     fun delayMinutes(weekTag: Int, inout: Int, trainNo: String, stationName: String, trainSttus: String, nowSec: Int): Int? {
         val (list, i) = stopAt(weekTag, inout, trainNo, stationName) ?: return null
@@ -45,7 +49,7 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
             "3" -> list.getOrNull(i - 1)?.let { pick(it.leftSec, it.arriveSec) }
             else -> null
         } ?: return null
-        return ((nowSec - event) / 60.0).roundToInt()
+        return ((nowSec - event) / 60.0).roundToInt().takeIf { kotlin.math.abs(it) <= SANE_DELAY_MIN }
     }
 
     /** 다음 역 도착까지 남은 **초**(지연을 그대로 얹는다). 0 이하면 곧 도착. API 호출 0회. */
@@ -67,6 +71,9 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
     }
 
     companion object {
+        /** [delayMinutes] 가 믿어 주는 지연의 한계(분). 넘으면 시계·시간표가 어긋난 것으로 보고 표시를 접는다. */
+        const val SANE_DELAY_MIN = 120
+
         /** 본선 43역 + 신정지선 4역. **순서가 CSV 의 `stationIdx`** 라 바꾸면 자산을 다시 구워야 한다. */
         val STATIONS: List<String> = Line2Stations.MAIN + listOf("도림천", "양천구청", "신정네거리", "까치산")
         fun stationIdx(name: String): Int = STATIONS.indexOf(Line2Stations.norm(name))

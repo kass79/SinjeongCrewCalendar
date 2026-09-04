@@ -33,6 +33,16 @@ class Line2TimetableTest {
     @Test fun `전역출발은 직전 역 출발시각 기준`() { assertEquals(1, tt.delayMinutes(1, 1, "2006", "신촌", "3", 25230 + 60)) }
     @Test fun `빠르면 음수`() { assertEquals(-1, tt.delayMinutes(1, 1, "2006", "홍대입구", "1", 25200 - 60)) }
     @Test fun `모르는 열번은 null`() { assertNull(tt.delayMinutes(1, 1, "9999", "홍대입구", "1", 25200)) }
+    /**
+     * v1.6.88 안전장치 — 기기 시계가 틀리면(GMT 에뮬 실측 "534분 빠름") 시간표와 몇 시간씩
+     * 어긋난다. 그런 숫자는 보여 주지 않는 편이 낫다. **경계 120분은 살려 둔다.**
+     */
+    @Test fun `말이 안 되는 지연은 null, 경계 120분은 값`() {
+        assertEquals(120, tt.delayMinutes(1, 1, "2006", "홍대입구", "1", 25200 + 120 * 60))
+        assertEquals(-120, tt.delayMinutes(1, 1, "2006", "홍대입구", "1", 25200 - 120 * 60))
+        assertNull(tt.delayMinutes(1, 1, "2006", "홍대입구", "1", 25200 + 121 * 60))
+        assertNull(tt.delayMinutes(1, 1, "2006", "홍대입구", "1", 25200 - 121 * 60))
+    }
     @Test fun `API 꼬리 붙은 역명도 잡는다`() { assertEquals(0, tt.delayMinutes(1, 1, "2006", "홍대입구역", "1", 25200)) }
     /** 다음 역 도착 = `다음 역 ARRIVETIME + 지연 − now` (설계서 C절). 신촌 07:02:00 + 1분 지연 − 07:01:00 */
     @Test fun `다음 역까지 초 — 지연 반영`() {
