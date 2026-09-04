@@ -952,6 +952,102 @@ class PatternTest {
     }
 
     /**
+     * ★ **2026-09 지선 휴일 1·3·6 개정** — 교대 지점이 양천구청 12:55 → **12:41** ·
+     * 14:55 → **14:41**로 당겨졌다(회사 개정 안내문). v1.6.54의 본선 4·7 개정과 같은 종류의 건이다.
+     *
+     * 세 다이아가 한 덩어리로 맞물린다 — 지6 전반종료 = 지1 후반시작 = **12:41**,
+     * 지1 후반종료 = 지3 후반시작 = **14:41**. 열번도 한 편씩 앞으로 밀렸다:
+     * 5586이 지6 → **지1**로, 5610이 지1 → **지3**으로 넘어가고 5581·5605가 각 교대 열차다.
+     *
+     * ⚠ 옛 값(지1 후반 `12:55-14:55` · 첫 열번 5586 · 계 7:32 / 지3 계 8:47 / 지6 계 9:19)은
+     * **개정 전 기준**이라 되돌리지 말 것. 평일 표와 나머지 다이아는 한 칸도 안 바뀌었다.
+     *
+     * 후반 편승 알람은 규칙([BundledTimetable.advise]의 지선 갈래 = 후반시작 5분 전 도착)을
+     * 그대로 두고 **새 `secondLeg` 시작만 따라간다** — 지1 12:36 · 지3 14:36.
+     */
+    @Test fun branchHoliday_1_3_6_match_revised_notice_2026_09() {
+        // ① 시각표 — 세 다이아의 맞물림 지점이 12:41 / 14:41
+        Bundled.BRANCH_HOLIDAY.getValue("지1").let {
+            assertEquals("12:41-14:41", it.secondLeg)
+            assertEquals("14:41", it.signOff)          // 관례: 퇴근 = 후반종료
+            assertEquals("8:13#10:25", it.firstLeg)    // 전반 무변경
+        }
+        Bundled.BRANCH_HOLIDAY.getValue("지3").let {
+            assertEquals("14:41-16:54", it.secondLeg)
+            assertEquals("16:54", it.signOff)          // 퇴근은 안 바뀐다
+        }
+        Bundled.BRANCH_HOLIDAY.getValue("지6").let {
+            assertEquals("10:25#12:41", it.firstLeg)   // 전반을 12:41 인계로 마친다
+            assertEquals("16:54-18:54", it.secondLeg)  // 후반 무변경
+            assertEquals("18:54", it.signOff)
+        }
+
+        // ② 상세시트 열번·계 (`RouteTable.forBranch` = 상세시트가 읽는 그 경로)
+        RouteTable.forBranch(1, true)!!.let {
+            assertEquals("5581·5586·5587·5592·5593·5598·5599·5604·5605", it.secondHalf)
+            assertEquals("7:31", it.totalWorkTime)
+        }
+        RouteTable.forBranch(3, true)!!.let {
+            assertEquals("5605·5610·5611·5616·5617·5622·5623·5628·5629·5634", it.secondHalf)
+            assertEquals("9:00", it.totalWorkTime)
+        }
+        RouteTable.forBranch(6, true)!!.let {
+            assertEquals("5556·5557·5562·5563·5568·5569·5574·5575·5580·5581", it.firstHalf)
+            assertEquals("9:06", it.totalWorkTime)
+        }
+
+        // ③ 인계 열차가 넘겨주는 쪽·받는 쪽 양쪽에 다 있다 (개정 전 5586·5610의 자리와 같은 규칙)
+        assertEquals("5581", RouteTable.forBranch(6, true)!!.firstHalf.split('·').last())
+        assertEquals("5581", RouteTable.forBranch(1, true)!!.secondHalf.split('·').first())
+        assertEquals("5605", RouteTable.forBranch(1, true)!!.secondHalf.split('·').last())
+        assertEquals("5605", RouteTable.forBranch(3, true)!!.secondHalf.split('·').first())
+
+        // ④ 개정 대상은 1·3·6뿐 — 이웃 휴일 다이아와 평일 표는 그대로
+        assertEquals("14:21-16:21", Bundled.BRANCH_HOLIDAY.getValue("지2").secondLeg)
+        assertEquals("15:15-17:14", Bundled.BRANCH_HOLIDAY.getValue("지4").secondLeg)
+        assertEquals("16:21-18:20", Bundled.BRANCH_HOLIDAY.getValue("지5").secondLeg)
+        assertEquals("12:51-14:51", Bundled.BRANCH_WEEKDAY.getValue("지1").secondLeg)
+        assertEquals("14:51-16:50", Bundled.BRANCH_WEEKDAY.getValue("지3").secondLeg)
+        assertEquals("10:51#12:51", Bundled.BRANCH_WEEKDAY.getValue("지6").firstLeg)
+        assertEquals("7:48", RouteTable.forBranch(1, false)!!.totalWorkTime) // 평일 계는 손대지 않았다
+    }
+
+    /**
+     * **개정된 편승 알람 시각을 못으로 박는다** (2026-09 지선 휴일 1·3·6 개정).
+     *
+     * 지선은 양천구청에서 바로 인수인계하므로 알람 = **후반시작 5분 전 도착**이고, 그 규칙은
+     * 이번에 한 글자도 안 바뀌었다 — [BundledTimetable.advise]가 `secondLeg` 시작을 그대로 읽어
+     * 5분을 뺀다. 즉 데이터만 바뀌면 알람이 따라온다. **그 따라옴을 여기서 잠근다.**
+     *
+     * 깨지면 사람이 **14분 늦은 알람**으로 교대 지점에 늦게 간다 — 안전 직결.
+     */
+    @Test fun branchHoliday_secondLeg_alarms_follow_revised_handover() {
+        val holiday = LocalDate.of(2026, 9, 5) // 토 = 휴일 다이아
+
+        BundledTimetable.advise(DutyCode.parse("지1"), holiday, second = true).let {
+            assertEquals("지1 후반 = 12:41 출발 5분 전", LocalTime.of(12, 36), it.at)
+            assertTrue(it.text, it.text.contains("양천구청역 12:36 도착"))
+            assertTrue(it.text, it.text.contains("12:41 출발"))
+        }
+        assertEquals(
+            "지3 후반 = 14:41 출발 5분 전",
+            LocalTime.of(14, 36),
+            BundledTimetable.advise(DutyCode.parse("지3"), holiday, second = true).at,
+        )
+
+        // 지6은 **전반**이 12:41로 끝날 뿐 시작(10:25)은 그대로다 → 전반 알람 무변경
+        assertEquals(LocalTime.of(10, 20), BundledTimetable.advise(DutyCode.parse("지6"), holiday).at)
+        // 지6 후반도 무변경 (16:54 출발 → 16:49)
+        assertEquals(
+            LocalTime.of(16, 49),
+            BundledTimetable.advise(DutyCode.parse("지6"), holiday, second = true).at,
+        )
+        // 지1·지3 전반도 무변경
+        assertEquals(LocalTime.of(8, 8), BundledTimetable.advise(DutyCode.parse("지1"), holiday).at)
+        assertEquals(LocalTime.of(8, 17), BundledTimetable.advise(DutyCode.parse("지3"), holiday).at)
+    }
+
+    /**
      * **`signOnAt`의 24시+ 표기 규칙을 잠근다** (v1.6.33에 브리핑·위젯 2벌을 한 벌로 통합).
      *
      * 출근 브리핑 예약과 위젯 부제·경계 갱신이 같은 함수를 쓴다. `LocalTime.parse`로 바꾸는
