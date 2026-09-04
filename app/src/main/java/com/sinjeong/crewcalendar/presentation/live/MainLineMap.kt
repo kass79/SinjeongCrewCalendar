@@ -68,13 +68,17 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -441,6 +445,15 @@ private fun CabScreen(
         }
     }
 
+    // 방향 필터 — **내 열차는 어느 모드에서든 그린다**(사용자 확정).
+    // ⚠ 여기서 한 번만 거른다(v1.6.94). 상태바가 "왜 비었는지"를 말하려면 **거른 뒤**가
+    // 비었는지(이 방향만 없다)와 **거르기 전**이 비었는지(진짜 없다)를 둘 다 알아야 한다.
+    val drawn = trains.filter {
+        eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
+            it.trainNo == mineMark?.trainNo
+    }
+    val emptyMsg = mainEmptyReason(trains.isEmpty(), drawn.isEmpty(), error)
+
     Column(Modifier.fillMaxSize().padding(inset)) {
         CabHeader(nowMillis, mineMark, candidates, delay, nextSec, big, onDismiss)
         Box(Modifier.fillMaxWidth().weight(1f)) {
@@ -451,11 +464,6 @@ private fun CabScreen(
                 LocalDensity provides Density(d.density, d.fontScale.coerceAtMost(1.15f))
             ) {
                 val tm = rememberTextMeasurer()
-                // 방향 필터 — **내 열차는 어느 모드에서든 그린다**(사용자 확정).
-                val drawn = trains.filter {
-                    eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
-                        it.trainNo == mineMark?.trainNo
-                }
                 // ── 열차 이동 (v1.6.88) ────────────────────────────────
                 // 열번마다 [Animatable] 하나. 새 스냅샷이 오면 **1초 tween** 으로 그 자리까지
                 // 옮기고, 다음 스냅샷이 올 때까지 시간표의 **역간 소요시간** 속도로 다음 역
@@ -525,12 +533,44 @@ private fun CabScreen(
                     }
                 ) {
                     hit = drawCabLoop(tm, placed, mineMark?.trainNo, big, picked,
-                        labelSp, otherK, phase, mapDeg, error, trains.isEmpty())
+                        labelSp, otherK, phase, mapDeg)
                 }
             }
         }
-        CabStatusBar(mine, mineMark, candidates, error, trains.isNotEmpty(), big, eff, onFilter)
+        CabStatusBar(mine, mineMark, candidates, emptyMsg, error != null && trains.isEmpty(),
+            big, eff, onFilter)
     }
+}
+
+/**
+ * 열차가 하나도 안 그려질 때 **왜 비었는지** 한 줄로. `null` = 그릴 열차가 있다.
+ *
+ * ## v1.6.94 확정 — 빈 상태·오류는 **지도에 얹지 않고 상태바 한 줄로 말한다**
+ *
+ * v1.6.93 은 이 문구를 지도 **한가운데**에 반투명 판과 함께 그렸다. 두 가지가 한꺼번에 틀렸다:
+ *
+ *  1. 순환선 **안쪽은 역 이름이 가장 빽빽한 자리**다. 판이 동대문역사문화공원·을지로4가·
+ *     신당·방배를 통째로 덮었다 — 확정 규칙 *"역 이름이 가려지면 실패"* 위반이다.
+ *     바탕을 깔아도 가리는 건 그대로다. **덮을 자리가 애초에 없다.**
+ *  2. 왼쪽 상태 칩이 [error] 를 이미 말하고 있어 한 화면에 **같은 문장이 두 번** 나왔다.
+ *
+ * 그래서 지도 위에는 아무 글자도 얹지 않고, 이 함수가 고른 한 줄만 [CabStatusBar] 칩이 말한다.
+ * 문구·판정은 지선 카드([LineMap])와 같은 것을 쓴다 — 두 지도가 다른 시각에 "운행 종료"라고
+ * 말하면 안 된다.
+ *
+ * @param allEmpty 필터 **전** 목록이 비었나. 거짓이면 "이 방향만 없다"는 뜻이다.
+ * @param drawnEmpty 필터 **후** 목록이 비었나.
+ * @param error 스냅샷 오류 — 조회 실패·한도 소진·인터넷 끊김이 이미 사람 말로 들어 있다
+ *   ([BranchLive.humanError]).
+ */
+internal fun mainEmptyReason(
+    allEmpty: Boolean, drawnEmpty: Boolean, error: String?, now: LocalTime = LocalTime.now(),
+): String? = when {
+    !drawnEmpty -> null
+    !allEmpty -> "이 방향 열차 없음 · [전체]"
+    error != null -> error
+    inService(now) -> "실시간 조회 중…"
+    else -> "금일 운행 종료 (영업 05:30~)"
 }
 
 /* ────────────────────────── 상단바 ────────────────────────── */
@@ -543,9 +583,12 @@ private val WEEKDAYS = listOf("월", "화", "수", "목", "금", "토", "일")
  *
  * v1.6.88 에서 헤더·상태바가 **한 줄**이 되며 넷 → 둘로 줄였다. 넘쳐서 `Ellipsis` 가 걸리면
  * 뒤의 `외 N개` 부터 잘려 **몇 대인지도 모르게** 되기 때문이다.
+ *
+ * [take] 는 헤더가 폭에 안 들어갈 때 **한 개로 더 줄이는** 손잡이다(v1.6.94 [HEAD_LADDER]).
+ * 몇 개를 적든 `외 N개` 가 총수를 지키므로 정보는 안 사라진다.
  */
-private fun shortNos(nos: List<String>): String =
-    nos.take(2).joinToString("·") + if (nos.size > 2) " 외 " + (nos.size - 2) + "개" else ""
+private fun shortNos(nos: List<String>, take: Int = 2): String =
+    nos.take(take).joinToString("·") + if (nos.size > take) " 외 " + (nos.size - take) + "개" else ""
 
 /**
  * 헤더 한 줄의 **앞 토막** — 잘리면 안 되는 것들. `null` = 후보 열번조차 없다.
@@ -576,14 +619,49 @@ private fun mineHead(
     else -> null
 }
 
-/** 헤더 한 줄의 **뒤 토막** — 자리가 모자라면 여기부터 `Ellipsis` 로 잘린다. */
-private fun mineTail(mineMark: MainTrainMark?, candidates: List<String>): String = when {
-    // ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(MyTrain KDoc).
-    // API 가 준 역명(statnNm)과 상태(trainSttus)만 그대로 옮긴다.
-    mineMark != null -> mineMark.statusText
-    candidates.isNotEmpty() -> "오늘 열번 " + shortNos(candidates)
-    else -> ""
-}
+/** 헤더 한 줄의 **뒤 토막**. */
+private fun mineTail(mineMark: MainTrainMark?, candidates: List<String>, take: Int = 2): String =
+    when {
+        // ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(MyTrain KDoc).
+        // API 가 준 역명(statnNm)과 상태(trainSttus)만 그대로 옮긴다.
+        mineMark != null -> mineMark.statusText
+        candidates.isNotEmpty() -> "오늘 열번 " + shortNos(candidates, take)
+        else -> ""
+    }
+
+/**
+ * 헤더 한 줄에서 **무엇을 먼저 버릴지** — 넉넉한 것부터 짧은 것 순. 첫 번째로 **폭에 들어가는**
+ * 칸을 쓴다([CabHeader] 가 [TextMeasurer] 로 실제로 재서 고른다).
+ *
+ * ## v1.6.94 — 잘려서 `…` 로 끝나는 것은 실패다
+ *
+ * v1.6.93 은 헤더를 한 문장으로 합쳐 `weight(1f)` 하나만 줘서 **닫기 X 를 살렸는데**, 대신
+ * 남은 폭을 못 채운 만큼이 `Ellipsis` 로 잘렸다 — 실화면에서 `… · 오늘 열…` 로 끝나
+ * **오늘 열번(2501·2523 외 2개)이 통째로 사라졌다.** 단추는 살고 정보가 죽은 것이다.
+ *
+ * 사용자 확정 우선순위: **내 열차 상태 > 오늘 열번 > 날짜·시계.** 그래서 사다리는 위에서부터
+ * ① 글자 한 단계 축소(하한 [HEAD_MIN_K]) ② 요일 ③ 초 ④ 열번 목록 한 개로 ⑤ 날짜 ⑥ 제목
+ * 순으로만 덜어 내고, **마지막 칸에도 내 열차 상태와 오늘 열번은 남는다.** 각 칸은 앞 칸의
+ * 부분집합이라 되돌아가지 않는다.
+ */
+private data class HeadSpec(
+    val title: Boolean = true, val date: Boolean = true, val weekday: Boolean = true,
+    val seconds: Boolean = true, val take: Int = 2, val k: Float = 1f,
+)
+
+/** 글자 축소 하한 — 이 밑으로는 안 줄이고 **조각을 버린다**(작아서 못 읽으면 잘린 것과 같다). */
+private const val HEAD_MIN_K = 0.88f
+
+private val HEAD_LADDER = listOf(
+    HeadSpec(),
+    HeadSpec(k = HEAD_MIN_K),                                        // ① 글자 한 단계
+    HeadSpec(weekday = false, k = HEAD_MIN_K),                       // ② 요일 `(금)`
+    HeadSpec(weekday = false, seconds = false, k = HEAD_MIN_K),      // ③ 시계 초
+    HeadSpec(weekday = false, seconds = false, take = 1, k = HEAD_MIN_K),          // ④ 열번 목록
+    HeadSpec(date = false, weekday = false, seconds = false, take = 1, k = HEAD_MIN_K),   // ⑤ 날짜
+    HeadSpec(title = false, date = false, weekday = false, seconds = false,
+        take = 1, k = HEAD_MIN_K),                                   // ⑥ 제목
+)
 
 /**
  * 헤더 **한 줄** (v1.6.88) — `2호선 실시간 · 09/04(금) 10:08:57 · 내 열차 2039 · 외선 ·
@@ -599,8 +677,12 @@ private fun mineTail(mineMark: MainTrainMark?, candidates: List<String>): String
  * 순서대로 재면서 남은 폭을 깎아 나가고, 무게 있는 자식이 그 나머지를 나눠 갖는다. v1.6.88 은
  * 이 순서를 거꾸로 적어 놓고 [mineHead] 토막을 **무게 없이** 뒀는데, 그러면 긴 `내 열차 …`
  * 한 줄이 남은 폭을 통째로 먹고 **뒤에 오는 닫기 X 가 폭 0 으로 측정된다**(배율 2.0 근처).
- * 이제 앞·뒤 토막을 **한 문장으로 합쳐** 그 하나만 `weight(1f)` 를 갖는다 — 글꼴·크기·색이
- * 원래 같았으므로 화면은 그대로이고, 자리가 모자라면 `Ellipsis` 가 **뒤 토막부터** 먹는다.
+ *
+ * ⚠ **줄이는 것과 잘리는 것은 다르다**(v1.6.94). v1.6.93 은 한 문장으로 합쳐 닫기 X 를
+ * 살렸지만, 남은 폭을 넘는 몫이 그대로 `Ellipsis` 가 됐다 — 실화면이 `… · 오늘 열…` 로 끝나
+ * **오늘 열번이 사라졌다.** 이제 [HEAD_LADDER] 를 위에서부터 [TextMeasurer] 로 **실제로 재서**
+ * 처음으로 들어가는 칸을 고른다. 폭은 `weight(1f)` 자리에 놓은 [BoxWithConstraints] 가
+ * **Row 가 실제로 준 값**으로 알려 주므로 닫기 X 폭을 추측하지 않는다.
  */
 @Composable
 private fun CabHeader(
@@ -610,36 +692,59 @@ private fun CabHeader(
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
     }
-    val sp = (if (big) 12f else 9.5f).sp
+    val baseSp = if (big) 12f else 9.5f
+    // 시계는 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
+    val clockSp = if (big) 14f else 11.5f
     val mineColor = if (mineMark != null) MineYellow else Dim
+    val head = mineHead(mineMark, candidates, delay, nextSec)
+    val tm = rememberTextMeasurer()
+
+    fun build(s: HeadSpec): Pair<AnnotatedString, TextStyle> {
+        val txt = buildAnnotatedString {
+            if (s.title) withStyle(
+                SpanStyle(color = Color.White, fontWeight = FontWeight.Bold)
+            ) { append("2호선 실시간") }
+            if (s.title) append(" · ")
+            if (s.date) withStyle(SpanStyle(color = Dim)) {
+                append("%02d/%02d".format(t.monthValue, t.dayOfMonth))
+                if (s.weekday) append("(${WEEKDAYS[t.dayOfWeek.value - 1]})")
+                append(" ")
+            }
+            withStyle(
+                SpanStyle(
+                    color = MineYellow, fontSize = (clockSp * s.k).sp,
+                    fontWeight = FontWeight.Bold,
+                )
+            ) {
+                append(
+                    if (s.seconds) "%02d:%02d:%02d".format(t.hour, t.minute, t.second)
+                    else "%02d:%02d".format(t.hour, t.minute)
+                )
+            }
+            val info = listOfNotNull(
+                head, mineTail(mineMark, candidates, s.take).ifEmpty { null },
+            ).joinToString(" · ")
+            if (info.isNotEmpty()) withStyle(
+                SpanStyle(color = mineColor, fontWeight = FontWeight.Bold)
+            ) { append(" · $info") }
+        }
+        return txt to TextStyle(fontSize = (baseSp * s.k).sp)
+    }
+
     Row(
         Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "2호선 실시간 · ",
-            fontSize = sp, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1,
-        )
-        Text(
-            "%02d/%02d(%s) ".format(t.monthValue, t.dayOfMonth, WEEKDAYS[t.dayOfWeek.value - 1]),
-            fontSize = sp, color = Dim, maxLines = 1,
-        )
-        // 시계는 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
-        Text(
-            "%02d:%02d:%02d".format(t.hour, t.minute, t.second),
-            fontSize = (if (big) 14f else 11.5f).sp, fontWeight = FontWeight.Bold,
-            color = MineYellow, maxLines = 1,
-        )
-        val info = listOfNotNull(
-            mineHead(mineMark, candidates, delay, nextSec),
-            mineTail(mineMark, candidates).ifEmpty { null },
-        ).joinToString(" · ")
-        Text(
-            if (info.isEmpty()) "" else " · $info",
-            fontSize = sp, fontWeight = FontWeight.Bold, color = mineColor,
-            maxLines = 1, overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f),
-        )
+        BoxWithConstraints(Modifier.weight(1f)) {
+            val room = constraints.maxWidth
+            val pick = HEAD_LADDER.asSequence().map(::build).firstOrNull { (txt, style) ->
+                tm.measure(txt, style, maxLines = 1).size.width <= room
+            } ?: build(HEAD_LADDER.last())
+            Text(
+                pick.first, style = pick.second,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+            )
+        }
         IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Close, "닫기", Modifier.size(20.dp), tint = Color.White)
         }
@@ -655,11 +760,18 @@ private fun CabHeader(
  * `[2호선] [내 열번 2039 / 오늘 열번 …] ─── [내선][외선][전체]`.
  * 지운 것 — `내 열차 미검출`(헤더 줄과 같은 말) · `행선`(지도의 노란 깃발) ·
  * `↻ 내선`(바로 옆 필터 칩이 이미 켜져 있다). 셋 다 **다른 데서 이미 말하고 있다.**
+ *
+ * v1.6.94 부터 **빈 상태를 말하는 곳도 여기 하나뿐**이다([mainEmptyReason]) — 지도 한가운데
+ * 오버레이는 없앴다. 한 줄 규칙은 그대로다.
+ *
+ * @param empty 열차가 하나도 안 그려지는 이유. `null` 이면 그릴 열차가 있다.
+ * @param failed [empty] 가 **실패**인가(조회 실패·한도 소진). 참이면 주황, 거짓이면 흐린 색이다 —
+ *   영업 종료·조회 중은 잘못된 게 아니니 경고색을 쓰지 않는다.
  */
 @Composable
 private fun CabStatusBar(
     mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
-    error: String?, hasTrains: Boolean, big: Boolean,
+    empty: String?, failed: Boolean, big: Boolean,
     filter: DirFilter, onFilter: (DirFilter) -> Unit,
 ) {
     Row(
@@ -688,7 +800,10 @@ private fun CabStatusBar(
                 // ⚠ 오류는 **열차가 하나도 없을 때만** 말한다. 스냅샷의 `error` 는 지선 카드가 쓰는
                 // 양천구청 **도착** API 실패까지 합쳐 온 값이라(위치 API 는 멀쩡할 수 있다), 그대로
                 // 띄우면 열차 14대를 그려 놓고 "정보를 못 받았어요"라고 말하게 된다(v1.6.84 실측).
-                error != null && !hasTrains -> Chip(error, big, Color(0xFFE9A23B), modifier = shrink)
+                // 그 판정은 이제 [mainEmptyReason] 한 곳이 한다 — 영업 종료·조회 중·한도 소진도
+                // 같이 구분해서 말한다(v1.6.94).
+                empty != null ->
+                    Chip(empty, big, if (failed) Color(0xFFE9A23B) else Dim, modifier = shrink)
                 mineMark != null ->
                     Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true, modifier = shrink)
                 // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
@@ -1040,10 +1155,6 @@ private fun DrawScope.drawCabLoop(
      * [locoBox] 와 [drawLoco] 둘 다에 넘긴다.
      */
     mapDeg: Float,
-    /** 스냅샷 오류 — 빈 상태 문구를 고르는 데만 쓴다([CabStatusBar] 와 같은 값). */
-    error: String?,
-    /** 필터 **전** 목록도 비어 있나. 거짓이면 "이 방향만 없다"는 뜻이라 문구가 달라진다. */
-    allEmpty: Boolean,
 ): List<Pair<Offset, String>> {
     val m = margin(big).toPx()
     val ln = lane(big).toPx()
@@ -1232,48 +1343,12 @@ private fun DrawScope.drawCabLoop(
     }
 
     /*
-     * ── 그릴 열차가 없을 때: **이유를 말한다** (v1.6.93) ─────────────
-     * 지선 카드는 v1.6.46 부터 이 문구가 있었는데 본선 지도엔 없어서, 운행 종료든 API 한도
-     * 소진이든 **초록 사각형만 덩그러니** 남았다 — 사용자는 앱이 고장인지 알 수 없다.
-     * 문구·어투는 지선([LineMap])과 같은 것을 쓴다. 세로 창은 지도를 통째로 90도 돌리므로
-     * 글자만 되돌려 세운다(`-mapDeg`) — "글자는 절대 뒤집히지 않는다"(v1.6.91 확정).
+     * ── 그릴 열차가 없어도 **지도 위에는 아무 글자도 얹지 않는다** (v1.6.94) ─────────────
+     * v1.6.93 은 여기서 가운데에 반투명 판 + 두 줄을 그렸는데, 순환선 안쪽은 역 이름이 가장
+     * 빽빽한 자리라 동대문역사문화공원·을지로4가·신당·방배를 통째로 덮었다(실화면 확인).
+     * 게다가 왼쪽 상태 칩이 같은 문장을 이미 말해 **한 화면에 두 번** 나왔다.
+     * 빈 상태는 [mainEmptyReason] → [CabStatusBar] 칩 **한 줄**이 전담한다.
      */
-    if (trains.isEmpty()) {
-        val failed = allEmpty && error != null
-        val msg = when {
-            !allEmpty -> "이 방향 열차 없음 — 아래 [전체]"
-            error != null -> error
-            inService() -> "실시간 조회 중…"
-            else -> "금일 운행 종료 (영업 05:30~)"
-        }
-        val line = tm.measure(msg, TextStyle(
-            fontSize = (if (big) 15f else 12.5f).sp,
-            fontWeight = if (failed) FontWeight.Bold else FontWeight.Normal,
-            color = if (failed) Color.White else Dim))
-        val hint = if (!failed) null else tm.measure("잠시 뒤 다시 열어 보세요",
-            TextStyle(fontSize = (if (big) 12f else 10.5f).sp, color = Dim))
-        val gap = 4.dp.toPx()
-        val blockH = line.size.height + (hint?.let { gap + it.size.height } ?: 0f)
-        val blockW = maxOf(line.size.width, hint?.size?.width ?: 0)
-        rotate(-mapDeg, pivot = center) {
-            // ⚠ **바탕을 깐다.** 순환선 안쪽은 역 이름이 빽빽한 자리라(을지로4가·동대문역사문화공원
-            // …) 글자를 그냥 얹으면 서로 물려 둘 다 못 읽는다(실측). 라벨이 배지 위에 얹힐 때
-            // 쓰는 것과 **같은 처방**이다([Lab.over] 의 둥근 사각형).
-            val padX = 10.dp.toPx()
-            val padY = 6.dp.toPx()
-            drawRoundRect(
-                CabNavy,
-                topLeft = Offset(center.x - blockW / 2f - padX, center.y - blockH / 2f - padY),
-                size = Size(blockW + padX * 2, blockH + padY * 2),
-                cornerRadius = CornerRadius(10.dp.toPx()))
-            var ty = center.y - blockH / 2f
-            drawText(line, topLeft = Offset(center.x - line.size.width / 2f, ty))
-            hint?.let {
-                ty += line.size.height + gap
-                drawText(it, topLeft = Offset(center.x - it.size.width / 2f, ty))
-            }
-        }
-    }
 
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
     picked?.let { no -> centers[no]?.let { c ->

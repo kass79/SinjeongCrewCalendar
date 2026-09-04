@@ -23,8 +23,8 @@ android {
         // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
         // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
         targetSdk = 36
-        versionCode = 105
-        versionName = "1.6.93"
+        versionCode = 106
+        versionName = "1.6.94"
         vectorDrawables { useSupportLibrary = true }
     }
 
