@@ -73,7 +73,17 @@ object MainLegs {
         25 to listOf("12:55", "15:55", "17:59", "19:57"),
     )
 
-    /** 야간: 조합별 (휴휴 33~35는 운휴대기라 사업시각 없음) */
+    /**
+     * 야간: 조합별 (휴휴 33~35는 운휴대기라 사업시각 없음)
+     *
+     * ⚠ **자정을 넘긴 시각은 `24:xx`·`25:00` 으로 적는다** — `0:20` 이 아니라 `24:20`.
+     * v1.6.86 이전엔 44~47 평평만 `0:00`/`0:20`/`0:17`/`0:50` 이라, **같은 전반종료를 쓰는
+     * 평휴 칸이 `24:00`/`24:20`/…** 으로 적혀 상세시트 `전반사업` 줄이 조합에 따라 다르게
+     * 보였다(평평 `20:45~0:00` ↔ 평휴 `20:45~24:00`). 표기만 통일한 것이고 값은 같다 —
+     * 이 표를 읽는 [MyTrain] 은 `h % 24` + `plusDays(h / 24)` 로 24시+를 접고
+     * ([MyTrain]의 `legTime`), 알람([BundledTimetable.advise])은 인덱스 0·2만 읽어
+     * 이 칸을 아예 보지 않는다.
+     */
     val NIGHT: Map<Int, Map<NightCombo, List<String>>> = mapOf(
         33 to mapOf(NightCombo.PP to listOf("17:21", "20:35", "5:52", "6:30"), NightCombo.PH to listOf("17:21", "20:35", "5:54", "6:37"), NightCombo.HP to listOf("16:14", "19:26", "5:52", "6:30")),
         34 to mapOf(NightCombo.PP to listOf("17:44", "20:45", "5:40", "7:33"), NightCombo.PH to listOf("17:44", "20:45", "5:34", "7:30"), NightCombo.HP to listOf("16:38", "19:36", "5:40", "7:33")),
@@ -86,10 +96,10 @@ object MainLegs {
         41 to mapOf(NightCombo.PP to listOf("20:29", "23:30", "6:17", "8:10"), NightCombo.PH to listOf("20:29", "23:30", "6:46", "8:29"), NightCombo.HH to listOf("19:36", "22:35", "5:54", "7:53"), NightCombo.HP to listOf("19:22", "22:23", "6:48", "8:36")),
         42 to mapOf(NightCombo.PP to listOf("20:30", "23:31", "6:27", "8:20"), NightCombo.PH to listOf("20:30", "23:31", "6:58", "8:40"), NightCombo.HH to listOf("19:42", "22:42", "6:07", "8:00"), NightCombo.HP to listOf("19:27", "22:30", "7:00", "8:49")),
         43 to mapOf(NightCombo.PP to listOf("20:40", "23:42", "7:01", "8:57"), NightCombo.PH to listOf("20:40", "23:42", "6:58", "8:43"), NightCombo.HH to listOf("19:05", "22:13", "6:58", "8:43"), NightCombo.HP to listOf("20:12", "21:41", "7:39", "8:47")),
-        44 to mapOf(NightCombo.PP to listOf("20:45", "0:00", "7:27", "9:15"), NightCombo.PH to listOf("20:45", "24:00", "7:15", "8:57"), NightCombo.HH to listOf("19:22", "22:23", "7:15", "8:57"), NightCombo.HP to listOf("20:23", "21:52", "7:01", "8:57")),
-        45 to mapOf(NightCombo.PP to listOf("21:03", "0:20", "7:00", "8:49"), NightCombo.PH to listOf("21:03", "24:20", "7:16", "9:01"), NightCombo.HH to listOf("19:27", "22:30", "7:16", "9:01"), NightCombo.HP to listOf("20:35", "22:13", "7:02", "8:50")),
-        46 to mapOf(NightCombo.PP to listOf("21:09", "0:17", "7:02", "8:50"), NightCombo.PH to listOf("21:09", "24:17", "7:38", "9:19"), NightCombo.HH to listOf("20:12", "23:17", "7:38", "9:19"), NightCombo.HP to listOf("21:41", "23:17", "7:48", "9:36")),
-        47 to mapOf(NightCombo.PP to listOf("21:36", "0:50", "7:48", "9:36"), NightCombo.PH to listOf("21:36", "24:50", "7:45", "9:29"), NightCombo.HH to listOf("20:23", "23:33", "7:45", "9:29"), NightCombo.HP to listOf("21:52", "23:33", "7:27", "9:15")),
+        44 to mapOf(NightCombo.PP to listOf("20:45", "24:00", "7:27", "9:15"), NightCombo.PH to listOf("20:45", "24:00", "7:15", "8:57"), NightCombo.HH to listOf("19:22", "22:23", "7:15", "8:57"), NightCombo.HP to listOf("20:23", "21:52", "7:01", "8:57")),
+        45 to mapOf(NightCombo.PP to listOf("21:03", "24:20", "7:00", "8:49"), NightCombo.PH to listOf("21:03", "24:20", "7:16", "9:01"), NightCombo.HH to listOf("19:27", "22:30", "7:16", "9:01"), NightCombo.HP to listOf("20:35", "22:13", "7:02", "8:50")),
+        46 to mapOf(NightCombo.PP to listOf("21:09", "24:17", "7:02", "8:50"), NightCombo.PH to listOf("21:09", "24:17", "7:38", "9:19"), NightCombo.HH to listOf("20:12", "23:17", "7:38", "9:19"), NightCombo.HP to listOf("21:41", "23:17", "7:48", "9:36")),
+        47 to mapOf(NightCombo.PP to listOf("21:36", "24:50", "7:48", "9:36"), NightCombo.PH to listOf("21:36", "24:50", "7:45", "9:29"), NightCombo.HH to listOf("20:23", "23:33", "7:45", "9:29"), NightCombo.HP to listOf("21:52", "23:33", "7:27", "9:15")),
         48 to mapOf(NightCombo.PP to listOf("23:19", "25:00", "5:30", "7:18"), NightCombo.PH to listOf("23:19", "25:00", "5:30", "7:16"), NightCombo.HH to listOf("22:23", "24:00", "5:30", "7:16"), NightCombo.HP to listOf("22:23", "24:00", "5:30", "7:18")),
         49 to mapOf(NightCombo.PP to listOf("23:30", "25:00", "5:30", "7:15"), NightCombo.PH to listOf("23:30", "25:00", "5:30", "7:28"), NightCombo.HH to listOf("22:30", "24:00", "5:30", "7:28"), NightCombo.HP to listOf("22:30", "24:00", "5:30", "7:15")),
         50 to mapOf(NightCombo.PP to listOf("23:31", "25:00", "5:30", "7:17"), NightCombo.PH to listOf("23:31", "25:00", "5:30", "7:28"), NightCombo.HH to listOf("22:35", "24:00", "5:30", "7:28"), NightCombo.HP to listOf("22:35", "24:00", "5:30", "7:17")),
