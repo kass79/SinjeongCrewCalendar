@@ -18,11 +18,8 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.cos
 import kotlin.math.min
-import kotlin.math.sin
 
 /*
  * 옆모습 **증기기관차**(은하철도 999) 한 장 — 본선 지도와 지선 카드가 **같이 쓴다**.
@@ -44,6 +41,9 @@ import kotlin.math.sin
  * 3. **행선은 지붕 위 행선판**(v1.6.91). *"열차 아이콘 위에 지금 보다 한단계 작게 올려라..
  *    왜 따로 노냐?"* — 깃대 끝에 매달려 빈자리를 찾아다니던 깃발은 없앴다. 판은 몸통에
  *    붙어 **한 몸으로** 움직이고, 회피 상자도 [locoBox] `board = true` 한 상자로 넘어간다.
+ * 4. **바퀴는 늘 선로를 본다**(v1.6.96). *"외선,내선에서보면 바퀴가 선로쪽으로 안되어있는
+ *    열차 아이콘이 있는데?"* — 본선 외선은 바퀴가 루프 안쪽, 내선은 바깥쪽이고, 지선은 늘
+ *    아래(제 선로)다. 판정은 [locoFlip] 한 곳이고 머리 방향은 그대로 지킨다.
  *
  * ## 왜 회전이 아니라 [Heading] 네 칸인가
  *
@@ -105,27 +105,43 @@ internal fun headingFor(tx: Float, ty: Float, forward: Boolean): Heading {
 }
 
 /**
- * 지도를 통째로 [mapDeg] 만큼 돌려 놓은 화면에서 **배가 하늘을 보는가** — 그러면 몸통을
- * 긴 축으로 **뒤집어** 그려야 한다(v1.6.91).
- *
- * ⚠ 실측 사고: 세로 화면은 지도가 `rotationZ = 90f` 로 통째로 돈다([MainLineMapDialog]).
- * 지도 좌표에서 옳던 [Heading.DOWN] 그림이 화면에서는 **180° 로 서서** 바퀴를 하늘로 들고
- * 열번·행선판 글자가 거꾸로 찍혔다(`8509`, 신도림~당산 세로변). 머리 방향은 참이었으므로
- * 통째로 180° 돌려 고칠 수는 없다 — **긴 축 대칭(거울)** 이라야 머리를 지킨 채 배가 내려온다
- * (오른쪽↔왼쪽이 이미 쓰는 그 수법이다).
- *
- * 순수 함수 — [LocoTest] 가 잠근다.
+ * 안 뒤집은 몸통의 **배(바퀴)가 가는 쪽** — 지도 좌표. [drawLoco] 의 `p()` 표와 한 벌이라
+ * 둘 중 하나만 고치면 안 된다. 순수 함수 — [LocoTest] 가 잠근다.
  */
-internal fun locoFlip(heading: Heading, mapDeg: Float): Boolean {
-    // 제 몸 +y(배)가 지도 좌표에서 가는 쪽.
-    val (bx, by) = when (heading) {
-        Heading.RIGHT, Heading.LEFT -> 0f to 1f
-        Heading.DOWN -> -1f to 0f
-        Heading.UP -> 1f to 0f
-    }
-    val rad = mapDeg * PI.toFloat() / 180f
-    // 화면 좌표는 아래가 +y — 돌린 뒤 배가 위(−y)를 보면 뒤집는다.
-    return bx * sin(rad) + by * cos(rad) < -0.001f
+internal fun locoBelly(heading: Heading): Pair<Float, Float> = when (heading) {
+    Heading.RIGHT, Heading.LEFT -> 0f to 1f
+    Heading.DOWN -> -1f to 0f
+    Heading.UP -> 1f to 0f
+}
+
+/**
+ * **바퀴는 늘 선로를 본다** — 몸통을 긴 축으로 **뒤집어야** 하는가(v1.6.96 사용자 확정).
+ *
+ * > *"외선,내선에서보면 바퀴가 선로쪽으로 안되어있는 열차 아이콘이 있는데?"*
+ *
+ * ## ⚠ v1.6.91 의 `locoFlip(heading, mapDeg)` 이 틀렸던 이유
+ *
+ * 종전 판단 기준은 *"화면에서 배가 하늘을 보는가"* 였다. 글자가 거꾸로 서는 것만 보고 만든
+ * 기준이라 **바퀴가 어느 쪽에 있어야 하는지(= 선로 쪽)** 를 아예 안 봤다. 그래서 배가 늘
+ * **한 화면 방향**(세로 화면 기준 왼쪽/아래)으로만 향했고, 선로가 반대쪽에 있는 차선에서는
+ * 바퀴가 허공을 봤다 — 여덟 경우 중 **넷**이 틀렸다(v1.6.95 `R02` 실측: 화면 왼쪽 세로변
+ * 외선 `2021`·아래 가로변 외선 `3009` 가 바퀴를 선로 반대쪽으로 들었다).
+ *
+ * 규칙은 이제 하나다: **바퀴 = 선로 쪽.** 본선 외선(루프 바깥 차선)은 바퀴가 루프 안쪽으로,
+ * 내선(안쪽 차선)은 바깥쪽으로 간다. 머리 방향([headingFor])은 그대로다 — 긴 축 대칭(거울)
+ * 이라야 머리를 지킨 채 배가 돌아눕는다(좌우 미러가 이미 쓰는 그 수법이다).
+ *
+ * 글자는 이 뒤집기와 **무관하게** [locoTextDeg] 가 화면 기준으로 바로 세운다 — v1.6.91 이
+ * 고친 "거꾸로 찍힌 `8509`" 는 그쪽이 잠그고 있으므로 여기서 빠져도 되살아나지 않는다.
+ *
+ * @param railX,railY 기관차 중심에서 **선로 쪽**을 가리키는 벡터(지도 좌표. y 는 아래가 +).
+ *   본선은 제 차선 바깥 방향의 **반대**(`-out`), 지선은 기관차가 늘 선로 위에 앉으므로 `(0, +1)`.
+ *
+ * 순수 함수 — [LocoTest] 가 여덟 경우 + 지선 둘을 잠근다.
+ */
+internal fun locoFlip(heading: Heading, railX: Float, railY: Float): Boolean {
+    val (bx, by) = locoBelly(heading)
+    return bx * railX + by * railY < 0f     // 배가 선로 반대쪽을 보면 뒤집는다
 }
 
 /**
@@ -175,7 +191,7 @@ internal fun locoHalf(
  * @param wake true = 앞쪽 물결([LOCO_WAKE])까지 넣는다. **앞쪽으로만** 늘어난다.
  * @param board true = 지붕 위 행선판([LOCO_BOARD_H])까지 넣는다. **지붕 쪽으로만** 늘어난다.
  *   기관차와 행선판은 **한 몸**이므로 회피도 한 상자로 넘긴다(v1.6.91 사용자 확정).
- * @param mapDeg 지도 전체 회전([drawLoco] 와 **같은 값**을 줘야 한다) — 뒤집힌 몸통은
+ * @param railTowards 선로 쪽 단위벡터([drawLoco] 와 **같은 값**을 줘야 한다) — 뒤집힌 몸통은
  *   지붕이 반대쪽으로 뻗으므로 상자도 따라 뒤집힌다.
  *
  * 둘 다 한쪽으로만 늘어나므로 상자는 **앞뒤·위아래가 다르다** — 쓰는 쪽에서 `left`/`right`/
@@ -183,10 +199,11 @@ internal fun locoHalf(
  */
 internal fun DrawScope.locoBox(
     center: Offset, heading: Heading, scale: Float,
-    wake: Boolean = false, board: Boolean = false, mapDeg: Float = 0f,
+    wake: Boolean = false, board: Boolean = false,
+    railTowards: Offset = Offset(0f, 1f),
 ): Rect {
     val u = scale * 1.dp.toPx()
-    val h = locoHalf(heading, wake, board, locoFlip(heading, mapDeg))
+    val h = locoHalf(heading, wake, board, locoFlip(heading, railTowards.x, railTowards.y))
     return Rect(
         center.x - h[0] * u, center.y - h[1] * u, center.x + h[2] * u, center.y + h[3] * u)
 }
@@ -219,9 +236,12 @@ private fun Color.mix(o: Color, t: Float) = Color(
  * @param dest 지붕 위 **행선판** 글자(`"성수행"`). 빈 문자열이면 안 단다. 아래 행선판 절을 보라.
  * @param smokeK 연기가 떠오르는 **길이 배수**. 지선 카드 **아래 차선**(까치산행)은 0.5 —
  *   기관차 위가 바로 역 이름 줄이라 제 길이로 오르면 글자에 흰 점이 얹힌다(v1.6.91 실측).
+ * @param railTowards 기관차 중심에서 **선로 쪽**(지도 좌표). 바퀴가 늘 이쪽을 보도록
+ *   몸통을 뒤집는다([locoFlip], v1.6.96). ⚠ [locoBox] 에 **같은 값**을 줘야 회피 상자가
+ *   그림과 맞는다. 기본값 `(0, +1)` = 선로가 밑에 있다(지선 카드가 늘 그렇다).
  * @param mapDeg 지도 **전체 회전**(세로 화면 90f — [MainLineMapDialog] 의 `rotationZ`).
- *   글자를 화면 기준으로 바로 세우고([locoTextDeg]) 배가 하늘을 보면 몸통을 뒤집는다
- *   ([locoFlip]). ⚠ [locoBox] 에 **같은 값**을 줘야 회피 상자가 그림과 맞는다.
+ *   **글자를 화면 기준으로 바로 세우는 데만** 쓴다([locoTextDeg]). 몸통 뒤집기는 v1.6.96
+ *   부터 [railTowards] 가 정한다.
  */
 internal fun DrawScope.drawLoco(
     center: Offset,
@@ -238,11 +258,12 @@ internal fun DrawScope.drawLoco(
     highlight: Boolean = false,
     dest: String = "",
     smokeK: Float = 1f,
+    railTowards: Offset = Offset(0f, 1f),
     mapDeg: Float = 0f,
 ) {
     val u = scale * 1.dp.toPx()
-    /** 배가 하늘을 보면 긴 축으로 뒤집는다 — 머리는 지킨 채 지붕이 화면 위로 온다. */
-    val flip = locoFlip(heading, mapDeg)
+    /** 배가 선로 반대쪽을 보면 긴 축으로 뒤집는다 — 머리는 지킨 채 바퀴가 선로로 내려간다. */
+    val flip = locoFlip(heading, railTowards.x, railTowards.y)
 
     /**
      * **제 몸 좌표 → 화면 좌표.** 머리가 +x, 아래가 +y 인 오른쪽 보기 그림 하나만 적고
@@ -386,11 +407,20 @@ internal fun DrawScope.drawLoco(
     // ⚠ 운전실 창은 **열번 띠(y −8…+8) 위쪽**에만 둔다 — 띠 안에 두면 남색 창이 열번을 삼킨다.
     box(-20.5f, -11.5f, -12f, -8.8f, SolidColor(wheel), 0.6f)
     box(-21.5f, 8f, 17f, 9.8f, SolidColor(wheel))    // 대차 프레임
-    for (cx in floatArrayOf(-16.5f, -4.5f, 8.5f)) {  // 동륜 3개
-        val c = p(cx, 10.3f)
-        drawCircle(wheel, 3.6f * u, c)
-        drawCircle(body, 3.6f * u, c, style = Stroke(width = 1.2f * u))
-        drawCircle(body, 1.2f * u, c)
+    /*
+     * 동륜 3개 — v1.6.96 에서 반지름을 **30% 줄였다**(3.6 → 2.5. 사용자: *"전체 바퀴를 줄이고
+     * 열차번호를 조금 더 크게 해줘!"*). 바퀴가 작아진 만큼 열번 띠가 눈에 먼저 든다.
+     *  · 테·축도 같은 비율(1.2 → 0.85)로 줄인다 — 안 줄이면 작은 바퀴가 테로 꽉 찬다.
+     *  · 중심을 10.3 → 11 로 내려 **바퀴 윗날이 대차 프레임(y 9.8)에 물리게** 둔다. 안 내리면
+     *    작아진 바퀴가 프레임에서 떨어져 몸통 밑에 점 세 개를 찍은 꼴이 된다.
+     *  · 아랫날 13.5 는 종전 13.9 와 거의 같다 — **바퀴가 선로에 닿는 자리**(차선 오프셋 14dp)
+     *    라서 여기가 움직이면 기관차가 선로에서 뜬다.
+     */
+    for (cx in floatArrayOf(-16.5f, -4.5f, 8.5f)) {
+        val c = p(cx, 11f)
+        drawCircle(wheel, 2.5f * u, c)
+        drawCircle(body, 2.5f * u, c, style = Stroke(width = 0.85f * u))
+        drawCircle(body, 0.85f * u, c)
     }
 
     /*
@@ -426,7 +456,10 @@ internal fun DrawScope.drawLoco(
     val lab = textMeasurer.measure(
         number,
         TextStyle(
-            fontSize = (9.5f * scale).sp, fontWeight = FontWeight.ExtraBold, color = numberColor,
+            // v1.6.96 **한 단계 크게**(9.5 → 11). 4자리 ExtraBold 가 ≈27dp — 열번 띠(y −8…+8,
+            // 폭 −23…16)에 그대로 들어가므로 몸통은 안 늘렸다. 전체 필터의 0.8배 기관차에서도
+            // 8.8sp 라 실화면에서 읽힌다(종전 7.6sp). 행선판은 8.5 그대로 = 열번보다 작다.
+            fontSize = (11f * scale).sp, fontWeight = FontWeight.ExtraBold, color = numberColor,
         ),
     )
     val nc = p(-3.5f, 0f)   // 보일러 + 운전실 가운데

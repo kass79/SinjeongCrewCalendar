@@ -4,6 +4,7 @@ import com.sinjeong.crewcalendar.presentation.live.Heading
 import com.sinjeong.crewcalendar.presentation.live.LOCO_BOARD_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_BOX_H
 import com.sinjeong.crewcalendar.presentation.live.headingFor
+import com.sinjeong.crewcalendar.presentation.live.locoBelly
 import com.sinjeong.crewcalendar.presentation.live.locoFlip
 import com.sinjeong.crewcalendar.presentation.live.locoHalf
 import com.sinjeong.crewcalendar.presentation.live.locoTextDeg
@@ -173,16 +174,67 @@ class LocoTest {
         }
     }
 
-    /**
-     * 몸통도 같이 본다 — 글자만 세우면 **바퀴를 하늘로 든 기관차**가 남는다.
-     * 세로(90°)에서 배가 하늘을 보는 것은 [Heading.DOWN] 하나뿐이고, 가로(0°)에서는 아무도 아니다.
+    /*
+     * ── **바퀴는 늘 선로를 본다** (v1.6.96) ────────────────────────────────
+     * 사용자: *"외선,내선에서보면 바퀴가 선로쪽으로 안되어있는 열차 아이콘이 있는데?"*
+     *
+     * v1.6.91 의 `locoFlip(heading, mapDeg)` 는 *"화면에서 배가 하늘을 보는가"* 만 봤다 —
+     * 글자가 거꾸로 서는 문제만 보고 만든 기준이라 **선로가 어느 쪽인지**를 아예 안 봤고,
+     * 여덟 경우 중 넷에서 바퀴가 허공을 봤다(v1.6.95 `R02` 실측). 아래 세 건이 그 자리를
+     * 잠근다 — 이제 판정은 `배 벡터 · 선로 벡터 > 0` 하나뿐이다.
      */
+
+    /** 뒤집기까지 반영한 **바퀴가 보는 쪽**(지도 좌표) — [drawLoco] 가 실제로 그리는 방향이다. */
+    private fun wheels(h: Heading, railX: Float, railY: Float): Pair<Float, Float> {
+        val (bx, by) = locoBelly(h)
+        return if (locoFlip(h, railX, railY)) -bx to -by else bx to by
+    }
+
+    /**
+     * 본선 한 변의 (머리, 선로 쪽) — [MainLineMap] 의 `headingFor`·`spot` 과 **같은 계산**이다.
+     * 차선은 내선이 안쪽(`+nIn`)·외선이 바깥쪽(`−nIn`)이고, 선로는 늘 그 **반대쪽**에 있다.
+     */
+    private fun mainCase(tx: Float, ty: Float, inner: Boolean): Triple<Heading, Float, Float> {
+        val nx = -ty                       // 루프 안쪽 법선
+        val ny = tx
+        val d = if (inner) 1f else -1f     // 제 차선이 물러나는 쪽
+        return Triple(headingFor(tx, ty, inner), -nx * d, -ny * d)
+    }
+
+    /** 네 변 × 내선·외선 **여덟 경우** 모두 바퀴 벡터 = 선로 벡터. 이 한 줄이 규칙 4다. */
     @Test
-    fun `세로에서 아래로 달리는 열차만 몸통을 뒤집는다`() {
-        assertTrue(locoFlip(Heading.DOWN, 90f))
-        for (h in Heading.values()) assertFalse("$h", locoFlip(h, 0f))
-        for (h in listOf(Heading.RIGHT, Heading.LEFT, Heading.UP)) {
-            assertFalse("$h", locoFlip(h, 90f))
+    fun `본선 네 변 여덟 경우 모두 바퀴가 선로를 본다`() {
+        val edges = listOf(
+            "윗변" to (1f to 0f), "오른쪽변" to (0f to 1f),
+            "아랫변" to (-1f to 0f), "왼쪽변" to (0f to -1f),
+        )
+        for ((name, tan) in edges) for (inner in listOf(true, false)) {
+            val (h, rx, ry) = mainCase(tan.first, tan.second, inner)
+            val w = wheels(h, rx, ry)
+            val tag = "$name ${if (inner) "내선" else "외선"}($h)"
+            assertEquals("$tag 바퀴 x", rx, w.first, 0f)
+            assertEquals("$tag 바퀴 y", ry, w.second, 0f)
+        }
+    }
+
+    /** 지선 카드는 두 차선 다 기관차가 **제 선로 위**에 앉는다 — 바퀴는 늘 아래(+y). */
+    @Test
+    fun `지선 두 차선 다 바퀴가 아래 선로를 본다`() {
+        for (toSindorim in listOf(true, false)) {
+            val h = headingFor(1f, 0f, toSindorim)
+            val w = wheels(h, 0f, 1f)
+            assertEquals("$h 바퀴 x", 0f, w.first, 0f)
+            assertEquals("$h 바퀴 y", 1f, w.second, 0f)
+        }
+    }
+
+    /** 선로가 배 반대쪽이면 뒤집고, 같은 쪽이면 안 뒤집는다 — 네 머리 방향 모두. */
+    @Test
+    fun `선로가 반대쪽일 때만 몸통을 뒤집는다`() {
+        for (h in Heading.values()) {
+            val (bx, by) = locoBelly(h)
+            assertFalse("$h", locoFlip(h, bx, by))
+            assertTrue("$h", locoFlip(h, -bx, -by))
         }
     }
 }

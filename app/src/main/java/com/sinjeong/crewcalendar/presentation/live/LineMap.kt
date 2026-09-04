@@ -90,9 +90,10 @@ import kotlin.math.floor
  *  1. 남색 바탕(#0E2A47) 고정 — 앱 테마(라이트/다크)와 **무관**하다.
  *  2. 굵은 초록 가로선 하나에 5역을 붙인다. 역 = 흰 점, **열차가 서 있는 역 = 빨간 점**.
  *  3. **신도림**은 이름 주황 +2sp 굵게 · 점 1.5배 + 흰 테두리 — 본선의 신도림·성수와 같은 규칙.
- *  4. **신도림행은 선 위 차선 · 까치산행은 선 아래 차선**(본선이 내선을 선 안쪽, 외선을
- *     바깥쪽에 두는 것과 같은 발상 — 방향을 자리로 말한다).
- *  5. **내 열차**는 노란 몸통 + 빨간 열번 + 지붕 위 행선판, 그리고 **맨 나중에** 그린다.
+ *  4. **아래가 신도림행(주 선로) · 위가 까치산행**(v1.6.95 복선. 아래 절을 보라) — 본선이
+ *     내선을 선 안쪽, 외선을 바깥쪽에 두는 것과 같은 발상으로 **방향을 자리로 말한다**.
+ *  5. **내 열차**는 흰 테두리 + 빨간 열번 + 지붕 위 행선판, 그리고 **맨 나중에** 그린다
+ *     (몸통 노랑은 v1.6.96 부터 신도림행 **전부**가 쓰므로 구분 표시가 아니다).
  *  6. v1.6.91 — **영업 열차는 전부 증기기관차**([drawLoco]). 모양 = 열차 / 머리 = 진행 방향 /
  *     색 = 신분(내 열차 노랑 · 일반 하늘 · 기지 회송 회색). **열번은 늘 몸통 안**이고,
  *     행선은 **지붕 위 행선판**이다(깃발처럼 따로 떠다니지 않는다).
@@ -116,11 +117,24 @@ import kotlin.math.floor
  * | | 선로 | 굵기·색 | 기관차 |
  * |---|---|---|---|
  * | 위 | 까치산행 | [UP_LINE_H] · [LoopGreenSoft] (연하고 가늘게) | [UP_LOCO_K] 배 · [BadgeSkySoft] |
- * | 아래 | **신도림행(주)** | [LINE_H] · [LoopGreen] (종전 그대로) | 1배 · [BadgeSky] / 내 열차 [MineYellow] |
+ * | 아래 | **신도림행(주)** | [LINE_H] · [LoopGreen] (종전 그대로) | 1배 · **[MineYellow]**(v1.6.96) |
  *
- * **역 이름은 두 선로 사이 한 줄**이고, 역 점은 두 선로에 각각 찍힌다(위 선로 점은 작게).
- * 정차(빨간 점)는 그 열차가 달리는 **제 선로의 점**에만 든다.
- * 두 차선 모두 기관차가 선로 위로 쌓이므로 계단식 회피(`r = 1`)는 **양쪽 다 위로** 물러난다.
+ * 역 점은 두 선로에 각각 찍힌다(위 선로 점은 작게). 정차(빨간 점)는 그 열차가 달리는
+ * **제 선로의 점**에만 든다. 두 차선 모두 기관차가 선로 위로 쌓이므로 계단식 회피(`r = 1`)는
+ * **양쪽 다 위로** 물러난다.
+ *
+ * ## v1.6.96 — 신도림행은 **노랑**, 역 이름은 **아래 선로 밑**(사용자 확정)
+ *
+ * > *"신정지선도 신도림행이 중요하니까 역이름을 신도림행 쪽으로 넣고,, 신도림행으로 가는
+ * > 열차를 본선과 마찬가지로 트렌디한 노란색으로 해줘!"*
+ *
+ *  · 세로 배치가 `까치산행 차선 → 위 선로 → 신도림행 차선 → **아래 선로 → 역 이름**` 이 됐다
+ *    (v1.6.95 는 이름이 두 선로 **사이**였다). 카드 높이는 그대로 — 순서만 바뀌었다.
+ *  · **신도림행 열차는 전부 [MineYellow] 몸통 + [BadgeInk] 남색 열번.** 색이 곧 방향이다.
+ *  · **내 열차 구분은 몸통색이 아니다** — 흰 테두리(`highlight`) + 지붕 위 행선판 +
+ *    **[MineInk] 빨간 열번**, 그리고 맨 나중에 그린다. 몸통색으로 갈랐다가는 사용자가 원한
+ *    *"신도림행은 노랑"* 이 깨진다.
+ *  · 까치산행([BadgeSkySoft])·기지 회송([DepotGray])은 종전 그대로 — 위계가 살아 있다.
  */
 
 /* ── 색: [MainLineMap] 과 **같은 값** — 같이 고칠 것 ────────────────────────── */
@@ -398,7 +412,12 @@ private fun LineMapCard(
                 val laneH = locoH * 2f + 4.dp
                 val nameH = if (big) 21.dp else 18.dp
                 /*
-                 * 위→아래: 까치산행 차선 → 위 선로 → 역 이름 → 신도림행 차선 → 아래 선로.
+                 * 위→아래: 까치산행 차선 → 위 선로 → 신도림행 차선 → **아래 선로 → 역 이름**.
+                 *
+                 * ⚠ v1.6.96 — 역 이름이 **두 선로 사이에서 아래 선로 밑으로** 내려왔다.
+                 * 사용자: *"신정지선도 신도림행이 중요하니까 역이름을 신도림행 쪽으로 넣고"*.
+                 * 이름이 주 선로(신도림행) 바로 밑에 붙어 **어느 선로의 역인지**가 눈에 먼저
+                 * 든다. 높이 총합은 v1.6.95 와 **똑같다** — 순서만 바뀌었다.
                  *
                  * ⚠ **행선판 자리(`boardRoom`)를 따로 안 비운다**(v1.6.94까지는 비웠다).
                  * 두 차선 모두 기관차가 선로 **위**로 쌓이고 내 열차가 늘 `r = 0`(선로에 붙은
@@ -406,7 +425,7 @@ private fun LineMapCard(
                  * `r = 1` 칸(31 + 2dp) 안에 그대로 들어간다. 굴뚝 연기도 같은 자리다.
                  */
                 val canvasH =
-                    laneH + UP_LINE_H + 2.dp + nameH + 2.dp + laneH + LINE_H + 3.dp
+                    laneH + UP_LINE_H + 2.dp + laneH + LINE_H + 2.dp + nameH + 3.dp
 
                 Column(Modifier.padding(vertical = 4.dp)) {
                     BranchHeader(nowMillis, big, onRefresh)
@@ -511,13 +530,13 @@ private fun LineMapCard(
                         val boardUpP = boardP * UP_LOCO_K
                         val lineP = LINE_H.toPx()
                         val upLineP = UP_LINE_H.toPx()
-                        // 위→아래: 까치산행 차선 → 위 선로 → 역 이름 → 신도림행 차선 → 아래 선로.
+                        // 위→아래: 까치산행 차선 → 위 선로 → 신도림행 차선 → 아래 선로 → 역 이름.
                         val upLineTop = laneP
                         val upLineY = upLineTop + upLineP / 2f
-                        val nameTop = upLineTop + upLineP + gapP
-                        val dnTop = nameTop + nameH.toPx() + gapP
-                        val lineTop = dnTop + laneP
+                        val lineTop = upLineTop + upLineP + gapP + laneP
                         val lineY = lineTop + lineP / 2f
+                        // 역 이름은 **아래 선로(신도림행) 바로 밑**이다(v1.6.96 사용자 확정).
+                        val nameTop = lineTop + lineP + gapP
                         /**
                          * 차선 행 중심 y. `r=0`은 **제 선로에 바퀴를 붙인** 행, `r=1`은 계단식으로
                          * 한 단 **위로** 물러난 행 — 두 차선 다 선로가 밑에 있으니 물러나는 쪽도 같다.
@@ -697,9 +716,13 @@ private fun LineMapCard(
                             Triple(no, pos, place(xOf(pos), up = true, tag = true))
                         }
 
-                        /** 자리를 못 잡은 열차 — 그래도 **어디 있는지는** 제 선로 위 점으로 남긴다. */
-                        fun dotOnly(x: Float, up: Boolean) =
-                            drawCircle(BadgeSky, 2.5.dp.toPx(), Offset(x, if (up) upLineY else lineY))
+                        /**
+                         * 자리를 못 잡은 열차 — 그래도 **어디 있는지는** 제 선로 위 점으로 남긴다.
+                         * 색도 제 차선 몸통색이다(v1.6.96 — 신도림행은 노랑).
+                         */
+                        fun dotOnly(x: Float, up: Boolean) = drawCircle(
+                            if (up) BadgeSkySoft else MineYellow,
+                            2.5.dp.toPx(), Offset(x, if (up) upLineY else lineY))
                         /**
                          * 기관차 한 대. **머리 = 진행 방향** — 신도림이 오른쪽 끝이라 신도림행은
                          * 오른쪽, 까치산행은 왼쪽이다([headingFor] 한 곳이 정하고 [LocoTest] 가
@@ -738,11 +761,20 @@ private fun LineMapCard(
                                     tagLeft(c.x), c.y - depotTag.size.height / 2f))
                             }
                         }
-                        // 남의 열차 — 위 차선(까치산행)은 한 톤 물러난 몸통색이다(v1.6.95).
+                        /*
+                         * 남의 열차 — **신도림행은 전부 노란 몸통 + 남색 열번**(v1.6.96 사용자
+                         * 확정: *"신도림행으로 가는 열차를 본선과 마찬가지로 트렌디한 노란색으로
+                         * 해줘!"*). 색이 곧 **어느 방향인가**를 말한다: 노랑 = 신도림행(주),
+                         * 물러난 하늘 = 까치산행, 회색 = 기지 회송.
+                         *
+                         * ⚠ 내 열차도 노란 몸통이라 **구분은 몸통색이 아니다**(아래) — 흰 테두리 +
+                         * 지붕 위 행선판 + **빨간** 열번 셋이 맡는다. 남의 신도림행 열번은
+                         * [BadgeInk] 남색이라 한눈에 갈린다(노랑 위 남색 대비 12:1).
+                         */
                         spots.filter { it.first.trainNo != mineNo }.forEach { (t, pos, c) ->
                             if (c == null) dotOnly(xOf(pos), !t.toSindorim)
                             else loco(c, t.trainNo, t.toSindorim,
-                                if (t.toSindorim) BadgeSky else BadgeSkySoft, BadgeInk)
+                                if (t.toSindorim) MineYellow else BadgeSkySoft, BadgeInk)
                         }
                         // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 표시에 가리면 "표시가 안 된다"는 말이 된다.
                         spots.firstOrNull { it.first.trainNo == mineNo }?.let { (t, pos, c) ->

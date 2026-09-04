@@ -120,7 +120,8 @@ import kotlin.math.sin
  *  3. 순환선은 **원이 아니라 둥근 사각형**. 굵은 초록 선에 43역을 네 변으로 나눠 붙인다.
  *  4. 역 = 흰 점, **열차가 서 있는 역 = 빨간 점**, 역 이름 **43개 전부**.
  *  5. 열차는 **내선이 선 안쪽 · 외선이 선 바깥쪽**. (그림은 v1.6.91 부터 전부 증기기관차 —
- *     하늘색 몸통, 내 열차만 노랑. 네모 배지는 없다.)
+ *     하늘색 몸통, 내 열차만 노랑. 네모 배지는 없다.) **바퀴는 늘 선로 쪽**이라 외선은 바퀴가
+ *     루프 안쪽, 내선은 바깥쪽을 본다(v1.6.96 — [locoFlip]).
  *
  * ## v1.6.85 2차 — 사용자 피드백 세 가지
  *
@@ -232,16 +233,43 @@ private val MineInk = Color(0xFFB3261E)
  */
 private val KeyOrange = Color(0xFFFFB74D)
 private val KEY_STATIONS = setOf("신도림", "성수")
+
+/**
+ * **보통 역 이름**이 기준 크기에서 내려가는 폭(v1.6.96 사용자 요청 — *"역 텍스트 너무 큰거
+ * 아니가? … 쫌 쭐여도 되는데?"*). 이 앱이 쓰는 "한 단계" = 1.5sp 다.
+ *
+ * ⚠ **[KEY_STATIONS] 에는 안 먹인다** — 신도림·성수는 종전 크기·주황 그대로가 사용자 확정이다.
+ * 폴드 펼침의 큰 글자(`big`)에도 같은 폭으로 붙어 비율이 유지된다.
+ */
+private const val LABEL_STEP = 1.5f
 private val Dim = Color(0xFF8FA9C4)
 private const val TAG = "BranchLive"
+
+/** 폴드 펼침 기관차 배수 — [margin] 과 [drawCabLoop] 이 **같은 값**을 봐야 한다. */
+private fun locoScale(big: Boolean) = if (big) 54f / LOCO_LEN else 1f
+
+/** 열차 중심이 선로에서 물러나는 거리 — 내선은 루프 안쪽, 외선은 바깥쪽. */
+private fun badgeOff(big: Boolean) = (if (big) 18 else 14).dp
 
 /**
  * 루프 바깥 여백 — 사용자가 *"옆에 여백이 많다"* 고 해서 최소로 줄였다.
  *
- * ⚠ 0 으로 못 내린다. **외선 열번 배지가 선 바깥에 붙기 때문**이다(배지 중심 14dp +
- * 절반 높이 ≈12dp = 26dp). 10dp 로 뒀더니 아랫변·윗변 외선 배지가 잘렸다(실측).
+ * ⚠ 0 으로 못 내린다. **외선 열차가 선 바깥에 붙기 때문**이다.
+ *
+ * ## v1.6.96 — 눈대중 30dp 가 **내 열차를 선로 위로 밀어 올렸다**
+ *
+ * 30dp 는 v1.6.85 의 하늘색 배지(중심 14dp + 반높이 ≈12dp = 26dp)만 보고 정한 값이다.
+ * 그런데 v1.6.91 부터 **내 열차는 지붕 위에 행선판**을 얹어 지붕 쪽 반높이가
+ * `15.5 + 17 = 32.5dp` 다 — 윗변 외선의 중심(`30 − 14 = 16dp`)에서 상자 위쪽이 캔버스를
+ * 16.5dp 넘어섰고, 그걸 [drawCabLoop] 의 `coerceIn` 이 **안쪽으로 밀어** 내 열차만 제 차선을
+ * 벗어나 **초록 선 위에 올라탔다**(v1.6.95 `R02` 실측 — 노란 `2035` 가 선을 가렸다).
+ *
+ * 사용자 확정 처방: *"캔버스 밖으로 나가면 clamp 대신 여백을 늘려라."* 그래서 이 값은 이제
+ * **눈대중이 아니라 계산값**이다 — `차선 오프셋 + (기관차 반높이 + 행선판)×배수`. 접힘
+ * 46.5dp · 펼침 ≈56.2dp. clamp 는 [drawCabLoop] 에서 통째로 걷어냈다.
  */
-private fun margin(big: Boolean) = (if (big) 42 else 30).dp
+private fun margin(big: Boolean) =
+    badgeOff(big) + ((LOCO_BOX_H / 2f + LOCO_BOARD_H) * locoScale(big)).dp
 
 /**
  * 좌·우 **역명 전용 차선**. 세로변 10개 역(건대입구…잠실 · 대림…당산)의 이름을 루프 **바깥**
@@ -1045,7 +1073,12 @@ private fun DrawScope.layoutLabels(
         val layout = tm.measure(name, TextStyle(
             // 중요 역만 +2sp·굵게·주황(사용자 확정). 열차가 서 있어도 주황이 이긴다 —
             // 빨간 점이 이미 그 말을 하고 있다.
-            fontSize = (if (key) sizeSp + 2f else sizeSp).sp,
+            //
+            // ⚠ v1.6.96 — **보통 역 이름만 한 단계 작다**([LABEL_STEP]). 사용자:
+            // *"본선 전체보기 역 텍스트 너무 큰거 아니가? 신도림, 성수 빼고 쫌 쭐여도 되는데?"*
+            // 신도림·성수는 `sizeSp + 2` 그대로라 **크기도 주황도 안 변한다**(사용자 확정).
+            // 상자가 작아진 만큼 아래 회피(SAT)는 저절로 헐거워진다.
+            fontSize = (if (key) sizeSp + 2f else sizeSp - LABEL_STEP).sp,
             fontWeight = if (key || red) FontWeight.ExtraBold else FontWeight.Medium,
             color = when {
                 key -> KeyOrange
@@ -1150,10 +1183,7 @@ private fun DrawScope.drawCabLoop(
     otherK: Float,
     /** 연기·물결 위상 0~1 — 지도 한 장에 하나([CabScreen]) */
     phase: Float,
-    /**
-     * 지도 전체 회전(세로 90f). **그리는 곳과 재는 곳이 같은 값을 써야** 한다 —
-     * [locoBox] 와 [drawLoco] 둘 다에 넘긴다.
-     */
+    /** 지도 전체 회전(세로 90f). 열번·행선판 **글자를 화면 기준으로 세우는 데만** 쓴다. */
     mapDeg: Float,
 ): List<Pair<Offset, String>> {
     val m = margin(big).toPx()
@@ -1203,12 +1233,13 @@ private fun DrawScope.drawCabLoop(
     }
     // ── 열차 자리를 **라벨보다 먼저** 잡는다 ────────────────
     // 내선은 선 **안쪽**, 외선은 **바깥쪽** — 방향을 자리로 구분한다(사진 사양).
-    val badgeOff = (if (big) 18 else 14).dp.toPx()
+    val off = badgeOff(big).toPx()
+    /** (중심, **제 차선 바깥 방향**). 선로 쪽은 그 반대다 — 바퀴가 볼 쪽이 곧 `-out` 이다. */
     fun spot(t: MainTrainMark, pos: Float): Pair<Offset, Offset> {
         val (p, tan) = loop.at(loop.sOfPos(pos - start))
         val nIn = Offset(-tan.y, tan.x)
         val dir = if (t.inner) 1f else -1f
-        return Offset(p.x + nIn.x * badgeOff * dir, p.y + nIn.y * badgeOff * dir) to
+        return Offset(p.x + nIn.x * off * dir, p.y + nIn.y * off * dir) to
             Offset(nIn.x * dir, nIn.y * dir)
     }
 
@@ -1224,7 +1255,7 @@ private fun DrawScope.drawCabLoop(
      * ⚠ **연기·물결은 내 열차만.** 전체 필터는 20대가 넘게 뜨는데 전부 연기를 내면 지도가
      * 지저분해진다(지선 카드는 열차가 적어 전부 낸다 — 거긴 다른 판이다).
      */
-    val locoScale = if (big) 54f / LOCO_LEN else 1f
+    val locoScale = locoScale(big)
     val otherScale = locoScale * otherK
     fun headingAt(t: MainTrainMark, pos: Float): Heading {
         val (_, tan) = loop.at(loop.sOfPos(pos - start))
@@ -1257,24 +1288,24 @@ private fun DrawScope.drawCabLoop(
     for ((t, pos) in trains.sortedByDescending { it.first.trainNo == mineNo }) {
         val isMine = t.trainNo == mineNo
         val head = headOf(t.trainNo)
-        // 원점에 놓은 상자가 그대로 반지름이다. ⚠ 물결([LOCO_WAKE])·행선판([LOCO_BOARD_H])
-        // 때문에 **앞뒤·위아래가 다르다** — `left`/`top` 은 음수이므로 여백은 `-half.left` 다.
-        val half = locoBox(Offset.Zero, head, if (isMine) locoScale else otherScale,
-            wake = isMine, board = isMine, mapDeg = mapDeg)
-        val (base0, out) = spot(t, pos)
-        // 기관차는 종전 배지보다 커서 [margin] 을 넘길 수 있다(윗변 외선이 가장 아슬아슬하다).
-        // 몇 dp 밀릴 뿐이라 차선은 그대로 읽힌다.
-        val base = Offset(
-            base0.x.coerceIn(-half.left, (size.width - half.right).coerceAtLeast(-half.left)),
-            base0.y.coerceIn(-half.top, (size.height - half.bottom).coerceAtLeast(-half.top)),
-        )
+        val (base, out) = spot(t, pos)
+        /*
+         * ⚠ **캔버스 clamp 를 걷어냈다**(v1.6.96). v1.6.90 은 여기서 중심을 `coerceIn` 으로
+         * 캔버스 안에 밀어 넣었는데, 내 열차는 상자가 지붕 위 행선판까지(32.5dp) 커서
+         * 윗변·아랫변 외선에서 **16.5dp 나 안쪽으로 밀렸다** — 제 차선을 벗어나 초록 선을
+         * 밟았다(v1.6.95 `R02` 실측: 노란 `2035` 가 선 위에 올라앉아 선을 가렸다).
+         * 차선(내선 안·외선 밖)은 이 지도가 **방향을 말하는 방법**이라 몇 dp 도 못 옮긴다.
+         * 자리가 모자라면 열차를 미는 게 아니라 [margin] 을 늘린다(사용자 확정) — 이제
+         * [margin] 이 그 상자를 계산해서 잡으므로 밀 일 자체가 없다.
+         */
         centers[t.trainNo] = base
         for (s in 0..2) {
             val c = Offset(base.x + out.x * stepPx * s, base.y + out.y * stepPx * s)
             // 겹침 회피(계단·역명 SAT)가 보는 상자 — 이제 **전부 기관차 상자**이고,
             // 내 열차는 **지붕 위 행선판까지 한 상자**다(v1.6.91 — 역 이름을 물면 실패다).
+            // 바퀴가 선로를 보므로 지붕은 늘 `out` 쪽이다 — 상자도 같은 벡터로 접는다.
             val r = locoBox(c, head, if (isMine) locoScale else otherScale,
-                wake = isMine, board = isMine, mapDeg = mapDeg)
+                wake = isMine, board = isMine, railTowards = Offset(-out.x, -out.y))
             // 밀어낸 열차가 화면 밖으로 나가면 그 단은 없는 셈 친다(0단은 [margin] 이 챙긴다).
             if (s > 0 && (r.left < 0f || r.top < 0f ||
                     r.right > size.width || r.bottom > size.height)) continue
@@ -1286,7 +1317,8 @@ private fun DrawScope.drawCabLoop(
         }
     }
 
-    // 라벨 글자는 **11sp 아래로 내리지 않는다**(사용자: 가독성). 좁으면 겹침 회피로 푼다.
+    // 라벨 글자 크기는 [labelSp] 하나가 정한다(보통 역은 [LABEL_STEP] 만큼 더 작다 — v1.6.96
+    // 사용자 요청). 좁아도 더 줄이지 않고 **겹침 회피로만** 푼다.
     fun draw(lab: Lab) = rotate(lab.deg, pivot = lab.pivot) {
         val x = if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width
         val y = lab.pivot.y - lab.layout.size.height / 2f
@@ -1321,12 +1353,13 @@ private fun DrawScope.drawCabLoop(
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 열차에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
     // 다른 열차 — 같은 기관차, **몸통만 짧고**(otherK) 연기·물결은 없다.
-    others.forEach { (t, c, _) ->
+    // `railTowards = -out` — 바퀴는 늘 선로 쪽이다(v1.6.96 규칙 4).
+    others.forEach { (t, c, out) ->
         drawLoco(c, headOf(t.trainNo), otherScale, BadgeSky, CabNavy, t.trainNo, BadgeInk, tm,
-            smoke = false, mapDeg = mapDeg)
+            smoke = false, railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg)
     }
     labs.filter { it.over }.forEach { draw(it) }
-    mineRows.forEach { (t, c, _) ->
+    mineRows.forEach { (t, c, out) ->
         /*
          * ⚠ 종전 노란 배지의 **펄스 테두리는 없앴다.** 반투명 노랑을 남색 위에 깔면 기관차
          * 뒤에 **탁한 회색 상자**가 생겨(실측) 도리어 열번이 흐려졌다. 내 열차는 노란 몸통 +
@@ -1338,7 +1371,8 @@ private fun DrawScope.drawCabLoop(
          * 고를 일이 없고, 회피는 위에서 [locoBox] `board = true` 한 상자로 이미 넘어갔다.
          */
         drawLoco(c, headOf(t.trainNo), locoScale, MineYellow, CabNavy, t.trainNo, MineInk, tm,
-            smoke = true, phase = phase, highlight = true, mapDeg = mapDeg,
+            smoke = true, phase = phase, highlight = true,
+            railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
             dest = if (t.destName.isBlank()) "" else t.destName + "행")
     }
 
