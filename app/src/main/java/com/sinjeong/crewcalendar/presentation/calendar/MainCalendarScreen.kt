@@ -2024,7 +2024,11 @@ private fun DutyChangeSheet(
                 LaunchedEffect(manualImeOpen) { if (!manualImeOpen) manualFocus.clearFocus() }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     OutlinedTextField(
-                        value = manualText, onValueChange = { manualText = it },
+                        // 길이 제한(v1.6.86 점검 #5). Firestore 규칙이 `dutyRaw`·`originalDutyRaw`를
+                        // 각각 32자로 막는다(firestore.rules:139,141) — 넘기면 저장이 규칙에서
+                        // **조용히 거절**된다. 두 번째 편집 때 원래근무도 같이 실려 가는 것까지 감안해
+                        // 20자로 여유를 둔다(달력 칸 두 줄 표시도 이 정도가 한계다).
+                        value = manualText, onValueChange = { manualText = it.take(20) },
                         placeholder = { Text("예: 지7, 45, 대2, 회의") },
                         modifier = Modifier.weight(1f), singleLine = true,
                         colors = fieldColors(),
