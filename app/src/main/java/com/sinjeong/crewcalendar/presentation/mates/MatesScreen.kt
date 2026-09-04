@@ -354,35 +354,8 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
         liveUsers.associate { mateKey(it.name, it.group) to it.uid }
     }
 
-    // 소속 칩용 전체 명단 (종전 동료근무와 같은 합성 규칙).
-    // 우선순위: 나 → 로그인 근무자(실데이터) → 수동등록 동료 → 내장 명단.
-    // 중복 제거는 **이름+소속** — 이름만 보면 동명이인(기관사/차장 김지환)이 서로를 지운다.
-    val roster = remember(user, mates, liveUsers) {
-        val taken = mutableSetOf<String>()
-        me?.let { taken += it.key }
-        val live = liveUsers.filter { mateKey(it.name, it.group) !in taken && it.uid != user?.uid }
-            .map {
-                taken += mateKey(it.name, it.group)
-                MatrixPerson(it.name, it.group, it.patternOffset, isMe = false, uid = it.uid)
-            }
-        val manual = mates.filter { mateKey(it.name, it.group) !in taken }
-            .map {
-                taken += mateKey(it.name, it.group)
-                MatrixPerson(it.name, it.group, it.patternOffset, isMe = false)
-            }
-        val bundled = CrewGroup.entries.flatMap { g ->
-            BundledRoster.forGroup(g)
-                .filterNot { mateKey(it.first, g) in taken }
-                .map { (name, off) -> MatrixPerson(name, g, off, isMe = false) }
-        }
-        // ⚠ **마지막 `distinctBy`가 크래시 방지선이다**(v1.6.60). 위 `taken` 대조는 네 갈래
-        // *사이의* 중복만 막는다 — **한 갈래 안에 같은 이름+소속이 둘 있으면 그대로 통과한다.**
-        // `live`의 `filter`는 `map`이 `taken`을 채우기 전에 전부 평가되므로 특히 무방비다:
-        // Firestore `users`에 같은 사람이 사번 두 개로 들어가면(테스트 계정·사번 변경 등)
-        // 아래 `LazyColumn(key = rows[it].key)`가 **`Key ... was already used`로 앱을 죽인다.**
-        // v1.6.60에 에뮬레이터 검증 중 실제로 재현했다. 화면이 죽는 것보다 한 줄만 보이는 게 낫다.
-        (listOfNotNull(me) + live + manual + bundled).distinctBy { it.key }
-    }
+    // 소속 칩용 전체 명단. 합성 규칙은 [mergeRoster] 한 곳에만 있다(테스트가 그 함수를 직접 돌린다).
+    val roster = remember(user, mates, liveUsers) { mergeRoster(me, liveUsers, mates) }
 
     // ★그룹별 인원수 (셋째 줄 칩에 붙는다). 본인 행은 필터와 무관하게 늘 보이므로 세지 않는다 —
     // 세면 `우리 조 3`인데 동료는 둘만 보이는 어긋남이 생긴다.

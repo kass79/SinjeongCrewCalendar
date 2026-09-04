@@ -51,8 +51,13 @@ import java.time.LocalDate
  * 파일을 따로 둔 건 그려내는 법(밴드·레일·칩 계산)과 화면 조립을 갈라 두기 위해서다.
  */
 
-/** 동료 식별 키 — 이름만으로는 그룹 간 동명이인 3쌍(김지환·박두원·이용석)이 충돌한다 */
-fun mateKey(name: String, group: CrewGroup) = "$name|${group.name}"
+/*
+ * ⚠ `mateKey` · `MatrixPerson.cleanName` · `MatrixPerson.key` · `mergeRoster`는 같은 패키지의
+ * [RosterMerge.kt]로 옮겼다(v1.6.87). 이 파일의 파일클래스(`DutyMatrixKt`)는 정적 초기화에
+ * Compose `Dp`·폰트 리소스를 잡아서, 그 안에 있으면 **JUnitCore 직접 실행 classpath에서 로드가
+ * 실패한다**(`gradlew test`가 한글 경로에서 못 도는 이 저장소에선 그게 유일한 실행 경로다).
+ * 패키지가 같으므로 부르는 쪽 import는 한 줄도 바뀌지 않는다.
+ */
 
 /** 매트릭스 한 행 = 사람 하나 */
 data class MatrixPerson(
@@ -71,11 +76,6 @@ data class MatrixPerson(
      */
     val segments: List<PatternSegment> = emptyList(),
 )
-
-/** 즐겨찾기·전화번호는 " (나)" 꼬리표 없는 실제 이름으로 매칭한다 */
-val MatrixPerson.cleanName: String get() = name.removeSuffix(" (나)").trim()
-
-val MatrixPerson.key: String get() = mateKey(cleanName, group)
 
 /**
  * **화면에 그리는 이름** — 동명이인이면 뒤에 `A`·`B`가 붙는다(v1.6.62, [BundledRoster.dupSuffix]).
