@@ -17,6 +17,7 @@ import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.domain.usecase.GetMonthScheduleUseCase
 import com.sinjeong.crewcalendar.domain.usecase.SelectDutyPositionUseCase
 import com.sinjeong.crewcalendar.domain.usecase.UpdateDayUseCase
+import com.sinjeong.crewcalendar.domain.usecase.WeeklyHours
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -92,6 +93,15 @@ data class CalendarUiState(
     /** 이달 휴일 갯수 (앱바 칩) — 충당으로 나가도 안 줄고 **지근으로 바꿀 때만** 준다([countsAsRestDay]) */
     val restDayCount: Int get() = days.count { it.countsAsRestDay }
 
+    /**
+     * 다 불러왔는데 한 칸도 없다 = 그릴 것이 없다(로그인 전·근무 미선택).
+     * 종전엔 이 상태가 [isLoading]과 구분되지 않아 **빠져나올 수 없는 로딩 원**이 됐다(v1.6.92 ③).
+     */
+    val isEmpty: Boolean get() = !isLoading && days.isEmpty()
+
+    /** 이 달이 공휴일표 밖이면 신정·설날·추석이 조용히 평일로 계산된다 → 화면이 말하게 한다(v1.6.92 ①) */
+    val holidayTableMissing: Boolean get() = !Bundled.holidayTableCovers(month)
+
     /** 현재 소속 (근무선택 1단계 기본 표시용) */
     val currentGroup: CrewGroup?
         get() = when {
@@ -147,15 +157,50 @@ class MainCalendarViewModel @Inject constructor(
     private val changeDate = MutableStateFlow<LocalDate?>(null)
     private val error = MutableStateFlow<String?>(null)
 
+    /**
+     * 한 달치 로드 결과에 **대상 달을 실어** 보낸다 (v1.6.92 ②).
+     *
+     * `flatMapLatest{}.stateIn()`은 달을 넘기는 순간 **옛 달 값을 그대로 들고 있는다** —
+     * 그런데 격자는 이미 새 `month`로 그려지므로 9월 격자에 8월 근무가 앉는다(로드가 실패하면
+     * 계속 남는다). 값에 달을 붙여 `month`와 같을 때만 그리게 하면 그 구간이 구조적으로 사라진다.
+     */
+    private data class MonthDays(val month: YearMonth, val days: List<DaySchedule>)
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val days: StateFlow<List<DaySchedule>> = month
+    private val days: StateFlow<MonthDays?> = month
         .flatMapLatest { m ->
-            getMonthSchedule(m).catch { e ->
-                error.value = e.message ?: "근무표를 불러오지 못했습니다"
-                emit(emptyList())
+            getMonthSchedule(m)
+                .map { MonthDays(m, it) }
+                .catch { e ->
+                    error.value = e.message ?: "근무표를 불러오지 못했습니다"
+                    emit(MonthDays(m, emptyList()))
+                }
+        }
+        // null = **아직 한 번도 안 왔다**. 로딩을 "목록이 비었나"로 파생시키면 사용자가 없을 때
+        // (빈 목록 + 에러 없음) 영영 참이라 로딩 원에서 못 빠져나온다(v1.6.92 ③).
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+
+    /**
+     * 주52시간 주별 근무시간 — **메모 시트가 열려 있는 동안에만** 흐른다(`WhileSubscribed(0)`).
+     *
+     * 달 경계 주(월~일이 두 달에 걸친 주)를 그 달 안에서만 세면 52시간을 넘겨도 초과가 안 뜬다
+     * (v1.6.92 ⑦). 그래서 앞뒤 달을 같이 읽어 **주 전체**를 합산한다 — 표시 범위는 그 달 기준
+     * 그대로다. 시간을 하나도 계산할 수 없는 소속(통상근무·4조2교대의 낱말 근무)은 빈 목록 =
+     * 화면이 줄 자체를 감춘다(v1.6.92 ⑥ — 0.0h를 사실처럼 보여 주는 게 더 나쁘다).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val weeklyHours: StateFlow<List<WeeklyHours.Week>> = month
+        .flatMapLatest { m ->
+            combine(
+                getMonthSchedule(m.minusMonths(1)).onStart { emit(emptyList()) },
+                getMonthSchedule(m),
+                getMonthSchedule(m.plusMonths(1)).onStart { emit(emptyList()) },
+            ) { prev, cur, next ->
+                if (WeeklyHours.computable(cur)) WeeklyHours.compute(m, prev + cur + next) else emptyList()
             }
         }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), emptyList())
 
     // 달력 위 오늘 카드 전용 `cardDays`(오늘·다음달 두 달치 합본)는 카드와 함께 v1.6.45에서 제거.
     // 되살리려면 `git show da7cacf`.
@@ -164,14 +209,17 @@ class MainCalendarViewModel @Inject constructor(
         month, days, userRepo.observeMe(), selectedDate, picker, changeDate, error,
     ) { arr ->
         @Suppress("UNCHECKED_CAST")
+        val m = arr[0] as YearMonth
+        // **보고 있는 달의 것일 때만** 그린다. 전환 중(옛 달 값)엔 빈 격자 + 로딩 표시.
+        val loaded = (arr[1] as MonthDays?)?.takeIf { it.month == m }
         CalendarUiState(
-            month = arr[0] as YearMonth,
-            days = arr[1] as List<DaySchedule>,
+            month = m,
+            days = loaded?.days.orEmpty(),
             user = arr[2] as User?,
             selectedDate = arr[3] as LocalDate?,
             picker = arr[4] as DutyPickerState?,
             changeDate = arr[5] as LocalDate?,
-            isLoading = (arr[1] as List<*>).isEmpty() && arr[6] == null,
+            isLoading = loaded == null,
             error = arr[6] as String?,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), CalendarUiState())

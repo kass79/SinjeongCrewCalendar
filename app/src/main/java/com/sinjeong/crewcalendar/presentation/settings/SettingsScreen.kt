@@ -284,6 +284,19 @@ fun SettingsScreen(
 
             // 알림
             SectionTitle("알림")
+            // 권한이 없으면 위 토글을 켜 놔도 브리핑·편승 알람이 걸리지 않는다(v1.6.32).
+            // warning = 아예 안 울림(빨강) / notice = 울리긴 하는데 약함(전체화면 알람 꺼짐).
+            // 화면에 돌아올 때마다 다시 읽어야 설정에서 켜고 온 것이 바로 반영된다.
+            // ⚠ **토글보다 먼저** 읽는다 — 브리핑 스위치가 이 값을 보고 제 상태를 정한다(v1.6.92 ④).
+            val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+            var alarmWarn by remember { mutableStateOf(AlarmPermission.warning(ctx)) }
+            var alarmNote by remember { mutableStateOf(AlarmPermission.notice(ctx)) }
+            LaunchedEffect(Unit) {
+                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
+                    alarmWarn = AlarmPermission.warning(ctx)
+                    alarmNote = AlarmPermission.notice(ctx)
+                }
+            }
             var notifyOn by remember { mutableStateOf(settingsPrefs.getBoolean("notify_tomorrow", true)) }
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
@@ -302,7 +315,17 @@ fun SettingsScreen(
                     settingsPrefs.edit().putBoolean("notify_tomorrow", it).apply()
                 })
             }
-            var briefingOn by remember { mutableStateOf(settingsPrefs.getBoolean("notify_briefing", true)) }
+            /*
+             * 브리핑 토글 — **권한이 없으면 켜진 채로 두지 않는다**(v1.6.92 ④).
+             *
+             * 기본값이 `true`인데 안드로이드 14+ 새 설치는 "알람 및 리마인더"가 기본 꺼짐이라,
+             * 종전엔 [BriefingAlarm.arm]이 조용히 `cancel`만 하고 돌아갔다 —
+             * **한 번도 안 울리는데 토글은 켜짐.** 출근을 놓치게 하는 자리다.
+             * 이제 스위치는 저장값이 아니라 **실제로 울릴 수 있는 상태**를 보여 주고,
+             * 권한이 없을 때 켜려 하면 저장 대신 그 설정 화면으로 보낸다(아래 안내 줄이 이유를 적는다).
+             */
+            var briefingPref by remember { mutableStateOf(settingsPrefs.getBoolean("notify_briefing", true)) }
+            val briefingOn = briefingPref && alarmWarn == null
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -310,30 +333,26 @@ fun SettingsScreen(
                 Column(Modifier.weight(1f)) {
                     Text("출근 1시간 전 브리핑", fontWeight = FontWeight.Bold)
                     Text(
-                        "당일 출근 1시간 전, 근무·출근시각·날씨 요약 알림 (새벽 근무도 그대로 울림)",
+                        if (briefingPref && alarmWarn != null)
+                            "권한이 없어 꺼져 있습니다 — 아래 \"설정 열기\"로 \"알람 및 리마인더\"를 켜 주세요"
+                        else "당일 출근 1시간 전, 근무·출근시각·날씨 요약 알림 (새벽 근무도 그대로 울림)",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (briefingPref && alarmWarn != null) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                Switch(checked = briefingOn, onCheckedChange = {
-                    briefingOn = it
-                    settingsPrefs.edit().putBoolean("notify_briefing", it).apply()
-                    com.sinjeong.crewcalendar.widget.BriefingAlarm.requestRearm(ctx) // 켜면 등록, 끄면 해제
+                Switch(checked = briefingOn, onCheckedChange = { on ->
+                    // 켜려는데 못 울리는 상태면 저장하지 않고 곧바로 그 설정으로 보낸다.
+                    if (on && alarmWarn != null) {
+                        AlarmPermission.openSettings(ctx)
+                    } else {
+                        briefingPref = on
+                        settingsPrefs.edit().putBoolean("notify_briefing", on).apply()
+                        com.sinjeong.crewcalendar.widget.BriefingAlarm.requestRearm(ctx) // 켜면 등록, 끄면 해제
+                    }
                 })
             }
 
-            // 권한이 없으면 위 토글을 켜 놔도 브리핑·편승 알람이 걸리지 않는다(v1.6.32).
-            // warning = 아예 안 울림(빨강) / notice = 울리긴 하는데 약함(전체화면 알람 꺼짐).
-            // 화면에 돌아올 때마다 다시 읽어야 설정에서 켜고 온 것이 바로 반영된다.
-            val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
-            var alarmWarn by remember { mutableStateOf(AlarmPermission.warning(ctx)) }
-            var alarmNote by remember { mutableStateOf(AlarmPermission.notice(ctx)) }
-            LaunchedEffect(Unit) {
-                lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.RESUMED) {
-                    alarmWarn = AlarmPermission.warning(ctx)
-                    alarmNote = AlarmPermission.notice(ctx)
-                }
-            }
             (alarmWarn ?: alarmNote)?.let { msg ->
                 val blocking = alarmWarn != null
                 Row(

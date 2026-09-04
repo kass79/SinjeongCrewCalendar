@@ -253,11 +253,25 @@ fun MainCalendarScreen(
             // 펼침 비율 50:50 — "폴더 펼쳤을 때 화면 반반"(v1.6.11 사용자 선택). v1.6.10은 38:62
             Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
                 NoticeBanner(notices)   // 관리자 공지(v1.6.89). 볼 게 없으면 높이 0
+                // 공휴일표(2026~2027) 밖의 해 — 신정·설날·추석이 조용히 평일로 계산된다.
+                // 표 자체를 늘리는 것이 정답이지만, 그때까지는 **틀릴 수 있다고 말한다**(v1.6.92 ①).
+                if (state.holidayTableMissing) HolidayTableBanner(state.month.year)
                 WeekdayHeader()
 
                 if (state.isLoading) {
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
+                    }
+                } else if (state.isEmpty) {
+                    // 다 불러왔는데 한 칸도 없다 = 로그인 전·근무 미선택. 종전엔 이 상태가
+                    // 로딩과 구분되지 않아 원이 영영 돌았다(v1.6.92 ③).
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "보여 줄 근무가 없습니다.\n앱을 다시 열거나 위 `근무선택`으로 내 근무를 골라 주세요.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 32.dp),
+                        )
                     }
                 } else {
                     CalendarGrid(
@@ -444,6 +458,8 @@ fun MainCalendarScreen(
     if (showMemos) MemoListSheet(
         month = state.month,
         days = state.days,
+        // 시트가 열려 있는 동안에만 앞뒤 달을 읽는다(`WhileSubscribed(0)`) — 달 경계 주 합산용.
+        weeks = viewModel.weeklyHours.collectAsStateWithLifecycle().value,
         onPick = { d ->
             showMemos = false
             if (wide) panelEpochDay = d.toEpochDay() else viewModel.selectDate(d)
@@ -532,6 +548,29 @@ private fun RestCountChip(count: Int) {
 }
 
 /* ── 요일 헤더 ────────────────────────────────────────── */
+@Composable
+private fun HolidayTableBanner(year: Int) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+        shape = RoundedCornerShape(8.dp),
+    ) {
+        Column(Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+            Text(
+                "${year}년 공휴일 정보 없음 (직접 확인 필요)",
+                fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Text(
+                "이 앱은 ${Bundled.HOLIDAY_YEARS.first}~${Bundled.HOLIDAY_YEARS.last}년 공휴일만 알고 있습니다. " +
+                    "이 달의 공휴일은 평일로 계산되어 출근시각·휴무가 틀릴 수 있습니다.",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+        }
+    }
+}
+
 @Composable
 private fun WeekdayHeader() {
     val duty = LocalDutyColors.current
@@ -1072,7 +1111,16 @@ private fun DayDetailContent(
 
             // 행로표 원본 (본선 + 지선). 계산은 [RouteTable.assetFor] 한 곳뿐이다 —
             // 동료 탭 격자(v1.6.81 ②)도 같은 함수를 부른다.
-            val routeAsset = RouteTable.assetFor(day.duty, day.date)
+            //
+            // ⚠ **파일이 실제로 있을 때만** 그림 가지로 간다(v1.6.92 ⑧). `assetFor`는 이름을 계산할
+            // 뿐 파일 유무를 안 보므로(야간 `pp_$n`·본선 `wd_$n`은 번호 범위를 안 잰다), 이름만 보고
+            // 갈라지면 근무변경 직접입력으로 범위 밖 숫자를 넣었을 때 그림도 없고 아래 else 가지의
+            // 사업시각·열번·운휴 안내도 통째로 사라졌다. 이제 그 경우 else로 떨어져 시각이 남는다.
+            val assetCtx = LocalContext.current
+            val routeAssetName = RouteTable.assetFor(day.duty, day.date)
+            val routeAsset = remember(routeAssetName) {
+                routeAssetName?.takeIf { routeAssetExists(assetCtx, it) }
+            }
             // 전체화면 행로표는 인라인 표를 탭했을 때만 연다(날짜 탭 자동 오픈은 되돌림).
             // 키를 날짜로 둬서 ① 닫으면 리컴포지션에도 다시 안 열리고 ② 날짜를 바꾸면 닫힌 채 시작.
             var showRoute by remember(day.date) { mutableStateOf(false) }

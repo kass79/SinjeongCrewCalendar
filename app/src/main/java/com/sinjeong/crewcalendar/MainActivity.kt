@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
@@ -91,6 +92,48 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/**
+ * **첫 실행 알람 권한 안내** (v1.6.92 ④).
+ *
+ * 출근 브리핑 토글은 기본값이 켜짐인데, 안드로이드 14+ 새 설치는 "알람 및 리마인더"가
+ * **기본 꺼짐**이다. 종전엔 [BriefingAlarm.arm]이 조용히 예약을 취소만 하고 돌아가서
+ * **한 번도 안 울리는데 토글은 켜진** 상태가 됐다 — 출근을 놓치게 하는 자리다.
+ * [MainActivity]가 요청하는 것은 알림 권한(POST_NOTIFICATIONS)뿐이라 여기까지 못 왔다.
+ *
+ * 한 번만 묻는다(`alarm_perm_asked`). "나중에"를 골라도 설정 화면의 빨간 안내 줄과
+ * 꺼진 토글이 계속 이유를 말해 주므로 다시 조를 필요가 없다.
+ */
+@Composable
+private fun AlarmPermissionGate() {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val prefs = ctx.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE)
+    val warn = com.sinjeong.crewcalendar.widget.AlarmPermission.warning(ctx)
+    var ask by androidx.compose.runtime.remember {
+        androidx.compose.runtime.mutableStateOf(
+            warn != null &&
+                prefs.getBoolean("notify_briefing", true) &&
+                !prefs.getBoolean("alarm_perm_asked", false),
+        )
+    }
+    if (!ask || warn == null) return
+    fun close() {
+        prefs.edit().putBoolean("alarm_perm_asked", true).apply()
+        ask = false
+    }
+    AlertDialog(
+        onDismissRequest = { close() },
+        title = { Text("알람이 울리지 않는 상태입니다") },
+        text = { Text("$warn\n\n지금 켜 두면 출근 1시간 전 브리핑과 편승 알람이 정시에 울립니다.") },
+        confirmButton = {
+            TextButton(onClick = {
+                close()
+                com.sinjeong.crewcalendar.widget.AlarmPermission.openSettings(ctx)
+            }) { Text("설정 열기") }
+        },
+        dismissButton = { TextButton(onClick = { close() }) { Text("나중에") } },
+    )
+}
+
 private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
     Calendar("calendar", "달력", Icons.Default.CalendarMonth),
     Mates("mates", "동료", Icons.Default.Groups),
@@ -110,6 +153,8 @@ private fun AppRoot() {
     val nav = rememberNavController()
     val backStack by nav.currentBackStackEntryAsState()
     val currentDest = backStack?.destination
+
+    AlarmPermissionGate()
 
     Scaffold(
         bottomBar = {

@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.widget
 
 import android.content.Context
+import android.util.Log
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.hilt.work.HiltWorker
@@ -52,7 +53,10 @@ class DutyWidgetWorker @AssistedInject constructor(
                 }.getOrNull()?.let { "편승 " + hhmm(it.hour, it.minute) }.orEmpty()
                 else -> ""
             }
-            Cell(date.format(dow), date.dayOfMonth.toString(), d?.duty?.display.orEmpty(), red, d?.duty?.type, time)
+            Cell(
+                date.format(dow), date.dayOfMonth.toString(), d?.duty?.display.orEmpty(), red,
+                d?.duty?.type, time, date.toEpochDay(),
+            )
         }
         val strip = encodeStrip(cells)
         // 근무 미선택·로그아웃이면 빈 문자열 → 위젯이 빈 상태 문구를 그린다
@@ -70,7 +74,9 @@ class DutyWidgetWorker @AssistedInject constructor(
         }
         scheduleBoundaryRefresh(context, today, byDate[today]?.signOn)
         Result.success()
-    }.getOrElse { Result.retry() }
+        // 조용히 넘기지 않는다 — 이게 밀리면 위젯이 어제 근무를 오늘로 보여 준다(v1.6.92 ⑤).
+        // 흔적이 있어야 `adb logcat -s DutyWidget` 으로 원인을 짚을 수 있다.
+    }.getOrElse { Log.w("DutyWidget", "위젯 갱신 실패 — 다시 시도", it); Result.retry() }
 }
 
 /**
@@ -100,6 +106,10 @@ internal fun focusDate(today: LocalDate, todaySignOn: String?): LocalDate =
  */
 internal fun subLine(today: LocalDate, byDate: Map<LocalDate, com.sinjeong.crewcalendar.domain.model.DaySchedule>): String {
     val date = focusDate(today, byDate[today]?.signOn)
+    // 공휴일표 밖의 해 — 출근시각이 평일값으로 계산됐을 수 있다. 조용히 넘기지 않는다(v1.6.92 ①).
+    if (!com.sinjeong.crewcalendar.domain.model.Bundled.holidayTableCovers(date)) {
+        return "공휴일 정보 없음 · 직접 확인"
+    }
     val head = if (date == today) "오늘" else "내일"
     val t = byDate[date] ?: return ""
     t.signOn?.let { return "$head 출근 $it" }

@@ -107,7 +107,18 @@ class DutyWidget : GlanceAppWidget() {
             ) {
                 val prefs = currentState<androidx.datastore.preferences.core.Preferences>()
                 val cells = decodeStrip(prefs[KEY_WEEK].orEmpty())
-                val sub = prefs[KEY_SUB].orEmpty()
+
+                /*
+                 * **신선도**(v1.6.92 ⑤). 종전엔 첫 칸을 무조건 오늘로 칠했다 — 자정 갱신이
+                 * 도즈에 밀리면 **어제 근무가 오늘로 강조된다.** 이제 칸마다 날짜가 실려 있으므로
+                 * ① 오늘 강조가 스스로 옳은 칸을 찾아가고 ② 어느 칸도 오늘이 아니면 "갱신 필요"라고
+                 * 말한다(그때 첫 칸 강조는 아예 안 걸린다 — 틀린 강조보다 없는 편이 낫다).
+                 * 날짜가 없는 옛 레코드는 워커가 한 번 돌 때까지 종전대로 첫 칸을 오늘로 본다.
+                 */
+                val todayEpoch = java.time.LocalDate.now().toEpochDay()
+                val dated = cells.any { it.epochDay != null }
+                val stale = dated && cells.none { it.epochDay == todayEpoch }
+                val sub = if (stale) "갱신 필요 · 탭해서 열기" else prefs[KEY_SUB].orEmpty()
 
                 val size = LocalSize.current
                 // 어느 판을 그릴지는 **판 크기**로 정한다(= 런처가 실폭으로 이미 고른 결과).
@@ -147,13 +158,16 @@ class DutyWidget : GlanceAppWidget() {
                         return@Column
                     }
 
+                    // 오늘 칸의 자리. 낡았으면 −1 = 어느 칸도 오늘로 칠하지 않는다.
+                    val todayIdx = if (dated) cells.indexOfFirst { it.epochDay == todayEpoch } else 0
+
                     // 2x1(TINY) / 3x1(MID) / 4x1 이상(FOUR·WIDE)
                     if (size.width < MID_SHORT.width) {
-                        Compact2(cells[0], sub, small)
+                        Compact2(cells.getOrNull(todayIdx) ?: cells[0], sub, stale, small)
                         return@Column
                     }
                     if (size.width < FOUR_SHORT.width) {
-                        ThreeDays(cells.take(3), small, tall)
+                        ThreeDays(cells.take(3), todayIdx, small, tall)
                         return@Column
                     }
 
@@ -177,7 +191,7 @@ class DutyWidget : GlanceAppWidget() {
                     Row(modifier = GlanceModifier.fillMaxWidth()) {
                         cells.forEachIndexed { i, c ->
                             Box(modifier = GlanceModifier.defaultWeight().padding(horizontal = 1.dp)) {
-                                DayCell(c, i == 0, narrow, tall, small, GlanceModifier.fillMaxWidth())
+                                DayCell(c, i == todayIdx, narrow, tall, small, GlanceModifier.fillMaxWidth())
                             }
                         }
                     }
@@ -189,9 +203,11 @@ class DutyWidget : GlanceAppWidget() {
     /**
      * 2x1 — 오늘 근무(크게) + 시각 한 줄("출근 07:47"/"편승 12:36").
      * 시각이 없으면 부제(`sub` — 오늘/내일 구분이 이미 들어 있다).
+     * [stale]이면 **시각 대신 부제**("갱신 필요")를 적는다 — 낡은 출근시각을 오늘 것처럼
+     * 보여 주는 게 이 칸에서 제일 위험하다(v1.6.92 ⑤).
      */
     @androidx.compose.runtime.Composable
-    private fun Compact2(today: Cell, sub: String, small: Boolean) {
+    private fun Compact2(today: Cell, sub: String, stale: Boolean, small: Boolean) {
         val pal = today.type?.let(::dutyPalette)
         val bg = if (pal != null && pal.first != 0) ColorProvider(Color(pal.first)) else GlanceTheme.colors.surface
         val fg = if (pal != null) ColorProvider(Color(pal.second)) else GlanceTheme.colors.onSurface
@@ -209,7 +225,7 @@ class DutyWidget : GlanceAppWidget() {
                         fontWeight = FontWeight.Bold,
                     ),
                 )
-                val line = today.time.ifBlank { sub }
+                val line = if (stale) sub else today.time.ifBlank { sub }
                 if (line.isNotBlank()) Text(
                     line,
                     maxLines = 1,
@@ -221,11 +237,11 @@ class DutyWidget : GlanceAppWidget() {
 
     /** 3x1 — 오늘·내일·모레 3칸. 칸이 넓으니 요일을 붙인다(narrow=false). */
     @androidx.compose.runtime.Composable
-    private fun ThreeDays(cells: List<Cell>, small: Boolean, tall: Boolean) {
+    private fun ThreeDays(cells: List<Cell>, todayIdx: Int, small: Boolean, tall: Boolean) {
         Row(modifier = GlanceModifier.fillMaxWidth()) {
             cells.forEachIndexed { i, c ->
                 Box(modifier = GlanceModifier.defaultWeight().padding(horizontal = 2.dp)) {
-                    DayCell(c, i == 0, narrow = false, tall = tall, small = small, GlanceModifier.fillMaxWidth())
+                    DayCell(c, i == todayIdx, narrow = false, tall = tall, small = small, GlanceModifier.fillMaxWidth())
                 }
             }
         }

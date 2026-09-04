@@ -25,12 +25,16 @@ import com.sinjeong.crewcalendar.domain.model.withSegments
 import com.sinjeong.crewcalendar.presentation.calendar.DutyPickerState
 import com.sinjeong.crewcalendar.widget.signOnAt
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.LocalTime
+import java.time.YearMonth
 
 
 /**
@@ -1892,20 +1896,105 @@ class PatternTest {
      * v1.6.60까지 `movePeriod`는 `coerceAtLeast(0)`뿐이라 `›`가 **무제한**이었다 — 연타하면
      * 10년, 20년 뒤까지 간다(에뮬레이터에서 900회 넘게 눌러 실제로 2037년까지 갔다).
      * 크래시는 안 났지만 **거기 그려지는 통상근무는 이미 틀린 값**이다:
-     * [Bundled.PUBLIC_HOLIDAYS]가 한 해치뿐이라 표 밖으로 나가면 `restOnHolidays`가 덮을 게 없어
+     * [Bundled.PUBLIC_HOLIDAYS] 밖으로 나가면 `restOnHolidays`가 덮을 게 없어
      * 설날·신정·추석이 **근무일로 그려진다.** 순환 교번은 멀쩡히 계산되니 화면은 정상으로 보인다 —
      * 조용히 틀리는 자리라서 화면 쪽에 한계를 두는 것이 답이다.
      *
-     * ⚠ 이 테스트가 깨지는 경우는 하나뿐이다: **공휴일표에 새 해를 넣었을 때.**
-     * 그때는 `MatesViewModel.MAX_PERIOD`도 같이 다시 정할 것(표가 덮는 만큼 늘릴 수 있다).
+     * v1.6.92에서 표가 **2026~2027 두 해**로 늘었다. 달력·위젯은 표 밖으로 나가면 스스로
+     * "공휴일 정보 없음"이라고 말하지만([Bundled.holidayTableCovers]) 동료 탭은 아직 그 안내가
+     * 없으므로 상한(12개월)을 그대로 둔다 — 표가 더 늘면 그때 `MatesViewModel.MAX_PERIOD`를 재검토.
      */
-    @Test fun holidayTable_covers_one_year_which_bounds_the_mates_period() {
-        assertEquals(setOf(2026), Bundled.PUBLIC_HOLIDAYS.keys.mapTo(mutableSetOf()) { it.year })
+    @Test fun holidayTable_years_bound_the_mates_period() {
+        assertEquals(setOf(2026, 2027), Bundled.PUBLIC_HOLIDAYS.keys.mapTo(mutableSetOf()) { it.year })
+        assertEquals(2026..2027, Bundled.HOLIDAY_YEARS)
 
-        // 표 안: 신정이 휴무로 덮인다
+        // 표 안: 신정이 휴무로 덮인다 (두 해 모두)
         assertEquals("휴무", Bundled.OFFICE_PATTERN.dutyOn(LocalDate.of(2026, 1, 1), 0).raw)
-        // 표 밖(한 해 뒤 신정, 금요일): 덮을 게 없어 그냥 주간 근무로 그려진다 = 상한이 필요한 이유
-        assertEquals("주간", Bundled.OFFICE_PATTERN.dutyOn(LocalDate.of(2027, 1, 1), 0).raw)
+        assertEquals("휴무", Bundled.OFFICE_PATTERN.dutyOn(LocalDate.of(2027, 1, 1), 0).raw)
+        // 표 밖(2028 신정, 토요일이라 주말로는 덮이지만 평일 공휴일로는 확인 불가)
+        assertFalse(Bundled.holidayTableCovers(LocalDate.of(2028, 1, 1)))
+        assertFalse(Bundled.holidayTableCovers(YearMonth.of(2028, 1)))
+        assertTrue(Bundled.holidayTableCovers(YearMonth.of(2027, 12)))
+        // 표 밖 평일 공휴일(2028 삼일절, 수요일): 덮을 게 없어 그냥 주간 근무로 그려진다 = 안내가 필요한 이유
+        assertEquals("주간", Bundled.OFFICE_PATTERN.dutyOn(LocalDate.of(2028, 3, 1), 0).raw)
+    }
+
+    /* ── v1.6.92 ①: 2027 공휴일 (출처 확인은 [Bundled.PUBLIC_HOLIDAYS] 주석) ───────── */
+
+    /**
+     * **2027년 공휴일 전수**. 하나라도 빠지면 그 날 휴일 다이아를 평일로 읽어 승무원이 지각한다.
+     * 날짜·요일은 한국천문연구원 2027년 월력요항 보도(설날 2/7 일 · 추석 9/15 수 ·
+     * 일요일 겹침 4일 · 토요일 겹침 5일)와 대체공휴일 7회 보도로 교차 확인했다.
+     */
+    @Test fun holidays_2027_are_complete() {
+        val h2027 = Bundled.PUBLIC_HOLIDAYS.filterKeys { it.year == 2027 }
+        assertEquals("2027 공휴일 건수(월력요항 24건)", 24, h2027.size)
+
+        fun on(m: Int, d: Int) = LocalDate.of(2027, m, d)
+        // 고정 공휴일
+        assertEquals("신정", h2027[on(1, 1)])
+        assertEquals("삼일절", h2027[on(3, 1)])
+        assertEquals("어린이날", h2027[on(5, 5)])
+        assertEquals("현충일", h2027[on(6, 6)])
+        assertEquals("광복절", h2027[on(8, 15)])
+        assertEquals("개천절", h2027[on(10, 3)])
+        assertEquals("한글날", h2027[on(10, 9)])
+        assertEquals("성탄절", h2027[on(12, 25)])
+        // 2026년부터 관공서 공휴일 — 2027년엔 둘 다 토요일
+        assertEquals("노동절", h2027[on(5, 1)])
+        assertEquals("제헌절", h2027[on(7, 17)])
+        assertEquals(DayOfWeek.SATURDAY, on(5, 1).dayOfWeek)
+        assertEquals(DayOfWeek.SATURDAY, on(7, 17).dayOfWeek)
+        // 음력 기반 — 기억이 아니라 출처로 확인한 값
+        assertEquals("설날", h2027[on(2, 7)])
+        assertEquals(DayOfWeek.SUNDAY, on(2, 7).dayOfWeek)
+        assertEquals("설연휴", h2027[on(2, 6)]); assertEquals("설연휴", h2027[on(2, 8)])
+        assertEquals("부처님오신날", h2027[on(5, 13)])
+        assertEquals("추석", h2027[on(9, 15)])
+        assertEquals(DayOfWeek.WEDNESDAY, on(9, 15).dayOfWeek)
+        assertEquals("추석연휴", h2027[on(9, 14)]); assertEquals("추석연휴", h2027[on(9, 16)])
+    }
+
+    /** 대체공휴일 7회 — 전부 그 주 월요일(설날만 화요일)이고, 신정·삼일절·추석엔 없다 */
+    @Test fun substituteHolidays_2027_are_exactly_seven() {
+        val subs = Bundled.PUBLIC_HOLIDAYS
+            .filterKeys { it.year == 2027 }.filterValues { it == "대체휴일" }.keys.sorted()
+        assertEquals(
+            listOf(
+                LocalDate.of(2027, 2, 9),   // 설날이 일요일
+                LocalDate.of(2027, 5, 3),   // 노동절이 토요일
+                LocalDate.of(2027, 7, 19),  // 제헌절이 토요일
+                LocalDate.of(2027, 8, 16),  // 광복절이 일요일
+                LocalDate.of(2027, 10, 4),  // 개천절이 일요일
+                LocalDate.of(2027, 10, 11), // 한글날이 토요일
+                LocalDate.of(2027, 12, 27), // 성탄절이 토요일
+            ),
+            subs,
+        )
+        // **현충일(6/6 일)은 대체공휴일이 없다** — 대체 대상에서 제외돼 있다. 가장 틀리기 쉬운 자리.
+        assertEquals(DayOfWeek.SUNDAY, LocalDate.of(2027, 6, 6).dayOfWeek)
+        assertNull(Bundled.PUBLIC_HOLIDAYS[LocalDate.of(2027, 6, 7)])
+        assertFalse("6/7(월)은 평일 다이아", Bundled.isHolidayTimetable(LocalDate.of(2027, 6, 7)))
+        // 2027년 전국단위 선거는 없다 — 2026년의 `지방선거` 같은 항목이 있으면 안 된다
+        assertFalse(Bundled.PUBLIC_HOLIDAYS.filterKeys { it.year == 2027 }.containsValue("지방선거"))
+    }
+
+    /** 2027 신정·설날·추석이 **휴일 다이아**로 잡히는지 — 이 표가 곧 출근시각이다 */
+    @Test fun holidays_2027_use_holiday_timetable() {
+        listOf(
+            LocalDate.of(2027, 1, 1),    // 금
+            LocalDate.of(2027, 2, 8),    // 월 (설 연휴)
+            LocalDate.of(2027, 2, 9),    // 화 (대체)
+            LocalDate.of(2027, 3, 1),    // 월
+            LocalDate.of(2027, 9, 15),   // 수 (추석)
+            LocalDate.of(2027, 12, 27),  // 월 (대체)
+        ).forEach { d ->
+            assertTrue("$d 는 휴일 다이아여야 한다", Bundled.isHolidayTimetable(d))
+            assertNotEquals("$d 는 주말이 아니다", DayOfWeek.SATURDAY, d.dayOfWeek)
+            assertNotEquals("$d 는 주말이 아니다", DayOfWeek.SUNDAY, d.dayOfWeek)
+            // 통상근무는 그 날 휴무로 덮인다
+            assertEquals("$d", "휴무", Bundled.OFFICE_PATTERN.dutyOn(d, 0).raw)
+        }
     }
 
     /** 본선 주간 26~29는 휴일 시각표에 없다 = 그날 운휴. 상세시트 안내 분기의 근거 */

@@ -92,6 +92,18 @@ fun routeSampleSize(srcW: Int, reqW: Int): Int {
  *     투명도를 잃을 것이 없고, 표 이미지는 평면 색·검은 글자뿐이라 밴딩이 생길 그라디언트가 없다.
  *     ⚠ 사진처럼 그라디언트가 있는 자산을 넣게 되면 이 줄을 다시 봐야 한다.
  */
+/**
+ * 행로표 자산이 **실제로 들어 있나** (v1.6.92 ⑧).
+ *
+ * [RouteTable.assetFor]는 이름을 **계산**할 뿐 파일이 있는지 보지 않는다 —
+ * 야간(`pp_$n`)·본선 평일(`wd_$n`)은 번호 범위를 안 재서, 근무변경 직접입력으로 범위 밖 숫자를
+ * 넣으면 있지도 않은 이름이 나온다. 화면이 **이름만 보고** 갈라지면 그 순간 디코딩이 null이라
+ * 그림도 없고, 사업시각·열번·운휴 안내가 있는 else 가지도 건너뛴 채 **아무것도 안 남았다.**
+ * 이름이 아니라 파일 유무로 갈라야 시각 정보가 늘 남는다.
+ */
+fun routeAssetExists(context: Context, asset: String?): Boolean =
+    asset != null && runCatching { context.assets.open("routes/$asset.webp").close() }.isSuccess
+
 private fun decodeRoute(context: Context, asset: String, reqW: Int): Bitmap? = runCatching {
     val path = "routes/$asset.webp"
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -292,6 +304,14 @@ fun RouteImageInline(
             // v1.6.29: 우하단 ZoomOutMap 아이콘 삭제(사용자 요청 "터치하면 커지는데?").
             // 힌트일 뿐이었고 가로 스크롤 위치에 따라 표 셀("야간 8:00")을 덮었다(남은 이슈 1번).
             // 이미지 아무 데나 탭하면 전체화면이 열리는 동작은 그대로다.
+        } else {
+            // 파일은 있는데 디코딩이 실패한 경우(손상·메모리). 자리를 비워 두면 사용자는
+            // "행로표가 없는 근무"인지 "앱이 못 그린 것"인지 알 길이 없다(v1.6.92 ⑧).
+            Text(
+                "행로표 이미지를 불러오지 못했습니다",
+                modifier = Modifier.padding(vertical = 12.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
     }
 }

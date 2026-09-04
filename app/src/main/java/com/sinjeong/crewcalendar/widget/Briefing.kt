@@ -66,8 +66,16 @@ object BriefingAlarm {
         )
         if (!enabled(ctx)) { am.cancel(pi); return }
         // 정확 알람 권한이 없으면 아예 걸지 않는다 — v1.6.31까지의 setWindow 폴백은 Doze에서
-        // 통째로 밀려 새벽 출근에 못 울렸다(근거는 [AlarmPermission] 주석). 안내는 설정 화면이 한다.
-        if (!AlarmPermission.canExact(ctx)) { am.cancel(pi); return }
+        // 통째로 밀려 새벽 출근에 못 울렸다(근거는 [AlarmPermission] 주석).
+        //
+        // ⚠ **안내는 화면이 한다**(v1.6.92 ④): 첫 실행 대화상자([AlarmPermissionGate])와
+        //   설정의 브리핑 스위치가 이 상태를 그대로 비춰 준다(권한이 없으면 스위치가 꺼져 보인다).
+        //   종전엔 여기서 조용히 취소만 해서 **토글은 켜짐인데 한 번도 안 울리는** 상태가 됐다.
+        if (!AlarmPermission.canExact(ctx)) {
+            Log.w("Briefing", "정확 알람 권한 없음 — 브리핑 예약 안 함")
+            am.cancel(pi)
+            return
+        }
 
         val now = LocalDateTime.now()
         val today = now.toLocalDate()

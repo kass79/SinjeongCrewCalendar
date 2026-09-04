@@ -62,6 +62,13 @@ fun memoFirstLine(memo: String): String =
 fun MemoListSheet(
     month: YearMonth,
     days: List<DaySchedule>,
+    /**
+     * 주52시간 주별 근무시간. **비어 있으면 줄 자체를 안 그린다** —
+     * 통상근무·4조2교대처럼 시간을 계산할 수 없는 소속이 매주 `0.0h`로 보이던 것을 막는다(v1.6.92 ⑥).
+     * 계산은 [MainCalendarViewModel.weeklyHours]가 하고(달 경계 주는 인접 달까지 합산, v1.6.92 ⑦)
+     * 여기서는 그리기만 한다.
+     */
+    weeks: List<WeeklyHours.Week>,
     onPick: (LocalDate) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -83,33 +90,34 @@ fun MemoListSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            // 주52시간 — 그 달의 주별 근무시간(월~일, 52.0h 초과는 빨강). 달력 상태에서 파생이라
-            // 근무변경·메모를 저장하면 곧바로 다시 계산된다(저장소·쿼리 없음).
-            // `FlowRow` 라 글자배율을 키우면 잘리지 않고 스스로 아랫줄로 접힌다.
-            val weeks = remember(month, days) { WeeklyHours.compute(month, days) }
+            // 주52시간 — 그 달의 주별 근무시간(월~일, 52.0h 초과는 빨강).
             // 사용자 피드백(v1.6.90): 숫자만 있으면 뭔지 모른다 — "주 52시간" 기준임을 한 줄로 밝힌다.
-            Text(
-                "주 52시간 확인 · 월~일 근무시간 합계 (넘는 주는 빨간색)",
-                fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.padding(bottom = 4.dp),
-            )
-            FlowRow(
-                Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                weeks.forEach { w ->
-                    val over = w.minutes > WeeklyHours.LIMIT_MIN
-                    val tail =
-                        (if (over) " 초과" else "") +
-                            if (w.excluded.isEmpty()) "" else " (${w.excluded.joinToString("·")} 미포함)"
-                    Text(
-                        WeeklyHours.label(w) + tail,
-                        fontSize = 12.5.sp,
-                        fontWeight = if (over) FontWeight.ExtraBold else FontWeight.Bold,
-                        color = if (over) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            if (weeks.isNotEmpty()) {
+                Text(
+                    "주 52시간 확인 · 월~일 근무시간 합계 (넘는 주는 빨간색)",
+                    fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(bottom = 4.dp),
+                )
+                // `FlowRow` 라 글자배율을 키우면 잘리지 않고 스스로 아랫줄로 접힌다.
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                ) {
+                    weeks.forEach { w ->
+                        val tail =
+                            (if (w.over) " 초과" else "") +
+                                // 인접 달 근무를 아직 못 읽은 경계 주 — 합계가 덜 찼으니 초과라고 말하지 않는다
+                                (if (w.partial) " · 일부만 집계" else "") +
+                                if (w.excluded.isEmpty()) "" else " (${w.excluded.joinToString("·")} 미포함)"
+                        Text(
+                            WeeklyHours.label(w) + tail,
+                            fontSize = 12.5.sp,
+                            fontWeight = if (w.over) FontWeight.ExtraBold else FontWeight.Bold,
+                            color = if (w.over) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
             }
             if (rows.isEmpty()) {

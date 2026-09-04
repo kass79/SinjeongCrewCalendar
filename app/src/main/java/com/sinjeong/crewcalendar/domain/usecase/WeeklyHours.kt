@@ -40,7 +40,10 @@ object WeeklyHours {
 
     /**
      * 그 달의 한 주(월~일).
-     * [from]/[to]는 **그 달 안으로 잘린다**(월초·월말의 걸친 주는 그 달 날짜만 센다).
+     * [from]/[to]는 **표시용**이라 그 달 안으로 잘린다(라벨의 `(1~6일)`이 여기서 나온다).
+     * [minutes]는 그와 달리 **월~일 7일 전부**를 센다 — 달 경계 주를 그 달 안에서만 세면
+     * 52시간을 넘겨도 초과가 안 뜬다(v1.6.92 ⑦).
+     * [partial]은 7일 중 근무를 모르는 날이 있다는 뜻(인접 달을 아직 못 읽음) → **초과 판정에서 뺀다.**
      * [excluded]는 시간 미정이라 0으로 둔 근무의 표시명 — 중복 없이 나온 순서대로.
      */
     data class Week(
@@ -49,9 +52,31 @@ object WeeklyHours {
         val to: LocalDate,
         val minutes: Int,
         val excluded: List<String>,
-    )
+        val partial: Boolean = false,
+    ) {
+        /** 52시간을 넘겼다고 **단정할 수 있는가**. 부분 집계면 넘겨도 단정하지 않는다 */
+        val over: Boolean get() = !partial && minutes > LIMIT_MIN
+    }
 
-    /** 그 달의 주(월~일) 목록. 1일이 속한 주의 월요일부터 7일씩. [Week.index]는 1부터 */
+    /**
+     * 시간을 하나라도 계산할 수 있는 근무표인가 (v1.6.92 ⑥).
+     *
+     * 통상근무(`주간`)·4조2교대(`주간`/`야간`)는 낱말 근무라 [DutyCode.parse]가 번호를 못 만들고,
+     * 행로표·시각표 어느 갈래에도 안 걸려 **모든 근무일이 미정**이 된다 → 매주 `0.0h`.
+     * 0.0h를 사실처럼 보여 주는 것이 아무것도 안 보여 주는 것보다 나쁘므로 **줄 자체를 감춘다.**
+     * 근무일이 아예 없는 달(전부 휴가)은 0h가 맞는 답이라 그대로 보여 준다.
+     */
+    fun computable(days: List<DaySchedule>): Boolean {
+        val work = days.filter { it.duty.isWorkDay }
+        return work.isEmpty() || work.any { minutesOf(it) != null }
+    }
+
+    /**
+     * 그 달의 주(월~일) 목록. 1일이 속한 주의 월요일부터 7일씩. [Week.index]는 1부터.
+     *
+     * [days]에 **인접 달이 섞여 있어도 된다** — 경계 주는 거기서 나머지 날을 채운다.
+     * 못 채우면 [Week.partial]이 켜진다.
+     */
     fun compute(month: YearMonth, days: List<DaySchedule>): List<Week> {
         val first = month.atDay(1)
         val last = month.atEndOfMonth()
@@ -59,19 +84,24 @@ object WeeklyHours {
         val weeks = mutableListOf<Week>()
         var monday = first.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
         while (monday <= last) {
-            val from = maxOf(monday, first)
-            val to = minOf(monday.plusDays(6), last)
             var minutes = 0
+            var missing = false
             val excluded = LinkedHashSet<String>()
-            var d = from
-            while (d <= to) {
-                byDate[d]?.let { day ->
-                    val m = minutesOf(day)
-                    if (m == null) excluded += day.duty.display else minutes += m
-                }
-                d = d.plusDays(1)
+            // 합계는 월~일 7일 전부 — 표시 범위(from/to)와 달리 달 경계에서 자르지 않는다.
+            for (i in 0L..6L) {
+                val day = byDate[monday.plusDays(i)]
+                if (day == null) { missing = true; continue }
+                val m = minutesOf(day)
+                if (m == null) excluded += day.duty.display else minutes += m
             }
-            weeks += Week(weeks.size + 1, from, to, minutes, excluded.toList())
+            weeks += Week(
+                index = weeks.size + 1,
+                from = maxOf(monday, first),
+                to = minOf(monday.plusDays(6), last),
+                minutes = minutes,
+                excluded = excluded.toList(),
+                partial = missing,
+            )
             monday = monday.plusDays(7)
         }
         return weeks
