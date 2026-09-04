@@ -1226,26 +1226,3 @@ private fun DrawScope.drawChevron(p: Offset, t: Offset, color: Color, h: Float) 
     drawPath(Path().apply { moveTo(l.x, l.y); lineTo(tip.x, tip.y); lineTo(r.x, r.y) },
         color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
 }
-
-/** 지선 지도 카드 우상단의 `전체 보기` 단추 (Lucide `maximize-2`). */
-@Composable
-internal fun FullMapButton(onClick: () -> Unit) = Surface(
-    color = Color.White.copy(alpha = 0.10f),
-    shape = RoundedCornerShape(50),
-    border = BorderStroke(1.2.dp, Color(0xFF3EC42E).copy(alpha = 0.75f)),
-    modifier = Modifier.height(26.dp),
-) {
-    Row(
-        Modifier.clip(RoundedCornerShape(50))
-            .clickable { onClick() }
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        Icon(
-            painterResource(R.drawable.ic_lucide_maximize_2),
-            null, Modifier.size(12.dp), Color(0xFFB9F5C0),
-        )
-        Text("전체 보기", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB9F5C0))
-    }
-}
