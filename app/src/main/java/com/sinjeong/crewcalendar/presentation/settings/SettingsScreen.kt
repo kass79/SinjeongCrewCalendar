@@ -34,11 +34,14 @@ import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WX_LOC_FIXED_KEY
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.sinjeong.crewcalendar.presentation.live.Line2TimetableLoader
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.YearMonth
 import javax.inject.Inject
 
@@ -410,6 +413,19 @@ fun SettingsScreen(
                         color = MaterialTheme.colorScheme.primary,
                     )
                 },
+            )
+
+            // 내장 시간표 판(다이아 개정 때 `tools/fetch_line2_timetable.py` 로 다시 굽는다).
+            // ⚠ 자산이 1.4MB 라 읽기·파싱은 IO 스레드에서 — 본 스레드에서 하면 화면이 멎는다.
+            val ttLabel by produceState("") {
+                value = withContext(Dispatchers.IO) {
+                    Line2TimetableLoader.get(ctx); Line2TimetableLoader.fetchedLabel
+                }
+            }
+            SettingRow(
+                title = "열차 시간표",
+                sub = "지도·알람의 지연 계산에 쓰는 서울시 역별 시간표",
+                trailing = { Text(ttLabel.ifBlank { "없음" } + "판", fontWeight = FontWeight.Bold) },
             )
 
             SectionTitle("문의")

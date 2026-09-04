@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -87,9 +88,11 @@ import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.MyTrain
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -367,7 +370,11 @@ private fun CabScreen(
     val badgeSp = if (filtered) (if (big) 14.5f else 12f) else (if (big) 13f else 10.5f)
 
     val ctx = LocalContext.current
-    val tt = remember { Line2TimetableLoader.get(ctx) }
+    // ⚠ 자산이 1.4MB 다 — 읽기·파싱을 **본 스레드에서 하면 안 된다**(다이얼로그가 뜨는 순간
+    // 그대로 멎는다). 다 읽기 전에는 null 이라 지연·다음 역 토막만 잠깐 안 보인다.
+    val tt by produceState<Line2Timetable?>(null) {
+        value = withContext(Dispatchers.IO) { Line2TimetableLoader.get(ctx) }
+    }
     val weekTag = remember(nowMillis / 60_000) {
         Line2Timetable.weekTagOf(Line2Timetable.serviceClock(LocalDateTime.now()).first)
     }
