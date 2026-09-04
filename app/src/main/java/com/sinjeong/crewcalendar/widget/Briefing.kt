@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -197,7 +198,9 @@ class BriefingWorker @AssistedInject constructor(
                 BriefingAlarm.notifyToday(context, getMonthSchedule)
             }
             BriefingAlarm.arm(context, getMonthSchedule)
-        }
+        // 재시도는 안 하지만(아래) **조용히 넘기지도 않는다** — arm 이 죽으면 다음 브리핑이
+        // 통째로 안 뜨는데 종전엔 흔적이 하나도 안 남았다(v1.6.86 점검 #7).
+        }.onFailure { Log.w("Briefing", "재등록 실패", it) }
         return Result.success() // 알림 실패는 재시도할 필요 없음
     }
 }
