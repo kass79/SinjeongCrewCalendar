@@ -41,6 +41,7 @@ import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
 import com.sinjeong.crewcalendar.presentation.menu.MenuAdminScreen
+import com.sinjeong.crewcalendar.presentation.notice.NoticeAdminScreen
 import com.sinjeong.crewcalendar.presentation.settings.SettingsScreen
 import com.sinjeong.crewcalendar.presentation.theme.SinjeongTheme
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
@@ -177,11 +178,13 @@ private fun AppRoot() {
                     onOpenContacts = { nav.navigate("contacts") },
                     onOpenAdmin = { nav.navigate("admin") },
                     onOpenMenuAdmin = { nav.navigate("menuAdmin") },
+                    onOpenNoticeAdmin = { nav.navigate("noticeAdmin") },
                 )
             }
             composable("contacts") { OfficeContactsScreen(onBack = { nav.popBackStack() }) }
             composable("admin") { AdminScreen(onBack = { nav.popBackStack() }) }
             composable("menuAdmin") { MenuAdminScreen(onBack = { nav.popBackStack() }) }
+            composable("noticeAdmin") { NoticeAdminScreen(onBack = { nav.popBackStack() }) }
         }
     }
 }

@@ -143,13 +143,14 @@ fun SettingsScreen(
     onOpenContacts: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
     onOpenMenuAdmin: () -> Unit = {},
+    onOpenNoticeAdmin: () -> Unit = {},
 ) {
     val user by viewModel.user.collectAsStateWithLifecycle()
     val mode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val savedMonths by viewModel.savedMonths.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
     var askAdminPw by remember { mutableStateOf(false) }
-    /** 암호를 통과한 뒤 어디로 갈지 — 대리등록 / 식단표 올리기 두 곳이 같은 잠금을 쓴다 */
+    /** 암호를 통과한 뒤 어디로 갈지 — 대리등록 / 식단표 / 공지 세 곳이 같은 잠금을 쓴다 */
     var afterUnlock by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     LaunchedEffect(user?.uid) { viewModel.refreshSavedMonths() }
@@ -396,6 +397,16 @@ fun SettingsScreen(
                     TextButton(onClick = {
                         if (com.sinjeong.crewcalendar.presentation.admin.AdminGate.unlocked) onOpenMenuAdmin()
                         else { afterUnlock = onOpenMenuAdmin; askAdminPw = true }
+                    }) { Text("열기") }
+                },
+            )
+            SettingRow(
+                title = "공지 쓰기",
+                sub = "달력 맨 위에 전원에게 보이는 공지 (암호 필요)",
+                trailing = {
+                    TextButton(onClick = {
+                        if (com.sinjeong.crewcalendar.presentation.admin.AdminGate.unlocked) onOpenNoticeAdmin()
+                        else { afterUnlock = onOpenNoticeAdmin; askAdminPw = true }
                     }) { Text("열기") }
                 },
             )
