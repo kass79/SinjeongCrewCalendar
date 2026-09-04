@@ -33,4 +33,12 @@ class WidgetStripTest {
         val c = Cell("금", "4", "충당|지6;", false, DutyType.STANDBY, "")
         assertEquals("충당지6", decodeStrip(encodeStrip(listOf(c)))[0].duty)
     }
+
+    @Test fun `모든 근무 타입에 색이 있다`() {
+        for (t in DutyType.entries) {
+            val (bg, fg) = com.sinjeong.crewcalendar.util.dutyPalette(t)
+            org.junit.Assert.assertTrue("$t fg", fg != 0)
+            if (t != DutyType.ETC) org.junit.Assert.assertTrue("$t bg", bg != 0)
+        }
+    }
 }

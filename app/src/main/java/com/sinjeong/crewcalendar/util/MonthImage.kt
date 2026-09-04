@@ -11,18 +11,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.time.YearMonth
 
-/** 근무 종별 [배경, 글자] 색 (라이트 톤과 동일) */
-private fun dutyColors(t: DutyType): Pair<Int, Int> = when (t) {
-    DutyType.MAIN_DAY, DutyType.OFFICE -> 0xFFE8FAF0.toInt() to 0xFF00210E.toInt()
-    DutyType.MAIN_NIGHT, DutyType.BRANCH_NIGHT, DutyType.SPECIAL -> 0xFFF6F0FD.toInt() to 0xFF7A5AB8.toInt()
-    // 비번 = 야간과 같은 보라 계열(채도만 낮춤). Theme.kt의 LightDutyColors.off/onOff와 같은 값 — 같이 고칠 것
-    DutyType.POST_NIGHT -> 0xFFF5F0FB.toInt() to 0xFF74679A.toInt()
-    DutyType.REST, DutyType.BRANCH_REST -> 0xFFFFF0EC.toInt() to 0xFFB3271E.toInt()
-    DutyType.STANDBY, DutyType.BRANCH_STANDBY -> 0xFFFFF8E8.toInt() to 0xFF755B00.toInt()
-    DutyType.BRANCH -> 0xFFE8FAF0.toInt() to 0xFF00210E.toInt()
-    DutyType.ETC -> 0x00000000 to 0xFF888888.toInt()
-}
-
 /** 그 달 근무표를 PNG로 그려 캐시에 저장, 공유용 content:// Uri 반환 */
 fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>, ownerName: String): android.net.Uri {
     val W = 1080
@@ -90,7 +78,7 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
         val lines = day.duty.gridLabel.split('\n')
         val label = lines.last()
         if (lines.any { it.isNotBlank() }) {
-            val (bg, fg) = dutyColors(day.duty.colorType)
+            val (bg, fg) = dutyPalette(day.duty.colorType)
             val two = lines.size > 1
             // 두 줄이면 알약을 조금 키운다 — 좁은 알약에선 윗줄이 위쪽 곡선에 걸려 삐져나왔다(실측)
             val chipW = cellW * (if (two) 0.74f else 0.62f); val chipH = if (two) 62f else 52f
