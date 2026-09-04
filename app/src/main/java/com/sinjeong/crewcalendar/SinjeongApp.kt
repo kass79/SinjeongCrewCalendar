@@ -6,6 +6,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
+import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -13,6 +14,8 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
+import com.google.firebase.FirebaseApp
+import com.google.firebase.appcheck.FirebaseAppCheck
 import com.sinjeong.crewcalendar.widget.BriefingAlarm
 import com.sinjeong.crewcalendar.widget.DeadheadAlarm
 import com.sinjeong.crewcalendar.widget.DutyNotifyWorker
@@ -33,6 +36,7 @@ class SinjeongApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        installAppCheck()
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel("duty_channel", "근무 알림", NotificationManager.IMPORTANCE_HIGH).apply {
@@ -69,6 +73,22 @@ class SinjeongApp : Application(), Configuration.Provider {
         )
         scheduleBackgroundWork()
         BriefingAlarm.requestRearm(this) // 앱 실행 시 다음 출근 알람 재등록
+    }
+
+    /**
+     * App Check 공급자 설치(v1.6.86). Firebase AI Logic(식단표 사진 인식)이 **2026-11-02 부터**
+     * App Check 를 의무화해서 미리 붙여 둔다.
+     *
+     * - 콘솔은 아직 **미적용(unenforced)** — 토큰을 못 받아도 앱 동작에는 아무 영향이 없다.
+     *   **콘솔 강제 전환은 지표 확인 후, 코디네이터만.**
+     * - 공급자는 빌드 타입별 소스셋(`src/debug`·`src/release`)의 `appCheckFactory()` 가 고른다.
+     * - `google-services.json` 없는 오프라인 체험판 빌드는 FirebaseApp 자체가 없으므로 건너뛴다
+     *   (`AppModule.firebaseOn` 과 같은 판정).
+     */
+    private fun installAppCheck() {
+        if (FirebaseApp.getApps(this).isEmpty()) return
+        runCatching { FirebaseAppCheck.getInstance().installAppCheckProviderFactory(appCheckFactory()) }
+            .onFailure { Log.w("AppCheck", "App Check 공급자 설치 실패 — 미적용 상태라 동작에는 영향 없음", it) }
     }
 
     /** 위젯 데이터 갱신(즉시 1회 + 6시간 주기) + 내일 근무 알림(매일 20:00) */

@@ -23,8 +23,8 @@ android {
         // targetSdk 36 (Android 16) — 플레이 2026-08-31 요구치. edge-to-edge는 이미 opt-in
         // 상태(enableEdgeToEdge)라 강제 전환의 영향이 없다. 자세한 조사는 docs/project-notes.md.
         targetSdk = 36
-        versionCode = 97
-        versionName = "1.6.85"
+        versionCode = 98
+        versionName = "1.6.86"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -98,6 +98,11 @@ dependencies {
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.auth)
     implementation(libs.firebase.firestore)
+    // App Check(v1.6.86) — Firebase AI Logic 이 2026-11-02 부터 의무화한다.
+    // 콘솔은 **미적용(unenforced)** 상태라 토큰을 못 받아도 앱 동작에는 영향이 없다.
+    // ⚠ 콘솔 강제 전환은 지표(정상 요청 비율) 확인 후, **코디네이터만** 한다.
+    implementation(libs.firebase.appcheck.playintegrity)
+    debugImplementation(libs.firebase.appcheck.debug)
     // firebase-analytics 제거(v1.6.18): 코드 호출 0건인데 매니페스트 병합으로
     // AD_ID·ACCESS_ADSERVICES_* 광고 권한이 딸려와 "광고 ID 수집" 신고 의무가 생겼다.
     // 광고 없는 사내앱이라 데이터 세이프티를 단순하게 유지하려고 뺀다. 필요하면 되살릴 것.
