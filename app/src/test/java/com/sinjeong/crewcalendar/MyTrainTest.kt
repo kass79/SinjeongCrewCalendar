@@ -197,4 +197,102 @@ class MyTrainTest {
             assertTrue(it + " 는 네 자리 열번만이어야 한다", nos.all { n -> n.length == 4 && n.all(Char::isDigit) })
         }
     }
+
+    /* ── 비번 = **전날 야간의 이어짐** (v1.6.95) ────────────────────
+     *
+     * 사용자 지적: *"38 야간일때 그다음날 38비번도 아침에 근무를 하는데? 행로표와 지선표가
+     * 그대로 나와야 하고 본선도 본인열번도 표시 되어야 하는데?"* — 야간 후반 사업이 비번 날
+     * 아침에 걸려 있는데 코드가 비번을 쉬는 날로만 다뤄 행로표·열번·내 열차가 통째로 빠졌다.
+     * 기준일이 **전날**이라는 것이 이 규칙의 전부다 — 아래 `평휴` 사례가 그 자물쇠다.
+     */
+
+    /** 목요일(수요일 야간의 비번) / 토요일(금요일 야간의 비번) */
+    private val THU: LocalDate = LocalDate.parse("2026-09-03")
+    private val SAT: LocalDate = LocalDate.parse("2026-09-05")
+
+    @Test
+    fun `비번은 전날 야간과 그 날짜를 준다`() {
+        val (night, d) = DutyCode.effectiveNight(DutyCode.parse("44비"), THU)!!
+        assertEquals("44", night.raw)
+        assertEquals(WED, d)
+        val (bn, bd) = DutyCode.effectiveNight(DutyCode.parse("지12비"), THU)!!
+        assertEquals("지12", bn.raw)
+        assertTrue(bn.isBranch)
+        assertEquals(WED, bd)
+        // 야간 다이아가 아닌 비번(대기·옛 표기)은 종전 그대로 — 아무것도 안 나온다.
+        listOf("대11비", "지대11비", "~", "비번").forEach {
+            assertNull(it + " 는 야간이 아니다", DutyCode.effectiveNight(DutyCode.parse(it), THU))
+        }
+        // 비번이 아닌 근무는 애초에 대상이 아니다.
+        listOf("44", "지12", "5", "휴3").forEach {
+            assertNull(it, DutyCode.effectiveNight(DutyCode.parse(it), THU))
+        }
+    }
+
+    /**
+     * 행로표는 **전날 조합**으로 고른다. 금요일 야간의 비번(토요일)이 자물쇠다 —
+     * 오늘(토)로 재면 `휴휴`(hh), 전날(금)로 재야 `평휴`(ph)다.
+     */
+    @Test
+    fun `비번 행로표는 전날 야간 것이다`() {
+        assertEquals(NightCombo.PP, Bundled.comboOf(WED))
+        assertEquals("pp_44", RouteTable.assetFor(DutyCode.parse("44"), WED))
+        assertEquals("pp_44", RouteTable.assetFor(DutyCode.parse("44비"), THU))
+
+        val fri = SAT.minusDays(1)
+        assertEquals(NightCombo.PH, Bundled.comboOf(fri))
+        assertEquals(NightCombo.HH, Bundled.comboOf(SAT))   // 오늘로 재면 틀리는 자리
+        assertEquals("ph_44", RouteTable.assetFor(DutyCode.parse("44비"), SAT))
+
+        // 지선도 같다 — 평일/휴일 표를 **전날**로 고른다.
+        assertEquals("bnwd_12", RouteTable.assetFor(DutyCode.parse("지12"), WED))
+        assertEquals("bnwd_12", RouteTable.assetFor(DutyCode.parse("지12비"), THU))
+        assertTrue(Bundled.isHolidayTimetable(SAT))
+        assertFalse(Bundled.isHolidayTimetable(fri))
+        assertEquals("bnwd_12", RouteTable.assetFor(DutyCode.parse("지12비"), SAT))
+
+        // 야간이 아닌 비번은 종전대로 행로표가 없다.
+        listOf("대11비", "지대11비", "~").forEach {
+            assertNull(it, RouteTable.assetFor(DutyCode.parse(it), THU))
+        }
+    }
+
+    /** 내 열번은 **후반(오늘 아침)이 앞**이다. 전반도 남긴다 — 자정 직후엔 전반 막차가 달린다. */
+    @Test
+    fun `비번 열번은 후반이 앞에 온다`() {
+        val a = RouteTable.forMainNight(44, NightCombo.PP)!!
+        assertEquals("2449·2481·2507·5956", a.firstHalf)
+        assertEquals("2052·2106", a.secondHalf)
+        assertEquals(
+            listOf("2052", "2106", "2449", "2481", "2507", "5956"),
+            dutyTrainNumbers(DutyCode.parse("44비"), THU),
+        )
+        // 야간 당일은 종전 그대로 전반이 앞이다(회귀 방지).
+        assertEquals(
+            listOf("2449", "2481", "2507", "5956", "2052", "2106"),
+            dutyTrainNumbers(DutyCode.parse("44"), WED),
+        )
+        // 지선 비번도 후반이 앞.
+        val b = RouteTable.forBranch(12, false)!!
+        assertEquals(
+            trainNumbers(b.secondHalf) + trainNumbers(b.firstHalf),
+            dutyTrainNumbers(DutyCode.parse("지12비"), THU),
+        )
+    }
+
+    /** 비번 날 아침에 **내 열차가 살아 있어야** 한다 — 후반 사업이 그 날 아침이기 때문이다. */
+    @Test
+    fun `비번 날 아침은 후반 사업 중이다`() {
+        assertEquals(listOf("20:45", "24:00", "7:27", "9:15"), MainLegs.forNight(44, NightCombo.PP))
+        val m = myTrainAt(DutyCode.parse("44비"), THU, at(THU, "08:00"))!!
+        assertTrue("후반 사업 시간 안이다", m.riding)
+        assertEquals(listOf("2052", "2106"), m.nos)
+        assertFalse("비번 날 아침은 **오늘**이다 — (익일)이 아니다", m.nextDay)
+        // 후반이 끝난 뒤(9:15 이후)엔 다시 없다.
+        assertNull(myTrainAt(DutyCode.parse("44비"), THU, at(THU, "10:00")))
+        // 지선 비번은 본선 지도의 몫이 아니다(지선 카드가 그린다).
+        assertNull(myTrainAt(DutyCode.parse("지12비"), THU, at(THU, "08:00")))
+        // 번호 없는 옛 비번은 종전 그대로 아무것도 없다.
+        assertNull(myTrainAt(DutyCode.parse("~"), THU, at(THU, "08:00")))
+    }
 }

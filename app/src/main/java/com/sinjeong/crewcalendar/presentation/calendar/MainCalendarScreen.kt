@@ -1046,6 +1046,20 @@ private fun DayDetailContent(
     val focus = LocalFocusManager.current
     val row = Bundled.timeRowFor(day.duty, day.date)
     val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
+    /*
+     * **비번(`38~`)은 쉬는 날이 아니라 전날 야간의 이어짐이다**(v1.6.95). 야간 후반 사업이
+     * 이 날 아침에 걸려 있으므로 행로표·사업시각·열번을 **전날 야간 기준**으로 계산한다
+     * (사용자: *"38 비번도 아침에 근무를 하는데? 행로표와 지선표가 그대로 나와야…"*).
+     * 규칙은 [DutyCode.effectiveNight] 한 곳 — 지도 헤더·내 열차도 같은 함수를 본다.
+     *
+     * ⚠ 알람 칩·침실 칩은 그대로 **오늘 기준 [row]·[combo]** 만 본다. 후반 편승 알람은
+     *   야간 당일에 이미 익일로 예약되므로([BundledTimetable.Advice.nextDay]) 비번 날 또
+     *   띄우면 같은 알람이 두 번 잡힌다.
+     */
+    val post = DutyCode.effectiveNight(day.duty, day.date)
+    val effDuty = post?.first ?: day.duty
+    val effDate = post?.second ?: day.date
+    val effRow = if (post == null) row else Bundled.timeRowFor(effDuty, effDate)
 
     Column(
         modifier.padding(horizontal = if (compact) 20.dp else 10.dp).padding(bottom = 28.dp),
@@ -1115,24 +1129,26 @@ private fun DayDetailContent(
                 }
             }
             // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
-            val holiday = Bundled.isHolidayTimetable(day.date)
-            val isNight = day.duty.type == DutyType.MAIN_NIGHT
+            // ⚠ 아래는 전부 **[effDuty]·[effDate]** 기준이다 — 비번이면 전날 야간, 아니면 오늘 그대로.
+            val holiday = Bundled.isHolidayTimetable(effDate)
+            val isNight = effDuty.type == DutyType.MAIN_NIGHT
             // 대기(대1~13)는 번호가 본선 교번과 겹친다 — 타입까지 봐야 `대3`이 `3` 다이아의
             // 사업시각·열번을 끌어오지 않는다 (v1.6.27에서 잡힌 표시 오류)
-            val isMain = day.duty.type == DutyType.MAIN_DAY || isNight
-            val mainLegs = day.duty.number?.takeIf { isMain }?.let { n ->
-                if (isNight) combo?.let { MainLegs.forNight(n, it) } else MainLegs.forDay(n, holiday)
+            val isMain = effDuty.type == DutyType.MAIN_DAY || isNight
+            val effCombo = if (isNight) Bundled.comboOf(effDate) else null
+            val mainLegs = effDuty.number?.takeIf { isMain }?.let { n ->
+                if (isNight) effCombo?.let { MainLegs.forNight(n, it) } else MainLegs.forDay(n, holiday)
             }
-            val trains = day.duty.number?.let { n ->
+            val trains = effDuty.number?.let { n ->
                 when {
-                    day.duty.isBranch && day.duty.type != DutyType.BRANCH_STANDBY -> RouteTable.forBranch(n, holiday)
-                    day.duty.isBranch -> null
-                    isNight -> combo?.let { RouteTable.forMainNight(n, it) }
+                    effDuty.isBranch && effDuty.type != DutyType.BRANCH_STANDBY -> RouteTable.forBranch(n, holiday)
+                    effDuty.isBranch -> null
+                    isNight -> effCombo?.let { RouteTable.forMainNight(n, it) }
                     isMain -> RouteTable.forMainDay(n, holiday)
                     else -> null
                 }
             }
-            val branchLegs = if (day.duty.isBranch) row?.let { r ->
+            val branchLegs = if (effDuty.isBranch) effRow?.let { r ->
                 r.firstLeg?.let { f -> r.secondLeg?.let { s -> f to s } }
             } else null
             fun fmtLeg(t: String) = t.replace('#', '~').replace('-', '~').replace("▼", " ▼")
@@ -1162,6 +1178,15 @@ private fun DayDetailContent(
                     KvRow("종료", (if (r.overnight) "익일 " else "") + r.signOff)
                 }
             }
+            // 비번 날 행로표가 **왜** 뜨는지 한 줄로 말한다 — 안 그러면 쉬는 날에 남의 표가
+            // 뜬 것으로 읽힌다(v1.6.95). 아래 사업시각 줄이 어느 반이 언제인지까지 적는다.
+            if (post != null && (routeAsset != null || mainLegs != null || branchLegs != null)) {
+                Text(
+                    "전날 야간 ${effDuty.display} 다이아의 이어짐 — 후반사업이 오늘 아침입니다",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (routeAsset != null) {
                 // 좌우 여백을 이미지에만 되밀어 (접힘 20→5dp, 펼침 10→3dp) 행로표를 최대로.
                 //
@@ -1179,31 +1204,40 @@ private fun DayDetailContent(
                     zoom = 1f,
                     vStretch = vStretch,
                 ) { showRoute = true }
-            } else {
-                if (row != null) {
+            }
+            /*
+             * 사업시각·열번 줄 — 행로표 그림이 있으면 생략한다(그림에 다 들어 있다).
+             * **비번만 예외**다(v1.6.95): 그림은 야간 것 그대로라 *어느 반이 언제인지*를
+             * 말해 주지 못하는데, 비번 날엔 그게 가장 중요한 정보다(전반 = 전날 저녁 /
+             * 후반 = 오늘 아침).
+             */
+            if (routeAsset == null || post != null) {
+                if (effRow != null) {
+                    // 비번이면 반마다 **언제인지**를 붙인다. 야간 근무일의 `(익일)`은 그대로.
+                    val firstWhen = if (post != null) " (전날 저녁)" else ""
+                    val secondWhen =
+                        if (post != null) " (오늘 아침)" else if (effDuty.isNight) " (익일)" else ""
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         when {
                             mainLegs != null -> {
-                                KvRow("전반사업", "${mainLegs[0]}~${mainLegs[1]}")
+                                KvRow("전반사업", "${mainLegs[0]}~${mainLegs[1]}$firstWhen")
                                 KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
-                                KvRow("후반사업", "${mainLegs[2]}~${mainLegs[3]}" + if (isNight) " (익일)" else "")
+                                KvRow("후반사업", "${mainLegs[2]}~${mainLegs[3]}$secondWhen")
                                 KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
                                 trains?.let { KvRow("총근무시간", it.totalWorkTime) }
                             }
                             branchLegs != null -> {
-                                KvRow("전반사업", fmtLeg(branchLegs.first))
+                                KvRow("전반사업", fmtLeg(branchLegs.first) + firstWhen)
                                 KvRow("└ 열번", trains?.firstHalf ?: "—", sub = true)
                                 // 지선 야간(지10~14)의 후반도 **익일 아침**이다(v1.6.73). 본선 줄(위)은
                                 // 처음부터 `(익일)`을 달고 있었는데 여기만 빠져 있어 맞췄다.
-                                // 위 `isNight`는 본선 전용(`MAIN_NIGHT`)이라 duty 쪽 값을 본다.
                                 //
-                                // ⚠ **이 블록은 야간 근무일엔 안 그려진다**(v1.6.77 실측). 바로 위
-                                // `if (routeAsset != null)`의 else 가지라, 행로표가 있는 근무는 이 줄 대신
-                                // 행로표 그림이 뜬다. 그리고 야간(본선 33~51 · 지선 지10~14)은 행로표가
-                                // 전건 있다 → 이 `(익일)`은 행로표 자산이 빠졌을 때만 보인다.
-                                // 야간의 `(익일)`을 실제로 보여 주는 곳은 **알람 칩 다이얼로그**
-                                // (제목 `후반사업 편승 알람 (익일)` + 본문 `익일 8/24 아침 · …`)다.
-                                KvRow("후반사업", fmtLeg(branchLegs.second) + if (day.duty.isNight) " (익일)" else "")
+                                // ⚠ **야간 근무일엔 이 줄이 안 그려진다**(v1.6.77 실측) — 행로표
+                                // 그림이 있으면 위에서 걸러지고, 야간(본선 33~51 · 지선 지10~14)은
+                                // 표가 전건 있다. 야간의 `(익일)`을 실제로 보여 주는 곳은 **알람 칩
+                                // 다이얼로그**다. 반대로 **비번은 그림이 있어도 이 줄을 그린다**
+                                // (v1.6.95) — 그때 [secondWhen]은 `(오늘 아침)`이다.
+                                KvRow("후반사업", fmtLeg(branchLegs.second) + secondWhen)
                                 KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
                                 trains?.let { KvRow("총근무시간", it.totalWorkTime) }
                             }
@@ -1287,7 +1321,8 @@ private fun DayDetailContent(
             if (showRoute && routeAsset != null) {
                 RouteImageDialog(
                     asset = routeAsset,
-                    title = "${day.duty.display} 다이아 행로표",
+                    // 비번은 전날 야간의 표라 **그 야간 번호**를 적는다 — `~ 다이아 행로표`는 말이 안 된다.
+                    title = "${effDuty.display} 다이아 행로표" + if (post != null) " (전날 야간)" else "",
                     onDismiss = { showRoute = false },
                 )
             }
@@ -1559,7 +1594,9 @@ private fun KvRow(key: String, value: String, sub: Boolean = false) {
     Row {
         Text(
             // 글자 배율 1.5배에서 키가 82dp를 넘어 잘렸다(v1.6.86 점검 #4) — 최소폭으로.
-            key, modifier = Modifier.widthIn(min = 82.dp),
+            // ⚠ 끝 여백 6dp는 **최소폭을 넘긴 키**(`총근무시간`)가 값과 맞붙는 것을 막는다
+            // (v1.6.95 점검: 배율 1.5에서 `총근무시간10:19` 로 붙어 읽혔다).
+            key, modifier = Modifier.widthIn(min = 82.dp).padding(end = 6.dp),
             style = if (sub) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )

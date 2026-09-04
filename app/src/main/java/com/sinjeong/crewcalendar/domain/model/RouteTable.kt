@@ -295,9 +295,14 @@ object RouteTable {
      * `null`이면 "행로표 없음", 아니면 "연다"로만 갈라도 된다.
      *  · 휴일 본선 주간 26~29는 그날 운휴라 표가 없다 → `null`
      *  · 지선 야간 표는 시각이 조합과 무관해 **당일 평일/휴일 2종**이면 충분하다
-     *  · 대기(대1~13)·지선대기·휴무·비번은 애초에 행로표라는 것이 없다 → `null`
+     *  · 대기(대1~13)·지선대기·휴무는 애초에 행로표라는 것이 없다 → `null`
+     *  · **비번(`38~`)은 전날 야간의 행로표를 그대로 준다**(v1.6.95) — 야간 후반 사업이 이 날
+     *    아침에 걸려 있으므로 쉬는 날이 아니다. 판정은 [DutyCode.effectiveNight] 한 곳.
      */
     fun assetFor(duty: DutyCode, date: LocalDate): String? {
+        // 비번 = 전날 야간의 이어짐 → **전날 날짜**의 야간 행로표. 야간이 아닌 비번
+        // (`대11비`·`~`)은 null 을 받아 종전처럼 아래로 떨어진다(= 행로표 없음).
+        DutyCode.effectiveNight(duty, date)?.let { (night, d) -> return assetFor(night, d) }
         val n = duty.number ?: return null
         val holiday = Bundled.isHolidayTimetable(date)
         return when {

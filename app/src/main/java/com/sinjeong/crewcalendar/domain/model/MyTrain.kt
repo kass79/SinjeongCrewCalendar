@@ -74,6 +74,9 @@ private fun placeOf(leg: Leg) = leg.nos.firstOrNull()?.let(BundledTimetable::boa
  * 열번이 하나도 없는 사업(운휴대기·주박처럼 네 자리 열번이 없는 칸)은 빼고, 둘 다 비면 null.
  */
 private fun mainLegsOf(duty: DutyCode, date: LocalDate): List<Leg>? {
+    // **비번은 전날 야간의 이어짐**이다(v1.6.95) — 후반 사업이 오늘 아침에 걸려 있으므로
+    // 전날 야간 그대로 계산한다. [leg] 가 후반을 `date + 1` 로 미루니 그 아침이 곧 오늘이다.
+    DutyCode.effectiveNight(duty, date)?.let { (night, d) -> return mainLegsOf(night, d) }
     val n = duty.number ?: return null
     if (duty.isBranch) return null                       // 지선은 이 지도의 몫이 아니다
     val night = duty.type == DutyType.MAIN_NIGHT
@@ -155,17 +158,28 @@ internal fun trainNumbers(raw: String): List<String> =
  * `지휴5` 인데 헤더에 "오늘 열번 5560·5561 외 16개"). 열차를 실제로 잡는 건 지선 주간
  * (`지1~8` = [DutyType.BRANCH])·야간(`지10~14` = [DutyType.BRANCH_NIGHT]) 둘뿐이다.
  * 본선 쪽은 원래 `type` 으로 갈라 놔서 휴무·대기가 `else` 로 빠져 있었다.
+ *
+ * ⚠ **비번(`38~`)은 전날 야간의 이어짐**이다(v1.6.95) — 전날 야간의 열번을 그대로 주되
+ * **후반(오늘 아침)을 앞에** 놓는다. 전반도 뺄 수 없다: 자정 직후엔 전반 막차(`24:50` 까지
+ * 가는 칸)가 아직 달리고 있어서, 그때 지도가 강조할 열번이 전반 쪽에 있다.
  */
 fun dutyTrainNumbers(duty: DutyCode, date: LocalDate): List<String> {
-    val n = duty.number ?: return emptyList()
+    DutyCode.effectiveNight(duty, date)?.let { (night, d) ->
+        val a = assignOf(night, d) ?: return emptyList()
+        return (trainNumbers(a.secondHalf) + trainNumbers(a.firstHalf)).distinct()
+    }
+    val a = assignOf(duty, date) ?: return emptyList()
+    return (trainNumbers(a.firstHalf) + trainNumbers(a.secondHalf)).distinct()
+}
+
+/** 그 날 그 근무의 행로표 한 칸 — 열차를 실제로 잡는 근무(본선 주간·야간 / 지선 주간·야간)만. */
+private fun assignOf(duty: DutyCode, date: LocalDate): TrainAssignment? {
+    val n = duty.number ?: return null
     val holiday = Bundled.isHolidayTimetable(date)
-    val assign = when {
-        duty.type == DutyType.BRANCH || duty.type == DutyType.BRANCH_NIGHT ->
-            RouteTable.forBranch(n, holiday)
-        duty.type == DutyType.MAIN_NIGHT ->
-            Bundled.comboOf(date)?.let { RouteTable.forMainNight(n, it) }
-        duty.type == DutyType.MAIN_DAY -> RouteTable.forMainDay(n, holiday)
+    return when (duty.type) {
+        DutyType.BRANCH, DutyType.BRANCH_NIGHT -> RouteTable.forBranch(n, holiday)
+        DutyType.MAIN_NIGHT -> RouteTable.forMainNight(n, Bundled.comboOf(date))
+        DutyType.MAIN_DAY -> RouteTable.forMainDay(n, holiday)
         else -> null
-    } ?: return emptyList()
-    return (trainNumbers(assign.firstHalf) + trainNumbers(assign.secondHalf)).distinct()
+    }
 }

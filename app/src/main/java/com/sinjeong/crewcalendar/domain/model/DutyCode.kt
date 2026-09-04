@@ -1,5 +1,7 @@
 package com.sinjeong.crewcalendar.domain.model
 
+import java.time.LocalDate
+
 /**
  * 근무 코드 파서/모델.
  * 근무표(xlsx) 셀 값 그대로를 파싱한다:
@@ -129,6 +131,36 @@ data class DutyCode(
 
         /** 지선 야간 시작 번호 (지10~지14) */
         const val BRANCH_NIGHT_FROM = 10
+
+        /**
+         * **비번(`38~`)은 쉬는 날이 아니라 전날 야간의 이어짐이다** (v1.6.95 — 사용자 지적
+         * *"38 야간일때 그다음날 38비번도 아침에 근무를 하는데? 행로표와 지선표가 그대로
+         * 나와야 하고 본선도 본인열번도 표시 되어야 하는데?"*).
+         *
+         * 야간 다이아는 전날 저녁에 시작해 **익일 아침 후반 사업까지** 이어진다. 그래서 비번 날의
+         * 행로표·사업시각·열번은 전부 **전날 야간 기준**으로 봐야 한다 — 이 함수가 그
+         * `(야간 근무, 야간이 시작한 날)` 짝을 준다. 비번이 아니면 `null`.
+         *
+         * 판정은 **[raw] 에서 `비`를 떼고 다시 파싱**한다. [type]·[number]·[isBranch] 만으로는
+         * 못 가른다 — `44비`(본선 야간)와 `대11비`(야간 대기)가 둘 다 `POST_NIGHT` · 번호 있음 ·
+         * `isBranch = false` 로 똑같이 파싱되기 때문이다([pickerLabel] 이 쓰는 그 수법이다).
+         * 열차를 실제로 잡는 야간([isNight] = 본선 33~51 · 지선 지10~14)만 돌려준다:
+         *  · `대11비`·`지대11비`(대기) → 행로표라는 것이 애초에 없다 → `null`
+         *  · `~`·`비번`(번호 없는 옛 데이터) → 파싱해도 야간이 아니다 → `null`
+         *
+         * 이 규칙을 **여기 한 곳**에 둔다 — [RouteTable.assetFor] · [dutyTrainNumbers] ·
+         * [myTrainAt] · 상세시트 · 지선 카드가 같은 함수를 본다. 흩어 놓으면 또 한쪽만 빠진다.
+         *
+         * ⚠ **주 52시간 계산([WeeklyHours])은 이 함수를 쓰지 않는다** — 야간 근무시간은
+         * *시작일에 귀속*한다는 확정 규칙이라 비번 날은 0시간 그대로다.
+         * ⚠ **편승 알람도 쓰지 않는다** — 후반 알람은 야간 당일에 이미 익일로 예약된다
+         * ([BundledTimetable.Advice.nextDay]). 비번 날 또 걸면 같은 알람이 두 번 잡힌다.
+         */
+        fun effectiveNight(duty: DutyCode, date: LocalDate): Pair<DutyCode, LocalDate>? {
+            if (duty.type != DutyType.POST_NIGHT) return null
+            val night = parse(duty.raw.removeSuffix("비")).takeIf { it.isNight } ?: return null
+            return night to date.minusDays(1)
+        }
 
         /**
          * 근무변경으로 **고를 수 있는 근무코드 전부**(묶음 이름은 여기 없다 — 저장값만 들어간다).
