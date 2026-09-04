@@ -3,6 +3,7 @@ package com.sinjeong.crewcalendar.presentation.menu
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -248,6 +249,9 @@ fun MenuDialog(
                                     ),
                                     shownDate,
                                 )
+                            // 여긴 `Dialog` 안이라 달력 Scaffold 의 스낵바가 위로 못 올라온다 → Toast.
+                            }.onFailure {
+                                Toast.makeText(ctx, "공유하지 못했습니다", Toast.LENGTH_SHORT).show()
                             }
                         }
                     }) { LucideIcon(R.drawable.ic_lucide_share_2, "식단표 공유") }
