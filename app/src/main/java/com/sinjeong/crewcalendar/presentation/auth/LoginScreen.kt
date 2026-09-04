@@ -183,16 +183,27 @@ private fun ErrorText(error: String?) {
     )
 }
 
+/**
+ * ⚠ **꺼진 상태 색을 직접 정한다**(v1.6.93). `buttonColors` 에 켜진 색 둘만 주면 꺼진 색은
+ * M3 기본값(`onSurface` 12% 바탕 · 38% 글자)이 되는데, 이 화면 배경이 앱 테마가 아니라
+ * 자체 그라디언트(`#FDE7EE`~`#EDE9FB`)라 **연회색 바탕 위 연회색 글자 ≈ 1.05:1** 로 뭉개졌다 —
+ * 이름을 아직 안 넣었을 때 "다음"이 있는지조차 안 보인다. 같은 팔레트에서 뽑아 4.5:1 을 넘긴다.
+ *
+ * ⚠ 높이는 `height` 가 아니라 **`heightIn(min = )`** 이다. 52dp 고정에 16sp + 기본 여백이라
+ * 글자배율 1.6~2.0 에서 위아래가 잘렸다.
+ */
 @Composable
 private fun PrimaryButton(label: String, enabled: Boolean, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().height(52.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
         shape = RoundedCornerShape(14.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = BrandGreen,
             contentColor = Color.White,
+            disabledContainerColor = Color(0xFFDCD5E4),
+            disabledContentColor = Color(0xFF56506A),
         ),
     ) { Text(label, fontSize = 16.sp, fontWeight = FontWeight.ExtraBold) }
 }

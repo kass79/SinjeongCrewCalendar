@@ -525,7 +525,7 @@ private fun CabScreen(
                     }
                 ) {
                     hit = drawCabLoop(tm, placed, mineMark?.trainNo, big, picked,
-                        labelSp, otherK, phase, mapDeg)
+                        labelSp, otherK, phase, mapDeg, error, trains.isEmpty())
                 }
             }
         }
@@ -594,8 +594,13 @@ private fun mineTail(mineMark: MainTrainMark?, candidates: List<String>): String
  *
  * ⚠ 줄 높이는 이제 **닫기 단추가 정한다** — 기본 [IconButton] 은 48dp 라 글자를 줄여도
  * 높이가 안 줄었다. 36dp 로 묶어 실제로 12dp 를 지도에 돌려준다.
- * ⚠ 뒤 토막에만 [weight] 를 준다. `weight` 는 무게 없는 형제들을 **먼저** 재고 남은 자리를
- * 주므로, 이렇게 두면 앞 토막과 닫기 X 가 자리를 먼저 가져가고 넘치는 건 뒤 토막뿐이다.
+ *
+ * ⚠ **늘어나는 토막에 [weight] 를 준다**(v1.6.93 정정). `Row` 는 무게 **없는** 자식을 먼저
+ * 순서대로 재면서 남은 폭을 깎아 나가고, 무게 있는 자식이 그 나머지를 나눠 갖는다. v1.6.88 은
+ * 이 순서를 거꾸로 적어 놓고 [mineHead] 토막을 **무게 없이** 뒀는데, 그러면 긴 `내 열차 …`
+ * 한 줄이 남은 폭을 통째로 먹고 **뒤에 오는 닫기 X 가 폭 0 으로 측정된다**(배율 2.0 근처).
+ * 이제 앞·뒤 토막을 **한 문장으로 합쳐** 그 하나만 `weight(1f)` 를 갖는다 — 글꼴·크기·색이
+ * 원래 같았으므로 화면은 그대로이고, 자리가 모자라면 `Ellipsis` 가 **뒤 토막부터** 먹는다.
  */
 @Composable
 private fun CabHeader(
@@ -625,16 +630,12 @@ private fun CabHeader(
             fontSize = (if (big) 14f else 11.5f).sp, fontWeight = FontWeight.Bold,
             color = MineYellow, maxLines = 1,
         )
-        mineHead(mineMark, candidates, delay, nextSec)?.let {
-            Text(
-                " · $it",
-                fontSize = sp, fontWeight = FontWeight.Bold, color = mineColor,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
-        }
-        val tail = mineTail(mineMark, candidates)
+        val info = listOfNotNull(
+            mineHead(mineMark, candidates, delay, nextSec),
+            mineTail(mineMark, candidates).ifEmpty { null },
+        ).joinToString(" · ")
         Text(
-            if (tail.isEmpty()) "" else " · $tail",
+            if (info.isEmpty()) "" else " · $info",
             fontSize = sp, fontWeight = FontWeight.Bold, color = mineColor,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
@@ -666,30 +667,43 @@ private fun CabStatusBar(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Chip("2호선", big, LoopGreen)
-        // ⚠ 정보 칩에 [weight] 를 준다. 없으면 줄이 화면보다 길어져 **오른쪽 필터 칩이
-        // 잘린다**(실측: 폴드 펼침 700dp 에서 `전체` 가 통째로 안 보였다). 잘린 정보는
-        // 헤더 줄에 그대로 다시 나오지만, 못 누르는 단추는 없는 단추다.
-        val shrink = Modifier.weight(1f, fill = false)
-        when {
-            // ⚠ 오류는 **열차가 하나도 없을 때만** 말한다. 스냅샷의 `error` 는 지선 카드가 쓰는
-            // 양천구청 **도착** API 실패까지 합쳐 온 값이라(위치 API 는 멀쩡할 수 있다), 그대로
-            // 띄우면 열차 14대를 그려 놓고 "정보를 못 받았어요"라고 말하게 된다(v1.6.84 실측).
-            error != null && !hasTrains -> Chip(error, big, Color(0xFFE9A23B), modifier = shrink)
-            mineMark != null -> Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true)
-            // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
-            mine != null && !mine.riding && mine.startAt != null && candidates.isNotEmpty() ->
-                Chip(
-                    "다음 " + mine.nos.first() + " " + fmt(mine.startAt) +
-                        (if (mine.nextDay) " (익일)" else ""),
-                    big, Color(0xFFCFE3F5), modifier = shrink,
-                )
-            candidates.isNotEmpty() ->
-                Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5), modifier = shrink)
-            else -> Chip("오늘 근무 열번: 없음", big, Dim)
+        /*
+         * ⚠ 왼쪽 칩 둘을 **한 겹 더 싼다**(v1.6.93 — 지선 카드가 v1.6.91 에 이미 고친 결함이
+         * 여기 그대로 남아 있었다). 종전엔 정보 칩의 `weight(1f, fill = false)` 와 빈
+         * [Spacer] 의 `weight(1f)` 가 남는 폭을 **반씩** 나눠 가져, 배율 1.5 에서 정보 칩이
+         * `오늘 열번 5668 · …` 로 잘리는데 그 옆은 텅 비어 있었다. 이제 안쪽 Row 가 남는 폭을
+         * 통째로 받아 정보 칩이 제 폭을 먼저 가져가고, 빈자리는 그 안에 남는다
+         * (덤으로 방향 필터가 오른쪽 끝에 붙는다 — [LineMap] 하단 칩 줄과 같은 처방).
+         */
+        Row(
+            Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Chip("2호선", big, LoopGreen)
+            // 정보 칩은 안쪽 Row 가 준 나머지 안에서만 늘어난다 — 넘치면 여기만 `Ellipsis` 다.
+            // 잘린 정보는 헤더 줄에 그대로 다시 나오지만, 못 누르는 단추는 없는 단추다.
+            val shrink = Modifier.weight(1f, fill = false)
+            when {
+                // ⚠ 오류는 **열차가 하나도 없을 때만** 말한다. 스냅샷의 `error` 는 지선 카드가 쓰는
+                // 양천구청 **도착** API 실패까지 합쳐 온 값이라(위치 API 는 멀쩡할 수 있다), 그대로
+                // 띄우면 열차 14대를 그려 놓고 "정보를 못 받았어요"라고 말하게 된다(v1.6.84 실측).
+                error != null && !hasTrains -> Chip(error, big, Color(0xFFE9A23B), modifier = shrink)
+                mineMark != null ->
+                    Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true, modifier = shrink)
+                // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
+                mine != null && !mine.riding && mine.startAt != null && candidates.isNotEmpty() ->
+                    Chip(
+                        "다음 " + mine.nos.first() + " " + fmt(mine.startAt) +
+                            (if (mine.nextDay) " (익일)" else ""),
+                        big, Color(0xFFCFE3F5), modifier = shrink,
+                    )
+                candidates.isNotEmpty() ->
+                    Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5), modifier = shrink)
+                else -> Chip("오늘 근무 열번: 없음", big, Dim, modifier = shrink)
+            }
         }
         // 오른쪽 끝에 방향 필터. 기본은 내 열차 방향이라 처음 열면 이미 한쪽이 켜져 있다.
-        Spacer(Modifier.weight(1f))
         DirFilter.entries.forEach { f ->
             Chip(f.label, big, BadgeSky, fill = f == filter) { onFilter(f) }
         }
@@ -698,27 +712,33 @@ private fun CabStatusBar(
 
 private fun fmt(t: LocalTime) = "%02d:%02d".format(t.hour, t.minute)
 
+/**
+ * ⚠ 누를 수 있는 칩은 **[Surface] 가 통째로 단추**다(v1.6.93). 종전엔 안쪽 [Text] 에
+ * `clickable` 을 걸어 실제 터치 영역이 글자 높이(≈20dp)뿐이었다 — M3 최소 48dp 의 절반도
+ * 안 된다. `Surface(onClick = …)` 은 리플·`Role.Button` 과 함께
+ * `minimumInteractiveComponentSize()` 를 스스로 붙여 **보이는 크기는 그대로 두고** 터치만
+ * 48dp 로 넓힌다(줄 높이는 그만큼 늘어난다 — 못 누르는 단추보다 낫다).
+ */
 @Composable
 private fun Chip(
     text: String, big: Boolean, tint: Color, fill: Boolean = false,
     modifier: Modifier = Modifier, onClick: (() -> Unit)? = null,
-) = Surface(
-    modifier = modifier,
-    color = if (fill) tint else tint.copy(alpha = 0.12f),
-    shape = RoundedCornerShape(50),
-    border = BorderStroke(1.dp, tint.copy(alpha = 0.85f)),
 ) {
-    Text(
-        text,
-        // v1.6.88 한 단계 축소(14→12.5 / 11.5→10) — 상태바 한 줄에 필터까지 다 들어가야 한다.
-        fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
-        color = if (fill) MineInk else tint,
-        maxLines = 1, overflow = TextOverflow.Ellipsis,
-        // 누를 수 있는 칩만 클릭 영역을 만든다 — 나머지는 종전대로 그냥 글씨다.
-        modifier = Modifier
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 11.dp, vertical = 4.dp),
-    )
+    val label: @Composable () -> Unit = {
+        Text(
+            text,
+            // v1.6.88 한 단계 축소(14→12.5 / 11.5→10) — 상태바 한 줄에 필터까지 다 들어가야 한다.
+            fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
+            color = if (fill) MineInk else tint,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 4.dp),
+        )
+    }
+    val bg = if (fill) tint else tint.copy(alpha = 0.12f)
+    val shape = RoundedCornerShape(50)
+    val line = BorderStroke(1.dp, tint.copy(alpha = 0.85f))
+    if (onClick == null) Surface(modifier, shape, bg, border = line) { label() }
+    else Surface(onClick, modifier, shape = shape, color = bg, border = line) { label() }
 }
 
 /* ────────────────────────── 둘레 기하 ────────────────────────── */
@@ -1020,6 +1040,10 @@ private fun DrawScope.drawCabLoop(
      * [locoBox] 와 [drawLoco] 둘 다에 넘긴다.
      */
     mapDeg: Float,
+    /** 스냅샷 오류 — 빈 상태 문구를 고르는 데만 쓴다([CabStatusBar] 와 같은 값). */
+    error: String?,
+    /** 필터 **전** 목록도 비어 있나. 거짓이면 "이 방향만 없다"는 뜻이라 문구가 달라진다. */
+    allEmpty: Boolean,
 ): List<Pair<Offset, String>> {
     val m = margin(big).toPx()
     val ln = lane(big).toPx()
@@ -1171,6 +1195,18 @@ private fun DrawScope.drawCabLoop(
     // ── 열차 ─────────────────────────────────────────────────
     // 아이콘을 접은 열차도 **점은 남으므로** 탭 판정은 전원을 넣는다.
     val hits = trains.map { (t, _) -> centers.getValue(t.trainNo) to t.trainNo }
+    /*
+     * ⚠ 3단이 다 막혀 **접힌 열차도 선 위에 점을 남긴다**(v1.6.93 — 지선 카드의 `dotOnly`
+     * 상당물). 종전엔 [spots] 에서 빠진 열차가 아무것도 안 그려지는데 [hits] 에는 그대로
+     * 남아 있어, **아무것도 없는 자리를 누르면 안 보이는 열차의 툴팁이 떴다.**
+     * 점이라도 있으면 "저기 한 대 더 있다"가 보이고 탭 판정과 그림이 다시 일치한다.
+     */
+    val drawnNos = spots.mapTo(HashSet()) { it.first.trainNo }
+    trains.forEach { (t, _) ->
+        if (t.trainNo !in drawnNos) drawCircle(
+            if (t.trainNo == mineNo) MineYellow else BadgeSky,
+            2.5.dp.toPx(), centers.getValue(t.trainNo))
+    }
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 열차에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
     // 다른 열차 — 같은 기관차, **몸통만 짧고**(otherK) 연기·물결은 없다.
@@ -1193,6 +1229,50 @@ private fun DrawScope.drawCabLoop(
         drawLoco(c, headOf(t.trainNo), locoScale, MineYellow, CabNavy, t.trainNo, MineInk, tm,
             smoke = true, phase = phase, highlight = true, mapDeg = mapDeg,
             dest = if (t.destName.isBlank()) "" else t.destName + "행")
+    }
+
+    /*
+     * ── 그릴 열차가 없을 때: **이유를 말한다** (v1.6.93) ─────────────
+     * 지선 카드는 v1.6.46 부터 이 문구가 있었는데 본선 지도엔 없어서, 운행 종료든 API 한도
+     * 소진이든 **초록 사각형만 덩그러니** 남았다 — 사용자는 앱이 고장인지 알 수 없다.
+     * 문구·어투는 지선([LineMap])과 같은 것을 쓴다. 세로 창은 지도를 통째로 90도 돌리므로
+     * 글자만 되돌려 세운다(`-mapDeg`) — "글자는 절대 뒤집히지 않는다"(v1.6.91 확정).
+     */
+    if (trains.isEmpty()) {
+        val failed = allEmpty && error != null
+        val msg = when {
+            !allEmpty -> "이 방향 열차 없음 — 아래 [전체]"
+            error != null -> error
+            inService() -> "실시간 조회 중…"
+            else -> "금일 운행 종료 (영업 05:30~)"
+        }
+        val line = tm.measure(msg, TextStyle(
+            fontSize = (if (big) 15f else 12.5f).sp,
+            fontWeight = if (failed) FontWeight.Bold else FontWeight.Normal,
+            color = if (failed) Color.White else Dim))
+        val hint = if (!failed) null else tm.measure("잠시 뒤 다시 열어 보세요",
+            TextStyle(fontSize = (if (big) 12f else 10.5f).sp, color = Dim))
+        val gap = 4.dp.toPx()
+        val blockH = line.size.height + (hint?.let { gap + it.size.height } ?: 0f)
+        val blockW = maxOf(line.size.width, hint?.size?.width ?: 0)
+        rotate(-mapDeg, pivot = center) {
+            // ⚠ **바탕을 깐다.** 순환선 안쪽은 역 이름이 빽빽한 자리라(을지로4가·동대문역사문화공원
+            // …) 글자를 그냥 얹으면 서로 물려 둘 다 못 읽는다(실측). 라벨이 배지 위에 얹힐 때
+            // 쓰는 것과 **같은 처방**이다([Lab.over] 의 둥근 사각형).
+            val padX = 10.dp.toPx()
+            val padY = 6.dp.toPx()
+            drawRoundRect(
+                CabNavy,
+                topLeft = Offset(center.x - blockW / 2f - padX, center.y - blockH / 2f - padY),
+                size = Size(blockW + padX * 2, blockH + padY * 2),
+                cornerRadius = CornerRadius(10.dp.toPx()))
+            var ty = center.y - blockH / 2f
+            drawText(line, topLeft = Offset(center.x - line.size.width / 2f, ty))
+            hint?.let {
+                ty += line.size.height + gap
+                drawText(it, topLeft = Offset(center.x - it.size.width / 2f, ty))
+            }
+        }
     }
 
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──

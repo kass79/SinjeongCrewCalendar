@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBars
@@ -135,8 +136,12 @@ import java.time.LocalDateTime
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MenuDialog(
-    /** 주 시작일(월) → 21칸. 이번 주·다음 주만 들어온다 */
-    weeks: Map<LocalDate, WeeklyMenu>,
+    /**
+     * 주 시작일(월) → 21칸. 이번 주·다음 주만 들어온다.
+     * `null` = **아직 못 받음** · `failure` = **오프라인·조회 실패** · `success` = 받음
+     * (v1.6.93 — 셋을 뭉뚱그리면 비행기 모드에서 "표가 아직 없다"고 거짓말을 한다).
+     */
+    weeks: Result<Map<LocalDate, WeeklyMenu>>?,
     thisWeek: LocalDate,
     isAdmin: Boolean,
     onUpload: () -> Unit,
@@ -156,9 +161,10 @@ fun MenuDialog(
      * 넘겨 볼 수 있는 날들. 이번 주 7일 + (다음 주 표가 **이미 올라와 있으면**) 7일.
      * 없는 주까지 넘기게 두면 빈 화면으로 떨어져 "고장난 것"처럼 보인다.
      */
+    val loaded = weeks?.getOrNull().orEmpty()
     val days = remember(weeks, thisWeek) {
         listOf(thisWeek, thisWeek.plusWeeks(1))
-            .filter { weeks[it]?.isBlank == false }
+            .filter { loaded[it]?.isBlank == false }
             .flatMap { w -> (0L..6L).map { w.plusDays(it) } }
     }
 
@@ -174,7 +180,14 @@ fun MenuDialog(
                         )
                         IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, "닫기") }
                     }
-                    MenuEmptyNotice(isAdmin, onUpload, Modifier.fillMaxSize())
+                    MenuEmptyNotice(
+                        when {
+                            weeks == null -> MenuLoad.LOADING
+                            weeks.isFailure -> MenuLoad.OFFLINE
+                            else -> MenuLoad.EMPTY
+                        },
+                        isAdmin, onUpload, Modifier.fillMaxSize(),
+                    )
                     return@Column
                 }
 
@@ -293,7 +306,10 @@ fun MenuDialog(
                             ) {
                                 Box(
                                     Modifier
-                                        .fillMaxWidth().height(28.dp)
+                                        // ⚠ 고정 `height` 가 아니라 **`heightIn(min = )`**(v1.6.93).
+                                        // 28dp 에 14sp 를 넣어 뒀는데 글자배율 1.6~2.0 에서 글자가
+                                        // 28dp 를 넘겨 요일 글자의 위아래가 잘렸다.
+                                        .fillMaxWidth().heightIn(min = 28.dp)
                                         .clip(RoundedCornerShape(10.dp))
                                         // ⚠ v1.6.84: **채움을 통째로 뺐다.** 종전엔 오늘 칩을
                                         // 연두(`#C6F5D8`)로 칠했는데 사용자가 *"형광펜처럼 보인다"*
@@ -342,7 +358,7 @@ fun MenuDialog(
                 // ── 하루 3끼니 ──────────────────────────────────────
                 HorizontalPager(state = pager, modifier = Modifier.fillMaxWidth().weight(1f)) { page ->
                     val date = days[page]
-                    val menu = weeks[weekStartOf(date)]
+                    val menu = loaded[weekStartOf(date)]
                     val dayIdx = date.dayOfWeek.value - 1
                     val isCurrent = page == pager.currentPage
                     // **다음 끼니 섹션이 맨 위**. 그 날이 아닌 페이지는 조식·중식·석식 순서 그대로
@@ -687,11 +703,19 @@ private fun markerAlpha(dark: Boolean) = if (dark) 0.22f else 0.30f
 private fun headerAlpha(dark: Boolean) = if (dark) 0.12f else 0.16f
 
 /**
- * 이번 주 표가 아직 없을 때. **지난주 메뉴는 절대 안 보여준다** —
+ * 식단표가 안 보이는 **세 가지 이유** (v1.6.93). 하나로 뭉뚱그리면 화면이 거짓말을 한다 —
+ * 비행기 모드에서 `이번 주 식단표가 아직 없어요` 는 관리자에게 "네가 안 올렸다"는 뜻이 된다.
+ */
+enum class MenuLoad { LOADING, OFFLINE, EMPTY }
+
+/**
+ * 이번 주 표를 못 보여줄 때. **지난주 메뉴는 절대 안 보여준다** —
  * 틀린 정보로 사람을 움직이게 하느니 없다고 말하는 게 낫다.
  */
 @Composable
-fun MenuEmptyNotice(isAdmin: Boolean, onUpload: () -> Unit, modifier: Modifier = Modifier) {
+fun MenuEmptyNotice(
+    state: MenuLoad, isAdmin: Boolean, onUpload: () -> Unit, modifier: Modifier = Modifier,
+) {
     Box(modifier.padding(32.dp), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -702,18 +726,28 @@ fun MenuEmptyNotice(isAdmin: Boolean, onUpload: () -> Unit, modifier: Modifier =
                 Modifier.size(40.dp), MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "이번 주 식단표가 아직 없어요",
+                when (state) {
+                    MenuLoad.LOADING -> "식단표를 불러오는 중이에요"
+                    MenuLoad.OFFLINE -> "식단표를 불러오지 못했어요"
+                    MenuLoad.EMPTY -> "이번 주 식단표가 아직 없어요"
+                },
                 fontFamily = MenuFont, fontSize = ITEM_SIZE, lineHeight = ITEM_LINE,
                 fontWeight = FontWeight.Medium,
                 color = MaterialTheme.colorScheme.onSurface,
             )
             Text(
-                "구내식당 표가 올라오면 여기에 바로 보입니다.",
+                when (state) {
+                    MenuLoad.LOADING -> "잠시만 기다려 주세요."
+                    MenuLoad.OFFLINE -> "인터넷 연결을 확인한 뒤 다시 열어 주세요."
+                    MenuLoad.EMPTY -> "구내식당 표가 올라오면 여기에 바로 보입니다."
+                },
                 fontFamily = MenuFont, fontSize = 14.sp, lineHeight = 21.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
-            if (isAdmin) FilledTonalButton(onClick = onUpload) {
+            // ⚠ 올리기는 **정말 없을 때만** 권한다. 못 받아 온 것뿐인데 올리라고 하면
+            // 이미 있는 주를 덮어쓰게 된다.
+            if (isAdmin && state == MenuLoad.EMPTY) FilledTonalButton(onClick = onUpload) {
                 Text("식단표 올리기", fontFamily = MenuFont, fontWeight = FontWeight.Medium)
             }
         }

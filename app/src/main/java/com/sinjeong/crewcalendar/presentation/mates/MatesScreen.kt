@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -800,9 +801,19 @@ private fun AddMateSheet(
         )
     }
 
-    ModalBottomSheet(onDismissRequest = onDismiss) {
+    /*
+     * ⚠ **반쯤 펼친 상태를 건너뛰고, 안이 스크롤된다**(v1.6.93). 종전엔 `skipPartiallyExpanded`
+     * 가 없어 시트가 화면 절반에서 멈춰 섰는데, 그 안에 300dp 짜리 근무 격자가 들어 있어
+     * 글자배율을 조금만 키워도 격자 아래 [저장] 이 화면 밖으로 나갔다 — **고르고도 저장을 못 했다.**
+     * 격자는 자기 높이(`heightIn(max = 300.dp)`)가 정해져 있어 바깥 스크롤과 충돌하지 않는다.
+     */
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+    ) {
         Column(
-            Modifier.padding(horizontal = 20.dp).padding(bottom = 28.dp),
+            Modifier.verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp).padding(bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(

@@ -54,7 +54,10 @@ class DutyWidgetWorker @AssistedInject constructor(
                 else -> ""
             }
             Cell(
-                date.format(dow), date.dayOfMonth.toString(), d?.duty?.display.orEmpty(), red,
+                // ⚠ [display] 가 아니라 **[cellLabel]** 이다(v1.6.93) — 4x1 칸은 ≈36dp 라
+                // `대기충당지2` 가 통째로 잘려 어느 다이아인지 안 보였다.
+                date.format(dow), date.dayOfMonth.toString(),
+                d?.duty?.let(::cellLabel).orEmpty(), red,
                 d?.duty?.type, time, date.toEpochDay(),
             )
         }
@@ -140,3 +143,4 @@ private fun scheduleBoundaryRefresh(context: Context, today: LocalDate, todaySig
             .build(),
     )
 }
+

@@ -157,11 +157,26 @@ fun MainCalendarScreen(
         topBar = {
             // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보
             Surface(color = MaterialTheme.colorScheme.surface) {
-                Row(
+                /*
+                 * ⚠ **한 줄이되, 안 들어가면 접힌다**(v1.6.93). 종전엔 고정 44dp `Row` 에
+                 * 자식 일곱(월·휴칩·날씨칩·근무선택·아이콘 4)과 빈 `Spacer(weight(1f))` 뿐이라,
+                 * 글자배율 1.25~2.0 × 폭 360dp 에서 **뒤에 오는 공유·안전앱 아이콘이 폭 0 으로
+                 * 밀려 사라졌다**(Row 는 무게 없는 자식을 순서대로 재며 남은 폭을 깎는다).
+                 * 아이콘이 없어지면 그 기능으로 가는 길이 화면에서 통째로 사라진다.
+                 *
+                 * 이제 **정보 묶음 / 단추 묶음** 두 덩이를 [FlowRow] 에 넣는다. 한 줄에 다 들어가면
+                 * `SpaceBetween` 이라 화면은 종전과 **똑같고**, 안 들어가면 단추 묶음이 아랫줄로
+                 * 접힌다(높이는 그때만 늘어난다 — `height` 를 `heightIn(min=)` 으로 바꾼 이유).
+                 */
+                FlowRow(
                     // 상단 공백 제거 — 상태바와 겹쳐도 됨(사용자 요청). statusBarsPadding 미적용
-                    Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 10.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                    Modifier.fillMaxWidth().heightIn(min = 44.dp)
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalArrangement = Arrangement.Center,
+                    maxItemsInEachRow = 2,
                 ) {
+                  Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         state.month.format(DateTimeFormatter.ofPattern("M월")),
                         fontSize = 15.sp,
@@ -175,13 +190,13 @@ fun MainCalendarScreen(
                     // 날씨는 달력 빈 칸 카드에서 헤더로 올렸다(v1.6.59 사용자 요청) — 휴N개 바로 옆.
                     // 날씨가 없으면 스스로 아무것도 안 그린다(자리도 안 먹는다).
                     // v1.6.65: **이번 달을 볼 때만** 그린다 — 칩 값은 "지금" 날씨라 11월 달력 옆
-                    // 오늘 기온이 붙으면 한 박자 멈칫한다. 다른 달이면 Spacer까지 같이 빠져
-                    // 오른쪽 weight(1f)가 그만큼 늘 뿐, 다른 요소는 움직이지 않는다.
+                    // 오늘 기온이 붙으면 한 박자 멈칫한다.
                     if (state.month == YearMonth.now()) {
                         Spacer(Modifier.width(4.dp))
                         WeatherChip()
                     }
-                    Spacer(Modifier.weight(1f))
+                  }
+                  Row(verticalAlignment = Alignment.CenterVertically) {
                     // v1.6.65: 초록 채움(FilledTonalButton) → 외곽선. 1년에 두세 번 누르는 버튼이
                     // 헤더에서 가장 무거웠다. 크기·위치·문구·동작은 그대로다.
                     // 테두리는 M3 기본 `outline`이 라이트에서 1.6:1로 사실상 안 보여 primary 70%로 깐다
@@ -190,7 +205,9 @@ fun MainCalendarScreen(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
                         contentPadding = PaddingValues(horizontal = 6.dp),
                         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
-                        modifier = Modifier.height(28.dp),
+                        // ⚠ 고정 `height` 가 아니라 **`heightIn(min = )`**(v1.6.93) — 28dp 에
+                        // 9.5sp 를 넣어 뒀는데 배율 2.0(=19sp)에서 `근무선택` 의 아래가 잘렸다.
+                        modifier = Modifier.heightIn(min = 28.dp),
                     ) { Text("근무선택", fontSize = 9.5.sp, fontWeight = FontWeight.ExtraBold) }
                     // 메모 모아보기 (v1.6.82) — 이 달 메모를 한 목록으로. 설정 화면이 아니라 헤더에
                     // 두는 이유는 **보고 있는 달**이 곧 목록의 범위이기 때문이다(달을 넘기면 목록도 따라간다).
@@ -245,6 +262,7 @@ fun MainCalendarScreen(
                             modifier = Modifier.size(26.dp).clip(CircleShape),
                         )
                     }
+                  }
                 }
             }
         },
@@ -1046,10 +1064,20 @@ private fun DayDetailContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
+                        // 날짜는 **줄이되 한가운데를 자르지 않는다**(v1.6.93). 종전엔 `maxLines = 1`
+                        // 뿐이고 `overflow` 가 기본값 `Clip` 이라 배율 1.5~2.0 에서 `9월 15일 (` 처럼
+                        // 글자 도중에 끊겼다. 넘치면 한 단계씩 줄이고(하한 14sp — 그 아래는 상세시트
+                        // 제목으로 안 읽힌다), 그래도 모자라면 `…` 로 끝맺어 잘린 사실이 보이게 한다.
+                        val baseSp = MaterialTheme.typography.titleLarge.fontSize
+                        var dateSp by remember(day.date) { mutableStateOf(baseSp) }
                         Text(
                             day.date.format(DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)),
-                            style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.ExtraBold,
-                            maxLines = 1,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontSize = dateSp, fontWeight = FontWeight.ExtraBold,
+                            maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+                            onTextLayout = {
+                                if (it.hasVisualOverflow && dateSp > 14.sp) dateSp *= 0.92f
+                            },
                         )
                         (day.holidayName ?: day.memorialName)?.let {
                             Text(it, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.ExtraBold,

@@ -133,12 +133,20 @@ class MainCalendarViewModel @Inject constructor(
      * "지난주 메뉴를 보여주면 절대 안 된다"를 화면 로직이 아니라 구조로 막는다.
      * (자정을 넘겨 앱이 켜져 있으면 하한이 한 주 낡을 수 있어, 화면도 열릴 때마다
      *  `weekStartOf(오늘)`을 다시 구해 그 키로만 꺼낸다.)
+     *
+     * ## 왜 `Result?` 인가 (v1.6.93)
+     *
+     * 종전엔 초기값도 `emptyMap()`, 오류 폴백도 `emptyMap()` 이라 화면이 **셋을 구분할 수 없었다**:
+     * ① 아직 못 받음 ② 오프라인·조회 실패 ③ 정말 이번 주 표가 안 올라옴. 그래서 비행기 모드에서도
+     * `이번 주 식단표가 아직 없어요` 라고 **사실이 아닌 말**을 했다(관리자에겐 "올려라"는 뜻이 된다).
+     * `null` = 미수신 · `failure` = 오프라인 · `success` = 받음 셋으로 갈라 화면이 각각 다르게 말한다.
+     * 표준 [Result] 라 새 타입을 만들지 않았다.
      */
-    val menus: StateFlow<Map<LocalDate, WeeklyMenu>> =
+    val menus: StateFlow<Result<Map<LocalDate, WeeklyMenu>>?> =
         menuRepo.observeFrom(weekStartOf(LocalDate.now()))
-            .map { m -> m.mapValues { (start, cells) -> WeeklyMenu(start, cells) } }
-            .catch { emit(emptyMap()) }
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+            .map { m -> Result.success(m.mapValues { (start, cells) -> WeeklyMenu(start, cells) }) }
+            .catch { emit(Result.failure(it)) }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
 
     /**
      * 관리자 공지 (v1.6.89) — 기간 안의 것만, 최신순. 달력 맨 위 배너가 그중 1건을 그린다.

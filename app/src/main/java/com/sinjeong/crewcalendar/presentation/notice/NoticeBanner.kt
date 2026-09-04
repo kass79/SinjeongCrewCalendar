@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Campaign
 import androidx.compose.material.icons.filled.Close
@@ -115,7 +117,12 @@ fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
         AlertDialog(
             onDismissRequest = { open = null },
             title = { Text(full.title, fontWeight = FontWeight.ExtraBold) },
-            text = { Text(full.body) },
+            // M3 AlertDialog 의 text 슬롯은 **스스로 스크롤하지 않는다**(v1.6.93). 공지 본문은
+            // 관리자가 얼마든지 길게 쓸 수 있어, 긴 글이면 아래 [확인] 이 화면 밖으로 나가
+            // 대화상자를 닫을 길이 사라졌다(뒤로가기만 남는다). MenuAdminScreen 과 같은 처방.
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) { Text(full.body) }
+            },
             confirmButton = { TextButton(onClick = { open = null }) { Text("확인") } },
         )
     }

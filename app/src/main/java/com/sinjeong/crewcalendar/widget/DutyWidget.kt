@@ -33,6 +33,7 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
 import com.sinjeong.crewcalendar.MainActivity
+import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.util.dutyPalette
 
 /**
@@ -161,17 +162,16 @@ class DutyWidget : GlanceAppWidget() {
                     // 오늘 칸의 자리. 낡았으면 −1 = 어느 칸도 오늘로 칠하지 않는다.
                     val todayIdx = if (dated) cells.indexOfFirst { it.epochDay == todayEpoch } else 0
 
-                    // 2x1(TINY) / 3x1(MID) / 4x1 이상(FOUR·WIDE)
+                    // 2x1(TINY) — 스트립이 안 들어간다. 부제는 그 판이 제 안에서 한 줄로 쓴다.
                     if (size.width < MID_SHORT.width) {
                         Compact2(cells.getOrNull(todayIdx) ?: cells[0], sub, stale, small)
                         return@Column
                     }
-                    if (size.width < FOUR_SHORT.width) {
-                        ThreeDays(cells.take(3), todayIdx, small, tall)
-                        return@Column
-                    }
 
                     // 부제는 높이가 남을 때만. 안 그러면 근무 코드 줄이 밀려 잘린다(v1.6.21 버그).
+                    // ⚠ **3칸 판(3x1)보다 먼저** 그린다(v1.6.93). 종전엔 3x1 이 이 블록 앞에서
+                    // `return@Column` 해 버려 `오늘 출근 07:47` 줄이 통째로 빠졌다 — 2x1 보다
+                    // 넓은데 정보는 더 적고, MID(84dp) 판은 높이의 40% 가 그냥 비어 있었다.
                     if (tall && sub.isNotBlank()) {
                         Text(
                             sub,
@@ -185,6 +185,13 @@ class DutyWidget : GlanceAppWidget() {
                             modifier = GlanceModifier.padding(start = 2.dp, bottom = 3.dp),
                         )
                     }
+
+                    // 3x1(MID) / 4x1 이상(FOUR·WIDE)
+                    if (size.width < FOUR_SHORT.width) {
+                        ThreeDays(cells.take(3), todayIdx, small, tall)
+                        return@Column
+                    }
+
                     // Glance 컨테이너는 자식 10개까지만 렌더한다.
                     // 칸 사이 Spacer 를 쓰면 7칸+6스페이서=13 이라 뒤 2칸이 잘리므로,
                     // 간격은 칸을 감싼 Box 의 padding 으로 준다(자식 7개).
@@ -217,7 +224,8 @@ class DutyWidget : GlanceAppWidget() {
         ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    today.duty.ifBlank { "·" },
+                    // 2x1 은 44dp 라 두 줄이 안 들어간다 — [cellLabel] 의 줄바꿈은 붙여 한 줄로.
+                    today.duty.ifBlank { "·" }.replace("\n", ""),
                     maxLines = 1,
                     style = TextStyle(
                         color = fg,
@@ -278,25 +286,45 @@ class DutyWidget : GlanceAppWidget() {
         ) {
             // 요일+날짜를 한 줄로 합쳐 근무 글자를 키울 세로 여유를 만든다.
             // 좁힌 위젯에서는 요일을 떼고(날짜만) 글자를 줄여 한 줄에 들어가게 한다.
+            /*
+             * ⚠ 빨간 날 글자색은 **칸 배경과 같은 팔레트에서** 뽑는다(v1.6.93).
+             * 칸 배경([dutyPalette])은 라이트 톤 **고정**인데 글자만 `GlanceTheme.colors.error`
+             * (다크 `#FFB4AB`)를 쓰고 있었다 — 다크모드에서 연한 살구 글자가 연한 파스텔 배경에
+             * 얹혀 대비가 약 1.5:1 로 무너졌다(일요일·공휴일 날짜가 안 읽힌다).
+             * 배경이 테마값(`inverseOnSurface`)인 옛 레코드·ETC 칸에서만 종전 `error` 가 맞다.
+             */
+            val redInk =
+                if (pal != null) ColorProvider(Color(dutyPalette(DutyType.REST).second))
+                else GlanceTheme.colors.error
             Text(
                 if (narrow) cell.day else "${cell.dow} ${cell.day}",
                 maxLines = 1,
                 style = TextStyle(
-                    color = if (cell.red && !isToday) GlanceTheme.colors.error else fg,
+                    color = if (cell.red && !isToday) redInk else fg,
                     fontSize = if (narrow) (if (small) 8.sp else 9.sp)
                     else if (tall) (if (small) 10.sp else 11.5.sp)
                     else if (small) 9.sp else 10.5.sp,
                     fontWeight = FontWeight.Bold,
                 ),
             )
+            /*
+             * 긴 근무명은 **두 줄**로 온다(`대기충당 지2` → `대기`⏎`지2` — [cellLabel]).
+             * ⚠ 두 줄은 **글자를 한 단계 줄여** 그린다(0.62배). 칸 높이는 한 줄 기준으로 잡혀
+             *   있어서 제 크기 두 줄은 아랫줄이 **세로로** 잘린다(3x1 실측) — 세로 잘림은
+             *   가로 `…` 보다 나쁘다(v1.6.21 사고와 같은 자리). 줄인 크기 두 줄(≈1.2배 높이)은
+             *   들어간다. 낮은 판(48dp)에서는 아예 붙여서 한 줄로.
+             */
+            val label = cell.duty.ifBlank { "·" }.let { if (tall) it else it.replace("\n", "") }
+            val two = '\n' in label
+            val base = if (narrow) (if (small) 9.5.sp else 11.sp)
+                else if (tall) (if (small) 14.5.sp else 16.sp)
+                else if (small) 13.5.sp else 15.sp
             Text(
-                cell.duty.ifBlank { "·" },
-                maxLines = 1,
+                label,
+                maxLines = if (two) 2 else 1,
                 style = TextStyle(
                     color = fg,
-                    fontSize = if (narrow) (if (small) 9.5.sp else 11.sp)
-                    else if (tall) (if (small) 14.5.sp else 16.sp)
-                    else if (small) 13.5.sp else 15.sp,
+                    fontSize = if (two) base * 0.62f else base,
                     fontWeight = FontWeight.Bold,
                 ),
             )

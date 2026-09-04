@@ -288,7 +288,17 @@ private object WxCache {
     @Volatile var grid: Pair<Int, Int>? = null
     @Volatile var value: Weather? = null
     @Volatile var freshUntilMs = 0L
+
+    /**
+     * 마지막으로 **성공한** 시각 (v1.6.93). 실패해도 직전 값을 안 버리는 정책 때문에,
+     * 지하·터널·API 한도에서 몇 시간을 못 받아도 **몇 시간 전 기온이 "지금"인 척** 헤더 칩에
+     * 그대로 붙어 있었다. 칩에는 시각이 안 적혀 있어 사용자가 낡음을 알 길이 없다.
+     */
+    @Volatile var okAtMs = 0L
 }
+
+/** 이보다 낡은 기온은 **현재 기온이 아니다** — 칩을 아예 감춘다(틀린 값보다 없는 편이 낫다). */
+private const val MAX_STALE_MS = 3 * 60 * 60_000L
 
 /**
  * 캐시가 살아 있으면 그대로, 아니면 한 번 받아 온다. 반드시 IO 스레드에서 부를 것.
@@ -301,17 +311,20 @@ private object WxCache {
 private fun currentWeather(ctx: Context): Weather? {
     val grid = gridOf(ctx)
     val now = System.currentTimeMillis()
-    if (grid == WxCache.grid && now < WxCache.freshUntilMs) return WxCache.value
+    // ⚠ 직전 성공값은 **3시간까지만** 내준다(v1.6.93). 그 너머는 현재 기온이 아니다.
+    fun kept() = WxCache.value?.takeIf { now - WxCache.okAtMs <= MAX_STALE_MS }
+    if (grid == WxCache.grid && now < WxCache.freshUntilMs) return kept()
     if (grid != WxCache.grid) {
         WxCache.grid = grid
         WxCache.value = null
+        WxCache.okAtMs = 0L
         Log.i("Weather", "격자 ${grid.first},${grid.second}")
     }
     val fetched = fetch(grid.first, grid.second)
     // 성공 45분(발표 주기 1시간보다 짧게) / 실패 5분 — 지하에서 매번 3초 타임아웃을 물지 않게.
     WxCache.freshUntilMs = now + if (fetched != null) 45 * 60_000L else 5 * 60_000L
-    if (fetched != null) WxCache.value = fetched
-    return WxCache.value
+    if (fetched != null) { WxCache.value = fetched; WxCache.okAtMs = now }
+    return kept()
 }
 
 /**

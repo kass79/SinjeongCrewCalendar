@@ -146,8 +146,11 @@ private const val TAG = "BranchLive"
 /** 회차 기억 저장 키 — 값 형식은 [BranchLive.turnMemory] */
 private const val TURN_KEY = "turn_memory"
 
-/** 영업시간: 05:30~24:00 + 익일 0~1시(전날 영업 연장). 빈 상태 문구를 고르는 데만 쓴다. */
-private fun inService(t: LocalTime = LocalTime.now()): Boolean {
+/**
+ * 영업시간: 05:30~24:00 + 익일 0~1시(전날 영업 연장). 빈 상태 문구를 고르는 데만 쓴다.
+ * 본선 지도([MainLineMap])도 같은 판정을 쓴다 — 두 지도가 다른 시각에 "운행 종료"라고 말하면 안 된다.
+ */
+internal fun inService(t: LocalTime = LocalTime.now()): Boolean {
     val mins = t.hour * 60 + t.minute
     return mins >= 330 || mins < 60
 }
@@ -568,6 +571,22 @@ private fun LineMapCard(
                         // 종전처럼 열번마다 재면 상자가 들쭉날쭉해져 겹침 판정과 그린 결과가 어긋난다.
                         val locoW = LOCO_BOX_W * locoScale * 1.dp.toPx()
                         val boxes = ArrayList<Rect>()
+                        /*
+                         * `기지` 꼬리표 — 몸통 **오른쪽**(진행 반대쪽)이 원칙이다. 신도림 끝에서는
+                         * 오른쪽에 자리가 없어 종전엔 `coerceAtMost` 로 끌려와 **제 회색 몸통 위에
+                         * 겹쳐 찍혔다**(글자색도 몸통색과 같은 [DepotGray] 라 통째로 못 읽었다).
+                         * 자리가 없으면 반대쪽(왼쪽)에 붙인다 — 그리는 곳과 자리를 잡는 곳이
+                         * **같은 함수**를 봐야 어긋나지 않는다(v1.6.93).
+                         */
+                        val tagGap = 2.dp.toPx()
+                        val depotTag = tm.measure("기지", TextStyle(
+                            fontSize = (if (big) 9f else 8f).sp,
+                            fontWeight = FontWeight.Bold, color = DepotGray))
+                        fun tagLeft(cx: Float): Float {
+                            val right = cx + locoW / 2f + tagGap
+                            return if (right + depotTag.size.width <= size.width) right
+                            else (cx - locoW / 2f - tagGap - depotTag.size.width).coerceAtLeast(0f)
+                        }
                         /**
                          * 빈 자리를 찾아 중심을 돌려준다. 두 단 다 막혔으면 `null`(= 점만).
                          * ⚠ 가장자리 물림에 **2dp 를 더해** 잰다 — 종착역(까치산·신도림)에서 딱
@@ -575,16 +594,21 @@ private fun LineMapCard(
                          *
                          * @param board 내 열차 = 지붕 위 행선판까지 **한 상자**다(v1.6.91).
                          *   판만큼 위로 큰 상자를 잡아야 남의 열차가 판 위에 올라앉지 않는다.
+                         * @param tag 기지 회송 = `기지` 꼬리표까지 **한 상자**다(v1.6.93).
+                         *   꼬리표를 [boxes] 밖에 두면 나중에 놓이는 열차가 그 위에 올라앉는다.
                          */
-                        fun place(x: Float, up: Boolean, board: Boolean = false): Offset? {
+                        fun place(x: Float, up: Boolean, board: Boolean = false,
+                                  tag: Boolean = false): Offset? {
                             val edge = locoW / 2f + 2.dp.toPx()
                             val cx = x.coerceIn(edge, (size.width - edge).coerceAtLeast(edge))
                             val roof = locoP / 2f + if (board) boardP else 0f
+                            val l0 = cx - locoW / 2f
+                            val r0 = cx + locoW / 2f
+                            val tagL = if (tag) minOf(l0, tagLeft(cx)) else l0
+                            val tagR = if (tag) maxOf(r0, tagLeft(cx) + depotTag.size.width) else r0
                             for (r in 0..1) {
                                 val cy = rowY(up, r)
-                                val rect = Rect(
-                                    cx - locoW / 2f, cy - roof,
-                                    cx + locoW / 2f, cy + locoP / 2f)
+                                val rect = Rect(tagL, cy - roof, tagR, cy + locoP / 2f)
                                 if (boxes.none { it.overlaps(rect) }) { boxes += rect; return Offset(cx, cy) }
                             }
                             return null
@@ -598,7 +622,7 @@ private fun LineMapCard(
                             }
                         // 입고 회송(신도림 → 기지)은 왼쪽으로 달리니 **까치산행 차선**이다.
                         val runnerSpots = runnerAnimated.map { (no, pos) ->
-                            Triple(no, pos, place(xOf(pos), false))
+                            Triple(no, pos, place(xOf(pos), false, tag = true))
                         }
 
                         /** 자리를 못 잡은 열차 — 그래도 **어디 있는지는** 선 위 점으로 남긴다. */
@@ -629,17 +653,13 @@ private fun LineMapCard(
                          * 신도림에서 도림천 기지로 왼쪽으로 달리니 머리도 왼쪽이고, 꼬리표는
                          * 진행 **반대쪽**(오른쪽) 몸통 밖에 붙는다. 아래 차선이라 y 가 역 이름
                          * 줄보다 밑이다 — 글자를 가릴 자리가 아니다.
+                         * 자리는 [tagLeft] 가 정한다(오른쪽이 막히면 왼쪽 — v1.6.93).
                          */
                         runnerSpots.forEach { (no, pos, c) ->
                             if (c == null) dotOnly(xOf(pos)) else {
                                 loco(c, no, toSindorim = false, body = DepotGray, ink = BadgeInk)
-                                val tag = tm.measure("기지", TextStyle(
-                                    fontSize = (if (big) 9f else 8f).sp,
-                                    fontWeight = FontWeight.Bold, color = DepotGray))
-                                drawText(tag, topLeft = Offset(
-                                    (c.x + locoW / 2f + 2.dp.toPx())
-                                        .coerceAtMost(size.width - tag.size.width),
-                                    c.y - tag.size.height / 2f))
+                                drawText(depotTag, topLeft = Offset(
+                                    tagLeft(c.x), c.y - depotTag.size.height / 2f))
                             }
                         }
                         spots.filter { it.first.trainNo != mineNo }.forEach { (t, pos, c) ->
@@ -774,11 +794,15 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, onRefresh: () -> Unit) {
 private fun RefreshButton(onRefresh: () -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     val spin by animateFloatAsState(tick * 360f, tween(700), label = "spin")
+    // ⚠ 누르는 것은 **[Surface] 자체**다(v1.6.93). 종전엔 안쪽 [Canvas] 만 13dp + 여백 10dp =
+    // 23dp 라 손끝의 절반도 안 걸렸는데, 빈 상태 문구가 바로 이 ↻ 를 누르라고 안내한다.
+    // `Surface(onClick = …)` 이 `minimumInteractiveComponentSize()` 로 터치만 48dp 로 넓힌다.
     Surface(
+        onClick = { tick++; onRefresh() },
         color = Color.White.copy(alpha = 0.10f),
         shape = CircleShape,
         border = BorderStroke(1.2.dp, LoopGreen.copy(alpha = 0.75f)),
-        modifier = Modifier.padding(start = 8.dp).clickable { tick++; onRefresh() },
+        modifier = Modifier.padding(start = 8.dp),
     ) {
         Canvas(Modifier.padding(5.dp).size(13.dp).rotate(spin)) {
             val c = Color(0xFFB9F5C0)
@@ -799,25 +823,31 @@ private fun RefreshButton(onRefresh: () -> Unit) {
     }
 }
 
-/** 하단 알약 칩 — 본선 상태바 칩과 같은 모양·같은 크기. */
+/**
+ * 하단 알약 칩 — 본선 상태바 칩과 같은 모양·같은 크기.
+ *
+ * ⚠ 누를 수 있는 칩은 **[Surface] 가 통째로 단추**다(v1.6.93 — [MainLineMap] 칩과 같은 처방).
+ * 안쪽 [Text] 에 `clickable` 을 걸면 터치 영역이 글자 높이(≈19dp)뿐이라 M3 최소 48dp 에 한참
+ * 못 미친다. `Surface(onClick = …)` 은 리플·`Role.Button` 과 함께
+ * `minimumInteractiveComponentSize()` 를 붙여 보이는 크기는 그대로 두고 터치만 넓힌다.
+ */
 @Composable
 private fun BranchChip(
     text: String, big: Boolean, tint: Color, fill: Boolean = false,
     modifier: Modifier = Modifier, onClick: (() -> Unit)? = null,
-) = Surface(
-    modifier = modifier,
-    color = if (fill) tint else tint.copy(alpha = 0.12f),
-    shape = RoundedCornerShape(50),
-    border = BorderStroke(1.dp, tint.copy(alpha = 0.85f)),
 ) {
-    Text(
-        text,
-        fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
-        color = if (fill) MineInk else tint,
-        maxLines = 1, overflow = TextOverflow.Ellipsis,
-        // 누를 수 있는 칩만 클릭 영역을 만든다 — 나머지는 그냥 글씨다.
-        modifier = Modifier
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 10.dp, vertical = 3.dp),
-    )
+    val label: @Composable () -> Unit = {
+        Text(
+            text,
+            fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
+            color = if (fill) MineInk else tint,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
+        )
+    }
+    val bg = if (fill) tint else tint.copy(alpha = 0.12f)
+    val shape = RoundedCornerShape(50)
+    val line = BorderStroke(1.dp, tint.copy(alpha = 0.85f))
+    if (onClick == null) Surface(modifier, shape, bg, border = line) { label() }
+    else Surface(onClick, modifier, shape = shape, color = bg, border = line) { label() }
 }

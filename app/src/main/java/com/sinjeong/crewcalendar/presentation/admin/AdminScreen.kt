@@ -1,5 +1,7 @@
 package com.sinjeong.crewcalendar.presentation.admin
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.text.KeyboardOptions
@@ -234,7 +236,13 @@ private fun MemberEditor(
         onDismissRequest = onDismiss,
         title = { Text(if (draft.editingUid == null) "동료 등록" else "동료 수정") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            // M3 AlertDialog 의 text 슬롯은 **스스로 스크롤하지 않는다**(v1.6.93). 사번 칸을
+            // 누르면 키보드가 올라와 대화상자가 그만큼 눌리는데, 그때 아래 [저장] 이 화면 밖으로
+            // 나가 **입력만 하고 저장을 못 했다**(글자배율 1.5 에서는 키보드 없이도 그렇다).
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
                 OutlinedTextField(
                     value = draft.name, onValueChange = { onChange(draft.copy(name = it)) },
                     label = { Text("이름") }, singleLine = true,

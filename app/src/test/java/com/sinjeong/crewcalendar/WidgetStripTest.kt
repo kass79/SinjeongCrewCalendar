@@ -1,7 +1,9 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.widget.Cell
+import com.sinjeong.crewcalendar.widget.cellLabel
 import com.sinjeong.crewcalendar.widget.decodeStrip
 import com.sinjeong.crewcalendar.widget.encodeStrip
 import org.junit.Assert.assertEquals
@@ -63,6 +65,32 @@ class WidgetStripTest {
         assertEquals(1, strip(today.minusDays(1)).indexOfFirst { it.epochDay == today.toEpochDay() })
         // 일주일 넘게 묵은 스트립: 오늘 칸이 없다 → 강조 없음 + "갱신 필요"
         assertEquals(-1, strip(today.minusDays(9)).indexOfFirst { it.epochDay == today.toEpochDay() })
+    }
+
+    /* ── v1.6.93 ⑧: 4x1 칸(≈36dp)에 긴 근무명이 안 들어간다 ─────────── */
+
+    /**
+     * 충당 계열은 **두 줄**로, 네 글자 휴가류는 **두 글자**로. 종전엔 [DutyCode.display] 를
+     * 그대로 넣어 `대기충당지2` 여섯 글자가 `대기충…` 으로 잘려 **다이아가 통째로 안 보였다.**
+     */
+    @Test fun `위젯 칸 표기는 긴 근무명을 접는다`() {
+        fun label(raw: String) = cellLabel(DutyCode.parse(raw))
+        assertEquals("대기\n지2", label("대기충당 지2"))
+        assertEquals("돌봄", label("돌봄휴가"))
+        assertEquals("동행", label("동행휴가"))
+        // 짧은 건 손대지 않는다 — 달력과 같은 글자여야 한다.
+        assertEquals("14", label("14"))
+        assertEquals("휴2", label("휴2"))
+        // 어느 표기든 **한 줄에 세 글자를 안 넘는다**(칸 폭이 그만큼뿐이다).
+        for (line in label("대기충당 지2").split('\n')) {
+            org.junit.Assert.assertTrue(line, line.length <= 3)
+        }
+    }
+
+    /** 줄바꿈이 섞여도 직렬화가 안 깨진다 — 구분자는 `|`·`;` 뿐이다. */
+    @Test fun `두 줄 표기가 왕복한다`() {
+        val c = Cell("월", "7", "대기\n지2", false, DutyType.STANDBY, "출근 07:47", 20_000L)
+        assertEquals(c, decodeStrip(encodeStrip(listOf(c)))[0])
     }
 
     @Test fun `모든 근무 타입에 색이 있다`() {
