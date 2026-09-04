@@ -87,6 +87,13 @@ fun MemoListSheet(
             // 근무변경·메모를 저장하면 곧바로 다시 계산된다(저장소·쿼리 없음).
             // `FlowRow` 라 글자배율을 키우면 잘리지 않고 스스로 아랫줄로 접힌다.
             val weeks = remember(month, days) { WeeklyHours.compute(month, days) }
+            // 사용자 피드백(v1.6.90): 숫자만 있으면 뭔지 모른다 — "주 52시간" 기준임을 한 줄로 밝힌다.
+            Text(
+                "주 52시간 확인 · 월~일 근무시간 합계 (넘는 주는 빨간색)",
+                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
             FlowRow(
                 Modifier.fillMaxWidth().padding(bottom = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -94,7 +101,8 @@ fun MemoListSheet(
                 weeks.forEach { w ->
                     val over = w.minutes > WeeklyHours.LIMIT_MIN
                     val tail =
-                        if (w.excluded.isEmpty()) "" else " (${w.excluded.joinToString("·")} 미포함)"
+                        (if (over) " 초과" else "") +
+                            if (w.excluded.isEmpty()) "" else " (${w.excluded.joinToString("·")} 미포함)"
                     Text(
                         WeeklyHours.label(w) + tail,
                         fontSize = 12.5.sp,
