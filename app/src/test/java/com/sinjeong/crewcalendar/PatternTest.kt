@@ -1924,11 +1924,15 @@ class PatternTest {
     /**
      * **2027년 공휴일 전수**. 하나라도 빠지면 그 날 휴일 다이아를 평일로 읽어 승무원이 지각한다.
      * 날짜·요일은 한국천문연구원 2027년 월력요항 보도(설날 2/7 일 · 추석 9/15 수 ·
-     * 일요일 겹침 4일 · 토요일 겹침 5일)와 대체공휴일 7회 보도로 교차 확인했다.
+     * 일요일 겹침 4일 · 토요일 겹침 5일)로 교차 확인했다.
+     *
+     * ⚠ 월력요항의 **24건**은 "일요일 52일을 뺀 빨간 날" 수라 **이 표의 크기가 아니다.**
+     * 표는 일요일에 겹친 공휴일(2/7·6/6·8/15·10/3)도 담는다. v1.6.92가 24를 표 크기로 착각해
+     * 없는 대체휴일(5/3)을 하나 채워 넣었고 v1.6.93에서 뺐다 — 숫자 맞추기로 날짜를 만들지 마라.
      */
     @Test fun holidays_2027_are_complete() {
         val h2027 = Bundled.PUBLIC_HOLIDAYS.filterKeys { it.year == 2027 }
-        assertEquals("2027 공휴일 건수(월력요항 24건)", 24, h2027.size)
+        assertEquals("2027 공휴일 표 크기(일요일 겹침 포함 23건)", 23, h2027.size)
 
         fun on(m: Int, d: Int) = LocalDate.of(2027, m, d)
         // 고정 공휴일
@@ -1955,14 +1959,13 @@ class PatternTest {
         assertEquals("추석연휴", h2027[on(9, 14)]); assertEquals("추석연휴", h2027[on(9, 16)])
     }
 
-    /** 대체공휴일 7회 — 전부 그 주 월요일(설날만 화요일)이고, 신정·삼일절·추석엔 없다 */
-    @Test fun substituteHolidays_2027_are_exactly_seven() {
+    /** 대체공휴일 6회 — 전부 그 주 월요일(설날만 화요일)이고, 신정·삼일절·추석·노동절엔 없다 */
+    @Test fun substituteHolidays_2027_are_exactly_six() {
         val subs = Bundled.PUBLIC_HOLIDAYS
             .filterKeys { it.year == 2027 }.filterValues { it == "대체휴일" }.keys.sorted()
         assertEquals(
             listOf(
                 LocalDate.of(2027, 2, 9),   // 설날이 일요일
-                LocalDate.of(2027, 5, 3),   // 노동절이 토요일
                 LocalDate.of(2027, 7, 19),  // 제헌절이 토요일
                 LocalDate.of(2027, 8, 16),  // 광복절이 일요일
                 LocalDate.of(2027, 10, 4),  // 개천절이 일요일
@@ -1971,6 +1974,9 @@ class PatternTest {
             ),
             subs,
         )
+        // **노동절(5/1 토)에도 대체공휴일이 없다** — 근로자의 날은 대체 대상 법률이 아니다.
+        assertNull(Bundled.PUBLIC_HOLIDAYS[LocalDate.of(2027, 5, 3)])
+        assertFalse("5/3(월)은 평일 다이아", Bundled.isHolidayTimetable(LocalDate.of(2027, 5, 3)))
         // **현충일(6/6 일)은 대체공휴일이 없다** — 대체 대상에서 제외돼 있다. 가장 틀리기 쉬운 자리.
         assertEquals(DayOfWeek.SUNDAY, LocalDate.of(2027, 6, 6).dayOfWeek)
         assertNull(Bundled.PUBLIC_HOLIDAYS[LocalDate.of(2027, 6, 7)])
