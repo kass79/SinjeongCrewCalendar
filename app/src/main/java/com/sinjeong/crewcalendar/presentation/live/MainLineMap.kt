@@ -169,22 +169,43 @@ import kotlin.math.sin
  *
  * 기본값은 이 앱이 도는 기기(폴드7·에뮬 1080x2400 노치)에서 잰 값이다 — **보정 손잡이**이니
  * 다른 기기에서 잘리거나 남으면 여기만 고치면 된다.
+ *
+ * ## 셋째 값 [side] — 가로(기기 회전)에서 창이 어긋나던 원인 (v1.6.88)
+ *
+ * 이 다이얼로그는 **화면 전체 크기로 재어 놓고**(Compose 가 받은 상자 = 2399x1079)
+ * 창틀은 노치를 피한 자리에 놓인다. 에뮬 가로 실측:
+ *
+ * ```
+ * act=2400x1080  actSys=136,74,0,63  actCut=136,0,0,0
+ * loc=136,74  vis=Rect(136,74 - 2400,1017)  view=2399x1079
+ * ```
+ *
+ * 즉 창은 `x=136`(노치 폭)부터 그려지는데 내용은 2399 폭으로 그려져 **오른쪽 135px 가 화면
+ * 밖으로 나갔다**(오른쪽 차선 역명·닫기 X). 왼쪽 136px 는 창이 아예 없어 뒤의 달력이 비쳤다.
+ * 세로가 멀쩡했던 건 같은 어긋남이 **위쪽**에 생기고, 위 [top] 여백이 그걸 그대로 상쇄해
+ * 줬기 때문이다(우연이 아니라 이 함수가 그러라고 있는 것).
+ *
+ * 그래서 가로에서는 **가로로 깎인 만큼**(`왼쪽 + 오른쪽` 시스템 여백 = 노치·측면 내비) 을
+ * 내용 오른쪽에 padding 으로 돌려준다. 세로 경로는 한 글자도 건드리지 않는다.
  */
-private fun decorInsets(ctx: Context, dens: Density): Pair<Dp, Dp> {
+private fun decorInsets(ctx: Context, dens: Density): Triple<Dp, Dp, Dp> {
     var c: Context? = ctx
     while (c is ContextWrapper && c !is Activity) c = c.baseContext
     (c as? Activity)?.window?.decorView?.let { dv ->
         val f = dv.rootWindowInsets
         val top = f?.systemWindowInsetTop ?: 0
         val bottom = f?.systemWindowInsetBottom ?: 0
+        // 가로로 깎인 총량. 노치가 왼쪽이든(회전 90) 오른쪽이든(270) 창 폭이 그만큼 줄고,
+        // 창은 왼쪽 여백만큼 밀려 시작한다 — 그래서 **합만 알면** 오른쪽에 돌려주면 맞는다.
+        val side = (f?.systemWindowInsetLeft ?: 0) + (f?.systemWindowInsetRight ?: 0)
         // ⚠ 제스처 네비게이션은 **덮어쓰는 바**라 `systemWindowInsetBottom` 이 0 으로 온다
         // (실측: 위는 136px 로 제대로 왔는데 아래가 0 이라 오른쪽 차선이 계속 물렸다).
         // 그래서 아래는 최소값을 깔아 준다 — 여기가 보정 손잡이다.
         if (top > 0) return with(dens) {
-            top.toDp() to bottom.toDp().coerceAtLeast(44.dp)
+            Triple(top.toDp(), bottom.toDp().coerceAtLeast(44.dp), side.toDp())
         }
     }
-    return 54.dp to 44.dp
+    return Triple(54.dp, 44.dp, 0.dp)
 }
 
 /** 운전실 화면 바탕 — 테마와 무관하게 늘 이 남색이다. */
@@ -323,6 +344,8 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
     val sysIns = decorInsets(view.context, dens)
     val safeTop = sysIns.first
     val safeBottom = sysIns.second
+    /** 가로에서 창이 노치만큼 밀려 잘리는 몫 — [decorInsets] KDoc 의 실측을 보라. */
+    val safeSide = sysIns.third
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -338,9 +361,11 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
                 // rotationZ = +90 은 내용을 시계로 돌린다 → 내용의 **왼쪽** 변이 화면 위
                 // (상태바), **오른쪽** 변이 화면 아래(제스처바)로 간다. 그래서 시스템바 여백도
                 // 같이 돌려서 준다.
+                // 가로는 창이 노치만큼 밀려 시작하므로 **오른쪽으로 그만큼 좁힌다**
+                // (v1.6.88 — 안 하면 오른쪽 차선 역명과 닫기 X 가 화면 밖으로 나간다).
                 val inset =
                     if (portrait) PaddingValues(start = safeTop, end = safeBottom)
-                    else PaddingValues(top = safeTop, bottom = safeBottom)
+                    else PaddingValues(top = safeTop, bottom = safeBottom, end = safeSide)
 
                 if (portrait) {
                     Box(
