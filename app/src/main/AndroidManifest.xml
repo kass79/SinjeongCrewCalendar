@@ -74,6 +74,33 @@
                 android:resource="@xml/duty_widget_info" />
         </receiver>
 
+        <!-- 같은 DutyWidget 을 런처 목록에 2x1·3x1 항목으로도 낸다(v1.6.88).
+             XML(appwidget-provider)이 리시버에 붙어 있어서 크기별 항목을 내려면 리시버를 늘려야 한다.
+             위 DutyWidgetReceiver 는 이름을 바꾸면 이미 놓인 4x1이 사라지므로 그대로 둔다. -->
+        <receiver
+            android:name=".widget.DutyWidgetReceiver2"
+            android:exported="true"
+            android:label="@string/widget_label_2">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/duty_widget_info_2" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.DutyWidgetReceiver3"
+            android:exported="true"
+            android:label="@string/widget_label_3">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/duty_widget_info_3" />
+        </receiver>
+
         <!-- 출근 1시간 전 브리핑 알람 + 부팅 재등록 (보호된 시스템 브로드캐스트는 exported=false로도 수신).
              SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED도 여기서 받는다 — 사용자가 "알람 및 리마인더"를
              켜는 순간 브리핑과 편승 예약을 정확 알람으로 다시 건다(권한을 끌 때 시스템이 지워 버리므로). -->

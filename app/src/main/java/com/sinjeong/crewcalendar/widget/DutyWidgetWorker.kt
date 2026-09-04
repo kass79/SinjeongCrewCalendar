@@ -59,7 +59,11 @@ class DutyWidgetWorker @AssistedInject constructor(
         val hasDuty = week.any { byDate[it]?.duty?.display?.isNotBlank() == true }
 
         val manager = GlanceAppWidgetManager(context)
-        manager.getGlanceIds(DutyWidget::class.java).forEach { id ->
+        // 위젯 클래스가 같아서(리시버만 3개) 이 한 줄이 세 항목의 id 를 다 준다 — v1.6.88에
+        // 세 위젯을 다 놓고 ids=3 으로 확인했다. 리시버별로 모을 필요 없다.
+        val ids = manager.getGlanceIds(DutyWidget::class.java)
+        android.util.Log.d("DutyWidget", "ids=${ids.size}")
+        ids.forEach { id ->
             updateAppWidgetState(context, id) { prefs ->
                 prefs[DutyWidget.KEY_WEEK] = if (hasDuty) strip else ""
                 prefs[DutyWidget.KEY_SUB] = subLine(today, byDate)

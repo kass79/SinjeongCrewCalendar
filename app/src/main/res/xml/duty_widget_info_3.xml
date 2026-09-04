@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  런처 위젯 목록의 **3x1 항목**(v1.6.88). 그리는 클래스는 4x1과 같은 DutyWidget —
+  duty_widget_info_2.xml 주석 참고.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="3"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen"
+    android:resizeMode="horizontal|vertical"
+    android:previewLayout="@layout/widget_duty_preview_3"
+    android:description="@string/widget_label_3" />

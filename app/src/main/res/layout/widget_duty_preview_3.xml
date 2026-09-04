@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  위젯 고르기 화면 previewLayout 전용(3x1) — 실제 위젯은 Glance(DutyWidget)라 XML이 없다.
+  DutyWidget.ThreeDays 의 모습(오늘·내일·모레 3칸)을 정적으로 흉내 낸다:
+  요일+날짜 11.5sp / 근무 16sp, 칸 padding 4dp, 칸 간격 2dp.
+  오늘 칸만 테마 강조색(런처 테마를 따라간다)이고 나머지 칸은 util/DutyPalette 의 고정
+  라이트 톤(주간 #E8FAF0 / #00210E)을 그대로 적는다 — 실제 렌더와 같아야 한다.
+  데이터는 가짜지만 MAIN_PATTERN 의 실제 연속 구간이고 일요일은 날짜만 빨강이다.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:background="@drawable/widget_preview_card"
+    android:backgroundTint="?android:attr/colorBackground"
+    android:paddingLeft="8dp"
+    android:paddingRight="8dp"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+
+    <!-- 오늘 -->
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginLeft="2dp"
+        android:layout_marginRight="2dp"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:background="@drawable/widget_preview_cell"
+        android:backgroundTint="?android:attr/colorAccent">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="목 13"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorPrimaryInverse" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="47"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:textColor="?android:attr/textColorPrimaryInverse" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginLeft="2dp"
+        android:layout_marginRight="2dp"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:background="@drawable/widget_preview_cell"
+        android:backgroundTint="#F5F0FB">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="금 14"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:textColor="#74679A" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="~"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:textColor="#74679A" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:layout_marginLeft="2dp"
+        android:layout_marginRight="2dp"
+        android:orientation="vertical"
+        android:gravity="center_horizontal"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:background="@drawable/widget_preview_cell"
+        android:backgroundTint="#FFF0EC">
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="토 15"
+            android:textSize="11.5sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:textColor="#B3271E" />
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="휴16"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:textColor="#B3271E" />
+    </LinearLayout>
+</LinearLayout>

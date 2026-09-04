@@ -2,4 +2,7 @@
 <resources>
     <string name="app_name">신정승무 캘린더</string>
     <string name="widget_label">오늘/내일 근무</string>
+    <!-- 위젯 목록 항목 3개는 같은 위젯을 크기만 다르게 놓는다(v1.6.88). 기존 4x1 = widget_label -->
+    <string name="widget_label_2">근무 위젯 (오늘)</string>
+    <string name="widget_label_3">근무 위젯 (3일)</string>
 </resources>

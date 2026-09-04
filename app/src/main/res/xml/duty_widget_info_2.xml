@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  런처 위젯 목록의 **2x1 항목**(v1.6.88). 실제로 그리는 클래스는 4x1과 같은 DutyWidget 이고,
+  다른 것은 처음 놓았을 때의 크기(targetCell)와 미리보기뿐이다.
+  하한(minWidth/minHeight)·리사이즈는 기존 항목과 같은 값이라, 놓은 뒤 늘리면 3칸·7칸 판으로
+  그대로 바뀐다. 자세한 배경은 duty_widget_info.xml 주석 참고.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="2"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="1800000"
+    android:widgetCategory="home_screen"
+    android:resizeMode="horizontal|vertical"
+    android:previewLayout="@layout/widget_duty_preview_2"
+    android:description="@string/widget_label_2" />
