@@ -121,10 +121,32 @@ internal fun headingFor(tx: Float, ty: Float, forward: Boolean): Heading {
  * ⚠ 쓰는 곳은 `MainLineMap.spot` 인데 함수가 여기 사는 이유: 그 파일은 최상위에 `Color(...)`
  * 가 있어 **테스트 하네스(Compose 미포함)에서 클래스 초기화가 터진다.** [headingFor] 와 같다.
  *
- * 순수 함수 — [LocoTest] 가 네 변 × 두 차선을 잠근다.
+ * ## 전체 보기는 **복선**이다 — [innerLane] (v1.7.4)
+ *
+ * 사용자: *"전체 보기를 할때 열차들이 내선,외선 열차 아이콘들이 서로 올라타고 그러는데
+ * 외선은 노선 바깥 내선은 노선 안쪽으로 다니게 하면 어떨까?"*
+ *
+ * 전체 보기에서는 선로가 **두 줄**이다(바깥 = 외선 · 안쪽 = 내선). 내선 열차는 **제
+ * 선로(안쪽 줄)** 를 기준으로 자리를 잡으므로 세로 변에서 **루프 안쪽**으로 선다 —
+ * 그래야 바깥 줄에 선 외선 열차와 자리를 안 다툰다. 가로 변은 **둘 다 화면 위**다
+ * (제 선로 위에 바퀴를 내리고 바로 선 그림 — 윗변 내선·아랫변 외선이 두 선로 사이에 든다).
+ *
+ * ⚠ **단독 보기(내선/외선)는 [innerLane] 이 늘 `false`** 다 — 선로가 한 줄뿐이라 v1.7.3
+ * 화면과 픽셀 단위로 같아야 한다. 기본값이 `false` 인 이유다.
+ *
+ * ⚠ v1.6.98 이 걷어낸 **"반대 방향을 한 차선 밖에 세우기"와는 다른 물건**이다. 그때는 선로가
+ * 한 줄인데 열차만 밖에 세워 **허공에 떠 보였다**(*"떠다니는데? 아니지?"*). 지금은 그 자리에
+ * **진짜 선로**가 있어 바퀴가 선로에 닿는다.
+ *
+ * 순수 함수 — [LocoTest] 가 네 변 × 두 차선 × 단선/복선을 잠근다.
  */
-internal fun mainTrainSide(tx: Float, ty: Float): Pair<Float, Float> =
-    if (abs(tx) >= abs(ty)) 0f to -1f else ty to -tx
+internal fun mainTrainSide(
+    tx: Float, ty: Float, innerLane: Boolean = false,
+): Pair<Float, Float> = when {
+    abs(tx) >= abs(ty) -> 0f to -1f     // 가로 변 — 단선·복선 · 내선·외선 모두 선로 위
+    innerLane -> -ty to tx              // 복선 세로 변 내선 — 안쪽 선로의 **루프 안쪽**
+    else -> ty to -tx                   // 세로 변 외선(과 단선 전부) — 루프 **바깥**
+}
 
 /**
  * 안 뒤집은 몸통의 **배(바퀴)가 가는 쪽** — 지도 좌표. [drawLoco] 의 `p()` 표와 한 벌이라

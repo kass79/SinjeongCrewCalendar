@@ -296,14 +296,52 @@ private const val CLAY_SHADOW_MAX = 15
 private fun locoScale(big: Boolean) = if (big) 54f / LOCO_LEN else 1f
 
 /**
- * 열차 중심이 선로에서 물러나는 거리 — **바퀴가 선로에 닿는** 그 한 자리다.
+ * 열차 중심이 **제 선로**에서 물러나는 거리 — 바퀴가 그 선로에 닿는 한 자리다.
  *
- * ⚠ **차선은 하나뿐이다**(v1.6.98). 반대 방향을 한 차선 밖(2차선)에 세워 봤더니 그 열차들이
- * **선로에서 떠 보였다**(사용자: *"떠다니는데? 아니지?"*). 방향은 차선이 아니라 **기관차
- * 머리**가 말한다 — 두 방향 다 이 자리, 곧 선로 위에 선다. 겹칠 때만 계단으로 피하고,
- * 계단으로 올라간 열차는 발밑에 **받침선**([drawProp])이 깔린다.
+ * ⚠ **한 선로에 차선은 하나뿐이다**(v1.6.98). 같은 선로에서 반대 방향을 한 차선 밖에 세워
+ * 봤더니 그 열차들이 **선로에서 떠 보였다**(사용자: *"떠다니는데? 아니지?"*). 겹칠 때만
+ * 계단으로 피하고, 계단으로 올라간 열차는 발밑에 **받침선**이 깔린다.
+ *
+ * v1.7.4 부터 **전체 보기는 선로가 두 줄**이라 내선·외선이 각자 제 선로 위에 선다
+ * ([laneGap]) — 차선을 늘린 것이 아니라 **선로를 늘린 것**이다. 단독 보기는 종전대로 한 줄.
  */
 private fun badgeOff(big: Boolean) = (if (big) 18 else 14).dp
+
+/** 선로 굵기 — [laneGap] 과 [drawCabLoop] 이 **같은 값**을 봐야 한다. */
+private fun railW(big: Boolean) = (if (big) 9f else 7.5f).dp
+
+/** 모서리 반지름의 기준값 — 복선은 이 값을 가운데 두고 두 선로가 [laneGap] 만큼 벌어진다. */
+private fun baseRadius(big: Boolean) = (if (big) 40 else 28).dp
+
+/** 다른 열차 기관차 배수 — 전체 보기(복선) / 방향 필터. 자세히는 [CabScreen] `otherK`. */
+private const val OTHER_K_ALL = 0.7f
+private const val OTHER_K_DIR = 0.82f
+
+/**
+ * **전체 보기 복선의 두 선로 사이 간격**(v1.7.4) — 바깥 = 외선 · 안쪽 = 내선.
+ *
+ * 사용자 확정: *"외선은 노선 바깥 내선은 노선 안쪽으로 다니게 하면 어떨까?"* 두 선로 다
+ * 같은 색·같은 굵기다(지선 카드처럼 한쪽을 연하게 하지 **않는다** — 본선은 두 방향이 대등하다).
+ *
+ * ## 왜 계산값인가 — 이 틈에 **열차 한 대가 선다**
+ *
+ * 가로 변에서 **윗변 내선**과 **아랫변 외선**은 제 선로(안쪽/바깥쪽) 위에 서는데, 그 자리가
+ * 곧 **두 선로 사이**다. 그러니 틈은 기관차 한 대가 옆 선로를 안 밟고 들어갈 만큼이라야 한다:
+ *
+ * `차선 오프셋([badgeOff]) + 기관차 반높이 + 선로 반굵기 + 2dp`
+ *
+ * 기관차는 **타 열차(0.7배)** 기준이다(전체 보기의 남의 열차가 다 이 크기다 — [OTHER_K_ALL]).
+ * 폰 `14 + 10.85 + 3.75 + 2 = 30.6dp` · 펼침 `18 + 12.74 + 4.5 + 2 = 37.2dp`.
+ *
+ * ⚠ **내 열차는 몸통이 1배**라 반높이가 15.5dp 다 — 틈에 서면 몸통 윗날이 반대편 선로에
+ * 4.7dp 만큼 닿고, **지붕 위 행선판**(17dp)은 그 위로 넘어간다. 이건 알고 둔 대가다:
+ * 행선판까지 넣어 틈을 재면(폰 46.5dp) 안쪽 루프가 폰에서 130dp 밑으로 내려가 역 이름이
+ * 서로 포갠다. 내 열차는 **맨 나중에 그려 무엇 위에도 얹히므로** 판이 선로를 스쳐도 읽힌다.
+ */
+private fun laneGap(big: Boolean): Dp =
+    badgeOff(big) +
+        ((LOCO_BOX_H / 2f) * locoScale(big) * OTHER_K_ALL).dp +
+        railW(big) / 2f + 2.dp
 
 /**
  * 열차 쪽이 선로에서 먹는 깊이 — **가로 변은 위, 세로 변은 루프 바깥**(v1.6.98 보조설비 배치).
@@ -583,8 +621,9 @@ private fun CabScreen(
      * 더 내리면 글자가 몸통을 넘거나 안 읽힌다 — **0.7 밑으로는 가지 말 것.**
      * ⚠ **내 열차는 [locoScale] 그대로**다. 여기 값은 남의 열차 전용이다.
      * ⚠ 지선 카드(`LineMap.kt`)의 `UP_LOCO_K` 는 별개다 — 사용자가 본선만 지목했다.
+     * ⚠ 전체(0.7 = [OTHER_K_ALL])는 [laneGap] 이 두 선로 사이 간격을 잴 때 **같이 본다**.
      */
-    val otherK = if (filtered) 0.82f else 0.7f
+    val otherK = if (filtered) OTHER_K_DIR else OTHER_K_ALL
 
     val ctx = LocalContext.current
     // ⚠ 자산이 1.4MB 다 — 읽기·파싱을 **본 스레드에서 하면 안 된다**(다이얼로그가 뜨는 순간
@@ -699,8 +738,10 @@ private fun CabScreen(
                         }
                     }
                 ) {
+                    // 전체 보기만 **복선**이다(v1.7.4). 방향 필터를 켜면 한 방향뿐이라
+                    // 선로도 한 줄 — v1.7.3 화면 그대로다.
                     hit = drawCabLoop(tm, placed, mineNos, big, picked,
-                        labelSp, otherK, phase, mapDeg, pal)
+                        labelSp, otherK, phase, mapDeg, pal, dual = !filtered)
                 }
             }
         }
@@ -1218,7 +1259,18 @@ private fun overlaps(a: List<Offset>, b: List<Offset>): Boolean {
  * 물러나 `홍대입구` 대각선 밑으로 깨끗이 빠졌다).
  */
 private fun DrawScope.layoutLabels(
-    tm: TextMeasurer, loop: Loop, start: Int, sizeSp: Float, obstacles: List<Rect>,
+    tm: TextMeasurer, loop: Loop,
+    /**
+     * **안쪽 선로**(v1.7.4 복선). 단독 보기는 [loop] 과 **같은 객체**라 아래 계산이 한 글자도
+     * 안 바뀐다.
+     *
+     * 복선에서 이름이 붙는 선로는 **두 선로 묶음의 바깥 테두리**다(사용자 확정):
+     * 윗변은 **안쪽 선로 아래** · 아랫변은 **바깥 선로 아래** · 좌·우변은 **안쪽 선로 안쪽**.
+     * 그래서 아랫변만 [loop](바깥 선로)을 보고 나머지는 이 [loopIn] 을 본다 —
+     * 이름이 **두 선로 사이 공간을 침범하지 않는다.**
+     */
+    loopIn: Loop,
+    start: Int, sizeSp: Float, obstacles: List<Rect>,
     pal: MapPalette,
 ): List<Lab> {
     // 깊이를 아껴야 한다 — 폰에서 루프 안쪽 높이가 ≈163dp 뿐인데 윗변·아랫변 라벨이
@@ -1291,10 +1343,14 @@ private fun DrawScope.layoutLabels(
                 name in OP_STATIONS -> pal.op
                 else -> pal.label
             }))
-        val (p, _) = loop.at(loop.sOf(k))
         val onTop = k < TOP_N
         val onRight = k in TOP_N until (TOP_N + RIGHT_N)
         val onBottom = k in (TOP_N + RIGHT_N) until (TOP_N + RIGHT_N + BOTTOM_N)
+        // 이름이 매달리는 선로 — 아랫변만 바깥 선로, 나머지는 안쪽 선로([loopIn] KDoc).
+        // ⚠ 두 선로는 **동심**이라 직선 구간의 x·y 범위가 정확히 같다(반지름 차 = 간격).
+        // 그래서 같은 [k] 의 두 점이 서로 마주 보고, 이름이 어느 점의 것인지 안 흐려진다.
+        val nameLoop = if (onBottom) loop else loopIn
+        val (p, _) = nameLoop.at(nameLoop.sOf(k))
 
         /*
          * ── 어느 쪽에 적는가 (v1.6.98 보조설비 배치) ─────────────────────
@@ -1432,17 +1488,44 @@ private fun DrawScope.drawCabLoop(
     mapDeg: Float,
     /** 색 한 벌([MapPalette]) — **배치 값은 하나도 여기서 안 온다.** */
     pal: MapPalette,
+    /**
+     * **복선인가**(v1.7.4) — 전체 보기만 참이다. 참이면 선로가 두 줄(바깥 외선 · 안쪽 내선)
+     * 이고 열차·역 점·역 이름이 전부 제 선로를 기준으로 놓인다. 거짓이면 두 `Loop` 이
+     * **같은 객체**라 v1.7.3 화면이 픽셀 단위로 그대로 나온다.
+     */
+    dual: Boolean,
 ): List<Pair<Offset, String>> {
     /*
-     * ── 루프 크기·자리 (v1.6.98) ────────────────────────────────
+     * ── 루프 크기·자리 (v1.6.98 · v1.7.4 복선) ──────────────────
      * 위·왼쪽·오른쪽은 **열차 차선**([trainPad]), 아래는 **역 이름**([namePad])이 먹는다.
-     * 셋 다 계산값이라 나머지는 전부 루프에 준다 — 화면을 세로로 꽉 채우고, 종전 좌·우
-     * 역명 차선(92/108dp)이 사라진 만큼 가로로도 넓어졌다.
+     * 셋 다 계산값이라 나머지는 전부 루프에 준다 — 화면을 세로로 꽉 채운다.
+     *
+     * ## 복선의 바깥 선로는 **단선의 그 자리 그대로**다
+     *
+     * 바깥(외선) 선로 밖에 서는 것은 **윗변·좌·우변 열차**이고 그 상자는 종전과 같다
+     * ([trainPad]). 아랫변 밖에 있는 것도 종전대로 **역 이름뿐**이다([namePad]) — 복선에서
+     * 아랫변 외선은 선로 **위**(두 선로 사이)에 서기 때문이다. 그래서 여백을 다시 재도
+     * 답이 같고, 안쪽 선로만 [laneGap] 만큼 들어온다 = **루프는 여전히 화면 최대 크기**다.
+     *
+     * ## 모서리 — 두 개의 **동심** 둥근 사각형
+     *
+     * 안쪽 반지름 = 바깥 반지름 − 간격이라야 두 곡선이 **어디서나 같은 간격**으로 나란하다
+     * (평행곡선). 덤으로 직선 구간의 x·y 범위가 정확히 같아져 **같은 역이 서로 마주 본다**
+     * (`Loop.sOf` 가 직선 길이를 등분하므로 `hLen`·`vLen` 이 같으면 자리도 같다).
+     * 기준 반지름([baseRadius])을 가운데 두고 반씩 벌려, 안쪽이 너무 뾰족해지지 않게 8dp 로
+     * 받친다 — 폰 `43.3 / 12.7dp`, 펼침 `58.6 / 21.4dp`.
      */
     val tp = trainPad(big).toPx()
     val np = namePad(big).toPx()
-    val radius = (if (big) 40 else 28).dp.toPx()
-    val loop = Loop(tp, tp, size.width - tp, size.height - np, radius)
+    val gap = if (dual) laneGap(big).toPx() else 0f
+    val rIn = (baseRadius(big).toPx() - gap / 2f).coerceAtLeast(8.dp.toPx())
+    val rOut = rIn + gap
+    /** 바깥 선로 = **외선**. 단선이면 이 한 줄뿐이다. */
+    val loop = Loop(tp, tp, size.width - tp, size.height - np, rOut)
+    /** 안쪽 선로 = **내선**. 단선이면 [loop] 과 같은 객체다(회귀 0의 열쇠). */
+    val loopIn =
+        if (!dual) loop
+        else Loop(tp + gap, tp + gap, size.width - tp - gap, size.height - np - gap, rIn)
     val start = Line2Stations.MAIN.indexOf(LOOP_START)
 
     /*
@@ -1454,88 +1537,122 @@ private fun DrawScope.drawCabLoop(
      *  · 하이라이트는 **같은 경로**를 위로 4dp 옮겨 가늘게 — 시안이 지목한 "모서리에서
      *    하이라이트가 어긋난다"는 자리를 이렇게 막는다(같은 둥근 사각형이라 곡률이 같다).
      * 셋 다 [screenDown] 을 쓰므로 세로 화면에서도 그림자가 화면 아래로 떨어진다.
+     *
+     * ⚠ **복선은 두 줄이 똑같다**(v1.7.4 사용자 확정) — 색도 굵기도 클레이 튜브 질감도.
+     * 지선 카드처럼 한쪽을 연하게 하지 **않는다**: 지선은 신도림행이 주 선로라 위계가 있지만
+     * **본선은 내선·외선이 대등**하다. 한쪽을 물러나게 하면 그 방향이 곁가지로 읽힌다.
      */
-    val railW = (if (big) 9f else 7.5f).dp.toPx()
-    val railTL = Offset(tp, tp)
-    val railSz = Size(size.width - 2 * tp, size.height - tp - np)
-    fun rail(brush: Color, w: Float, d: Offset) = drawRoundRect(
+    val railW = railW(big).toPx()
+    fun rail(brush: Color, w: Float, d: Offset, tl: Offset, sz: Size, r: Float) = drawRoundRect(
         brush,
-        topLeft = Offset(railTL.x + d.x, railTL.y + d.y),
-        size = railSz,
-        cornerRadius = CornerRadius(radius),
+        topLeft = Offset(tl.x + d.x, tl.y + d.y),
+        size = sz,
+        cornerRadius = CornerRadius(r),
         style = Stroke(width = w),
     )
-    pal.railShadow?.let { rail(it, railW, screenDown(mapDeg, 6.dp.toPx())) }
-    if (pal.clay) drawRoundRect(
-        androidx.compose.ui.graphics.Brush.verticalGradient(
-            listOf(pal.railTop, pal.rail, pal.railBottom),
-            startY = railTL.y, endY = railTL.y + railSz.height,
-        ),
-        topLeft = railTL, size = railSz, cornerRadius = CornerRadius(radius),
-        style = Stroke(width = railW),
-    ) else rail(pal.rail, railW, Offset.Zero)
-    /*
-     * ⚠ 하이라이트 굵기는 **선로의 30%**, 띄우는 거리는 그 절반이다(시안의 `6dp · −4dp` 에서
-     * 실화면 보고 고쳤다). 시안 값은 선로가 26px 이던 그림 기준이라, 7.5dp 선로에 6dp 를
-     * 얹으면 **세로 변에서 선로를 거의 덮는다** — 세로 변은 "화면 아래"로 띄운 오프셋이 선로를
-     * 따라 미끄러져 그대로 겹치기 때문이다(실측: 왼쪽 세로변이 연한 띠 하나로 납작해졌다).
-     * 지금 값이면 가로 변은 윗면 하이라이트, 세로 변은 가운데 밝은 줄로 읽혀 둘 다 튜브가 된다.
-     */
-    pal.railHighlight?.let { rail(it, railW * 0.30f, screenDown(mapDeg, -railW * 0.26f)) }
+    fun railPass(tl: Offset, sz: Size, r: Float) {
+        pal.railShadow?.let { rail(it, railW, screenDown(mapDeg, 6.dp.toPx()), tl, sz, r) }
+        if (pal.clay) drawRoundRect(
+            androidx.compose.ui.graphics.Brush.verticalGradient(
+                listOf(pal.railTop, pal.rail, pal.railBottom),
+                startY = tl.y, endY = tl.y + sz.height,
+            ),
+            topLeft = tl, size = sz, cornerRadius = CornerRadius(r),
+            style = Stroke(width = railW),
+        ) else rail(pal.rail, railW, Offset.Zero, tl, sz, r)
+        /*
+         * ⚠ 하이라이트 굵기는 **선로의 30%**, 띄우는 거리는 그 절반이다(시안의 `6dp · −4dp`
+         * 에서 실화면 보고 고쳤다). 시안 값은 선로가 26px 이던 그림 기준이라, 7.5dp 선로에
+         * 6dp 를 얹으면 **세로 변에서 선로를 거의 덮는다** — 세로 변은 "화면 아래"로 띄운
+         * 오프셋이 선로를 따라 미끄러져 그대로 겹치기 때문이다(실측: 왼쪽 세로변이 연한 띠
+         * 하나로 납작해졌다). 지금 값이면 가로 변은 윗면 하이라이트, 세로 변은 가운데 밝은
+         * 줄로 읽혀 둘 다 튜브가 된다.
+         */
+        pal.railHighlight?.let {
+            rail(it, railW * 0.30f, screenDown(mapDeg, -railW * 0.26f), tl, sz, r)
+        }
+    }
+    railPass(
+        Offset(tp, tp), Size(size.width - 2 * tp, size.height - tp - np), rOut)
+    if (dual) railPass(
+        Offset(tp + gap, tp + gap),
+        Size(size.width - 2 * (tp + gap), size.height - tp - np - 2 * gap), rIn)
 
     // ── 방향 화살표 — 모서리 호 한가운데(역이 없는 자리)에 안/밖 하나씩 ──
+    // 복선에서는 **각자 제 선로의 모서리**에 붙는다(단선은 두 줄이 같은 곡선이라 종전과 같다).
     val arrowOff = (if (big) 15 else 12).dp.toPx()
     for (corner in 0 until 4) {
-        val (p, t) = loop.at(loop.cornerMid(corner))
-        val nIn = Offset(-t.y, t.x)
-        drawChevron(Offset(p.x + nIn.x * arrowOff, p.y + nIn.y * arrowOff), t,
+        val (pi, ti) = loopIn.at(loopIn.cornerMid(corner))
+        val nIn = Offset(-ti.y, ti.x)
+        drawChevron(Offset(pi.x + nIn.x * arrowOff, pi.y + nIn.y * arrowOff), ti,
             if (pal.clay) pal.railBottom else pal.rail, 5.dp.toPx())  // 내선 = 시계
-        drawChevron(Offset(p.x - nIn.x * arrowOff, p.y - nIn.y * arrowOff),
-            Offset(-t.x, -t.y), if (pal.clay) pal.op else pal.otherBody, 5.dp.toPx())  // 외선
+        val (po, to) = loop.at(loop.cornerMid(corner))
+        val nOut = Offset(to.y, -to.x)
+        drawChevron(Offset(po.x + nOut.x * arrowOff, po.y + nOut.y * arrowOff),
+            Offset(-to.x, -to.y), if (pal.clay) pal.op else pal.otherBody, 5.dp.toPx())  // 외선
     }
 
     // ── 역 43개 ──────────────────────────────────────────────
     // 열차가 서 있는 역(진입·도착·출발 = 역에 걸쳐 있는 자리)은 빨간 점.
-    val occupied = trains.mapNotNull { (_, p) ->
+    // ⚠ 복선에서는 **그 열차 방향의 선로에만** 빨갛다(지선 카드와 같은 규칙) — 내선이 선
+    // 역을 외선 선로에도 빨갛게 찍으면 있지도 않은 정차를 그리게 된다.
+    fun occupiedOf(rows: List<Pair<MainTrainMark, Float>>): Set<Int> = rows.mapNotNull { (_, p) ->
         val kf = p - start
         val k = kotlin.math.round(kf)
         if (abs(kf - k) <= 0.2f) ((k.toInt() % LOOP_N) + LOOP_N) % LOOP_N else null
     }.toSet()
+    // 단선(방향 필터)은 종전대로 **한 벌** — 내 열차가 반대 방향이어도 그리므로 다 넣는다.
+    val occOut = if (!dual) occupiedOf(trains) else occupiedOf(trains.filter { !it.first.inner })
+    val occIn = if (!dual) occOut else occupiedOf(trains.filter { it.first.inner })
 
-    for (k in 0 until LOOP_N) {
-        val (p, _) = loop.at(loop.sOf(k))
-        val red = k in occupied
-        // 신도림·성수는 지름 1.5배 + 흰 테두리 — 이름과 같은 주황이라 멀리서도 짚인다.
-        val name = Line2Stations.MAIN[(k + start) % LOOP_N]
-        val key = name in KEY_STATIONS
-        val rad = (if (big) 5f else 4f).dp.toPx() * (if (key) 1.5f else 1f)
-        // 클레이 역 점은 **흰 점토 단추**다 — 밑에 그림자를 한 겹 깔아야 크림 바탕에서 뜬다.
-        if (pal.clay) drawCircle(
-            pal.shadow, rad, p + screenDown(mapDeg, 2.dp.toPx()))
-        drawCircle(if (red) pal.stationRed else if (key) pal.keyInk(name) else pal.station, rad, p)
-        // 클레이는 **모든 역**에 테가 있다(흰 점이 크림에 묻히기 때문). 남색은 종전대로
-        // 신도림·성수와 정차 역에만 — 흰 점 자체가 이미 또렷하다.
-        if (key || red || pal.clay) drawCircle(
-            when {
-                key -> Color.White
-                red -> Color.White.copy(alpha = 0.55f)
-                else -> pal.stationEdge
-            },
-            rad, p,
-            style = Stroke(width = (if (key && pal.clay) 4f else 1.5f).dp.toPx()))
+    /** 역 점 한 벌 — **선로마다** 찍는다(v1.7.4 복선. 지선 카드와 같은 규칙). */
+    fun dots(lp: Loop, red: Set<Int>) {
+        for (k in 0 until LOOP_N) {
+            val (p, _) = lp.at(lp.sOf(k))
+            val isRed = k in red
+            // 신도림·성수는 지름 1.5배 + 흰 테두리 — 이름과 같은 주황이라 멀리서도 짚인다.
+            // 복선에서는 **두 선로에 다** 찍는다(사용자 확정).
+            val name = Line2Stations.MAIN[(k + start) % LOOP_N]
+            val key = name in KEY_STATIONS
+            val rad = (if (big) 5f else 4f).dp.toPx() * (if (key) 1.5f else 1f)
+            // 클레이 역 점은 **흰 점토 단추**다 — 밑에 그림자를 한 겹 깔아야 크림 바탕에서 뜬다.
+            if (pal.clay) drawCircle(
+                pal.shadow, rad, p + screenDown(mapDeg, 2.dp.toPx()))
+            drawCircle(
+                if (isRed) pal.stationRed else if (key) pal.keyInk(name) else pal.station, rad, p)
+            // 클레이는 **모든 역**에 테가 있다(흰 점이 크림에 묻히기 때문). 남색은 종전대로
+            // 신도림·성수와 정차 역에만 — 흰 점 자체가 이미 또렷하다.
+            if (key || isRed || pal.clay) drawCircle(
+                when {
+                    key -> Color.White
+                    isRed -> Color.White.copy(alpha = 0.55f)
+                    else -> pal.stationEdge
+                },
+                rad, p,
+                style = Stroke(width = (if (key && pal.clay) 4f else 1.5f).dp.toPx()))
+        }
     }
+    dots(loop, occOut)
+    if (dual) dots(loopIn, occIn)
     // ── 열차 자리를 **라벨보다 먼저** 잡는다 ────────────────
     val off = badgeOff(big).toPx()
+    /** 그 방향의 **제 선로**. 단선이면 둘이 같은 객체라 방향을 안 가린다. */
+    fun railOf(inner: Boolean) = if (dual && inner) loopIn else loop
     /**
      * (중심, **열차 쪽 방향**). 선로 쪽은 그 반대다 — 바퀴가 볼 쪽이 곧 `-out` 이다.
      *
-     * ⚠ **내선·외선이 같은 자리에 선다**(v1.6.98). 차선으로 방향을 말하던 규칙은 걷어냈다 —
-     * 한 차선 밖에 세운 열차가 선로에서 떠 보였기 때문이다. 방향은 [headingFor] 가 정하는
-     * **머리**가 말하고, 자리는 늘 바퀴가 선로에 닿는 이 한 줄이다.
+     * ⚠ **단선(방향 필터)에서는 내선·외선이 같은 자리에 선다**(v1.6.98). 방향은 [headingFor]
+     * 가 정하는 **머리**가 말하고, 자리는 늘 바퀴가 선로에 닿는 한 줄이다.
+     *
+     * ⚠ **복선(전체 보기)에서는 제 선로가 다르다**(v1.7.4). 자리도 접선도 [railOf] 가 준
+     * **그 선로의 기하**에서 나오고, 세로 변에서만 내선이 [mainTrainSide] 의 `innerLane` 로
+     * 루프 안쪽에 선다 — 그래야 바깥 선로 밖에 선 외선과 안 겹친다. 가로 변은 둘 다
+     * 제 선로 **위**라 두 열차가 아래위로 나란히 선다(윗변 내선·아랫변 외선이 두 선로 사이).
      */
-    fun spot(pos: Float): Pair<Offset, Offset> {
-        val (p, tan) = loop.at(loop.sOfPos(pos - start))
-        val (ox, oy) = mainTrainSide(tan.x, tan.y)
+    fun spot(pos: Float, inner: Boolean): Pair<Offset, Offset> {
+        val lp = railOf(inner)
+        val (p, tan) = lp.at(lp.sOfPos(pos - start))
+        val (ox, oy) = mainTrainSide(tan.x, tan.y, innerLane = dual && inner)
         return Offset(p.x + ox * off, p.y + oy * off) to Offset(ox, oy)
     }
 
@@ -1554,8 +1671,11 @@ private fun DrawScope.drawCabLoop(
      */
     val locoScale = locoScale(big)
     val otherScale = locoScale * otherK
+    // 접선은 **제 선로**에서 뽑는다 — 복선의 두 곡선은 동심이라 직선 변에서는 같지만
+    // 모서리 호에서는 반지름이 달라 접는 자리가 조금씩 다르다(각자 제 곡률을 따라야 한다).
     fun headingAt(t: MainTrainMark, pos: Float): Heading {
-        val (_, tan) = loop.at(loop.sOfPos(pos - start))
+        val lp = railOf(t.inner)
+        val (_, tan) = lp.at(lp.sOfPos(pos - start))
         return headingFor(tan.x, tan.y, t.inner)
     }
     val heads = trains.associate { (t, pos) -> t.trainNo to headingAt(t, pos) }
@@ -1576,9 +1696,17 @@ private fun DrawScope.drawCabLoop(
      * 내 열차는 **맨 먼저** 자리를 잡아(빈 판이라 늘 0단) 밀리지도 숨지도 않는다. 그리기는
      * 여전히 맨 나중이라 무엇 위에도 얹힌다.
      * 필터(내선/외선)를 켜면 한 차선만 쓰니 계단이 거의 안 생긴다 — 전체 모드용 장치다.
+     *
+     * ⚠ **복선에서는 계단이 방향별로 따로 돈다**(v1.7.4). 내선·외선은 이제 **선로가 달라**
+     * 애초에 못 겹치는데, 한 장부로 보면 서로를 장애물로 세어 **멀쩡한 0단을 헛되이 포기**한다
+     * (윗변 내선이 바로 위 외선 상자에 걸려 두 단씩 올라가면 다시 떠 보인다). 그래서
+     * 장부를 두 벌로 나눈다 — 단선이면 [rectsIn] 을 안 쓰므로 종전과 한 글자도 안 다르다.
      */
     val stepPx = LOCO_BOX_H * otherScale * 1.dp.toPx() + 2.dp.toPx()
+    /** 바깥 선로(외선 · 단선이면 전부) 열차 상자. */
     val trainRects = mutableListOf<Rect>()
+    /** 안쪽 선로(내선) 열차 상자 — **복선에서만** 쓴다. */
+    val rectsIn = mutableListOf<Rect>()
     /** 그릴 열차 — (열차, 중심, 바깥 방향). 접힌 열차는 여기 없다. */
     val spots = mutableListOf<Triple<MainTrainMark, Offset, Offset>>()
     /** 탭 판정·툴팁이 쓸 중심 — 접힌 열차도 점 자리로 남는다. */
@@ -1588,7 +1716,9 @@ private fun DrawScope.drawCabLoop(
     for ((t, pos) in trains.sortedByDescending { it.first.trainNo in mineNos }) {
         val isMine = t.trainNo in mineNos
         val head = headOf(t.trainNo)
-        val (base, out) = spot(pos)
+        val (base, out) = spot(pos, t.inner)
+        // 같은 선로에 선 열차끼리만 자리를 다툰다(위 KDoc).
+        val lane = if (dual && t.inner) rectsIn else trainRects
         /*
          * ⚠ **캔버스 clamp 를 걷어냈다**(v1.6.96). v1.6.90 은 여기서 중심을 `coerceIn` 으로
          * 캔버스 안에 밀어 넣었는데, 내 열차는 상자가 지붕 위 행선판까지(32.5dp) 커서
@@ -1608,8 +1738,8 @@ private fun DrawScope.drawCabLoop(
             // 밀어낸 열차가 화면 밖으로 나가면 그 단은 없는 셈 친다(0단은 [margin] 이 챙긴다).
             if (s > 0 && (r.left < 0f || r.top < 0f ||
                     r.right > size.width || r.bottom > size.height)) continue
-            if (trainRects.any { it.overlaps(r) }) continue
-            trainRects += r
+            if (lane.any { it.overlaps(r) }) continue
+            lane += r
             spots += Triple(t, c, out)
             centers[t.trainNo] = c
             if (s > 0) raised += t.trainNo
@@ -1626,7 +1756,9 @@ private fun DrawScope.drawCabLoop(
     }
     // 역 이름은 선로 **반대편**이라 열차 밑에 깔릴 일이 없다 — 한 번에 다 그린다(v1.6.98).
     // (모서리에서만 겹칠 수 있어 [trainRects] 는 여전히 장애물로 넘긴다 — `layoutLabels` KDoc.)
-    layoutLabels(tm, loop, start, labelSp, trainRects, pal).forEach { draw(it) }
+    // ⚠ 장애물은 **두 선로를 합쳐** 넘긴다 — 계단만 방향별로 도는 것이지, 이름은 어느 쪽
+    // 열차든 물으면 안 된다(복선에서 좌·우변 내선이 루프 안쪽 = 이름 자리로 들어온다).
+    layoutLabels(tm, loop, loopIn, start, labelSp, trainRects + rectsIn, pal).forEach { draw(it) }
 
     /*
      * ── 계단으로 올라간 열차의 **받침선** (v1.6.98) ────────────

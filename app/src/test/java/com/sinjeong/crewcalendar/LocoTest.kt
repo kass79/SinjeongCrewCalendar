@@ -269,6 +269,109 @@ class LocoTest {
         }
     }
 
+    /*
+     * ── 전체 보기는 **복선** (v1.7.4) ──────────────────────────────────────
+     * 사용자: *"전체 보기를 할때 열차들이 내선,외선 열차 아이콘들이 서로 올라타고 그러는데
+     * 외선은 노선 바깥 내선은 노선 안쪽으로 다니게 하면 어떨까? 지금 내선클릭해서보면
+     * 괜찮고 외선 클릭해서 보면 괜찮은데..전체를 보면 열차 아이콘들이 어색해"*
+     *
+     * 답: **전체 보기만 선로를 두 줄로** 긋고(바깥 외선 · 안쪽 내선) 각자 제 선로 위에 세운다.
+     * 단독 보기(내선/외선)는 선로가 한 줄이라 종전 그대로다 — `innerLane` 기본값이 `false`.
+     */
+
+    /**
+     * **복선 여덟 경우** — 네 변 × 내선·외선. 잠그는 것 셋:
+     *  ① 가로 변은 **둘 다 선로 위**(윗변 내선·아랫변 외선이 두 선로 사이에 든다)
+     *  ② 세로 변은 **외선이 루프 바깥 · 내선이 루프 안쪽**(선로가 달라 서로 안 겹친다)
+     *  ③ 어느 경우든 **바퀴가 제 선로를 본다** = 떠 있는 열차가 없다
+     */
+    @Test
+    fun `복선 네 변 내선 외선 여덟 경우 모두 제 선로 위에 바로 선다`() {
+        for ((name, tan) in edges) for (inner in listOf(false, true)) {
+            val (tx, ty) = tan
+            val (ox, oy) = mainTrainSide(tx, ty, innerLane = inner)
+            val h = headingFor(tx, ty, inner)
+            val tag = "$name ${if (inner) "내선" else "외선"}($h) 복선"
+            val horiz = name == "윗변" || name == "아랫변"
+            // ①② 자리
+            if (horiz) assertSide("$tag 열차 쪽", 0f, -1f, ox to oy)
+            else if (inner) assertSide("$tag 열차 쪽", -ty, tx, ox to oy)   // 루프 안쪽
+            else assertSide("$tag 열차 쪽", ty, -tx, ox to oy)              // 루프 바깥
+            // ③ 바퀴 = 선로 쪽(= 열차 쪽의 반대)
+            assertSide("$tag 바퀴", -ox, -oy, wheels(h, -ox, -oy))
+            // 가로 변에서는 여전히 뒤집힘이 없다
+            if (horiz) assertFalse("$tag 가로 변인데 뒤집혔다", locoFlip(h, -ox, -oy))
+        }
+    }
+
+    /**
+     * **세로 변에서만 내선이 갈라진다** — 복선의 전부다. 가로 변은 단선·복선이 같은 값이라
+     * 윗변 내선·아랫변 외선이 **두 선로 사이**에 서고, 세로 변은 두 방향이 정반대로 갈라져
+     * 서로의 자리를 아예 안 넘본다.
+     */
+    @Test
+    fun `복선은 세로 변에서만 내선이 갈라진다`() {
+        for ((name, tan) in edges) {
+            val (tx, ty) = tan
+            val single = mainTrainSide(tx, ty)
+            val outer = mainTrainSide(tx, ty, innerLane = false)
+            val inner = mainTrainSide(tx, ty, innerLane = true)
+            // 외선은 단선과 같은 자리 — 바깥 선로가 v1.7.3 의 그 선로다
+            assertSide("$name 외선 = 단선", single.first, single.second, outer)
+            if (name == "윗변" || name == "아랫변")
+                assertSide("$name 내선 = 단선", single.first, single.second, inner)
+            else assertSide("$name 내선 = 반대", -single.first, -single.second, inner)
+        }
+    }
+
+    /**
+     * **두 선로는 동심**이라야 한다 — 안쪽 반지름 = 바깥 반지름 − 간격.
+     *
+     * 이 한 줄이 지키는 것 둘: ① 두 곡선 사이가 **어디서나 같은 간격**(모서리 포함)이라
+     * 복선으로 읽힌다 ② 직선 구간의 길이·범위가 **정확히 같아져** 같은 역이 두 선로에서
+     * 서로 마주 본다(`Loop.sOf` 가 직선을 등분하므로 `hLen`·`vLen` 이 같으면 자리도 같다).
+     * `MainLineMap` 의 `rOut = rIn + gap` 이 그 식이고, 여기서 그 산수를 잠근다.
+     */
+    @Test
+    fun `복선 두 선로는 동심이라 직선 구간이 정확히 겹친다`() {
+        // 폰 전체 보기 실측값(dp): 캔버스 815 × 335 · trainPad 46.5 · namePad 56 · 간격 30.6
+        val w = 815f; val h = 335f; val tp = 46.5f; val np = 56f; val gap = 30.6f
+        val rIn = maxOf(28f - gap / 2f, 8f)
+        val rOut = rIn + gap
+        assertEquals("안쪽 반지름", 12.7f, rIn, 1e-3f)
+        assertEquals("바깥 반지름", 43.3f, rOut, 1e-3f)
+        // 바깥: (tp, tp)~(w−tp, h−np) 반지름 rOut / 안쪽: 사방 gap 안으로, 반지름 rIn
+        val hOut = (w - tp) - tp - 2f * rOut
+        val hInn = (w - tp - gap) - (tp + gap) - 2f * rIn
+        val vOut = (h - np) - tp - 2f * rOut
+        val vInn = (h - np - gap) - (tp + gap) - 2f * rIn
+        assertEquals("직선 가로 길이", hOut, hInn, 1e-3f)
+        assertEquals("직선 세로 길이", vOut, vInn, 1e-3f)
+        // 시작 x 도 같다 — 그래서 k 번째 역이 두 선로에서 같은 x 에 선다
+        assertEquals("직선 시작 x", tp + rOut, (tp + gap) + rIn, 1e-3f)
+    }
+
+    /**
+     * **틈에는 기관차 한 대가 든다** — 두 선로 사이(윗변 내선·아랫변 외선의 자리)가
+     * `차선 오프셋 + 타 열차(0.7배) 반높이 + 선로 반굵기 + 2dp` 다. 이 산수가 틀어지면
+     * 틈에 선 열차가 반대편 선로를 밟는다(= 사용자가 v1.6.98 에서 물린 "떠 있는 열차").
+     */
+    @Test
+    fun `복선 간격은 타 열차 한 대가 옆 선로를 안 밟는 값이다`() {
+        /** `MainLineMap.laneGap` 의 식 그대로(dp). */
+        fun gapOf(badge: Float, k: Float, rail: Float) =
+            badge + (LOCO_BOX_H / 2f) * k + rail / 2f + 2f
+        // 폰: 차선 14 · 배수 0.7 · 선로 7.5 / 펼침: 18 · 0.7 × (54/46) · 9
+        assertEquals("폰", 30.6f, gapOf(14f, 0.7f, 7.5f), 1e-3f)
+        assertEquals("펼침", 37.2375f, gapOf(18f, 0.7f * (54f / 46f), 9f), 1e-3f)
+        // 기관차 상자 윗날이 반대편 선로 안쪽 면에 안 닿는다
+        for (t in listOf(
+            Triple(14f, 0.7f, 7.5f), Triple(18f, 0.7f * (54f / 46f), 9f))) {
+            val gap = gapOf(t.first, t.second, t.third)
+            assertTrue("$t", t.first + (LOCO_BOX_H / 2f) * t.second <= gap - t.third / 2f)
+        }
+    }
+
     /** `−0.0f` 과 `0.0f` 은 `equals` 로는 다르다 — 벡터 비교는 늘 성분으로 본다. */
     private fun assertSide(tag: String, x: Float, y: Float, got: Pair<Float, Float>) {
         assertEquals("$tag x", x, got.first, 0f)
