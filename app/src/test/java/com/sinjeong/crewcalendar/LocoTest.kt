@@ -8,10 +8,14 @@ import com.sinjeong.crewcalendar.presentation.live.locoBelly
 import com.sinjeong.crewcalendar.presentation.live.locoFlip
 import com.sinjeong.crewcalendar.presentation.live.locoHalf
 import com.sinjeong.crewcalendar.presentation.live.locoTextDeg
+import com.sinjeong.crewcalendar.presentation.live.mainTrainSide
+// ⚠ `mainTrainSide` 는 MainLineMap 이 아니라 **Loco** 에 산다 — MainLineMap 최상위의
+// `Color(...)` 가 이 하네스(Compose 미포함)에서 클래스 초기화를 터뜨리기 때문이다.
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.abs
 
 /**
  * 증기기관차 아이콘의 **머리 방향**을 잠근다 — 사용자가 이 그림을 넣은 이유가
@@ -116,11 +120,13 @@ class LocoTest {
     }
 
     /*
-     * ── 세로 화면에서 글자가 **거꾸로 안 선다** (v1.6.91) ──────────────────
-     * 사용자: *"신도림 문래 그쪽에 들어가면 열번 숫자 텍스트가 거꾸로 보이는건 아니지?"*
-     * 세로 창은 지도를 통째로 `rotationZ = 90f` 로 돌린다. 캔버스 글자 각도는 **지도 좌표**
-     * 기준이라 아래로 달리는 열차(신도림~당산 세로변)가 화면에서 180° = 거꾸로 섰다.
-     * [locoTextDeg] 가 화면 기준으로 정규화한다 — 아래 `screen()` 이 그 판정 그대로다.
+     * ── 열번 읽는 방향은 **화면 기준 한 벌** (v1.6.98) ──────────────────────
+     * 사용자와 합의: **가로로 달리는 열차는 왼쪽→오른쪽, 세로로 달리는 열차는 위→아래.**
+     * (역 이름과 같은 방향이다.)
+     *
+     * v1.6.91 은 *"거꾸로만 아니면 된다"* 였다 — `UP = −90` 을 그대로 두는 바람에 가로 화면
+     * 세로변에서 위로 달리는 열차의 열번이 **아래→위**로 읽혔고, 같은 변의 두 열차가 서로
+     * 반대로 읽혔다. 이제 [locoTextDeg] 가 화면 각을 **0 또는 +90 딱 두 값**으로 접는다.
      */
 
     /** 화면에 얹은 실제 각(−180, 180]. 사람이 읽는 각도다. */
@@ -131,46 +137,36 @@ class LocoTest {
         return s
     }
 
+    /** 가로 화면(`mapDeg = 0`) — 좌우로 달리면 0°, 위아래로 달리면 **둘 다** +90°. */
     @Test
-    fun `가로 화면 글자 각도는 v1_6_90 그대로`() {
-        assertEquals(0f, locoTextDeg(Heading.RIGHT, 0f), 0f)
-        assertEquals(0f, locoTextDeg(Heading.LEFT, 0f), 0f)
-        assertEquals(-90f, locoTextDeg(Heading.UP, 0f), 0f)
-        assertEquals(90f, locoTextDeg(Heading.DOWN, 0f), 0f)
-    }
-
-    /** 사용자가 잡아낸 그 자리 — 세로 화면 아래로 달리는 열차(신도림~당산 내선). */
-    @Test
-    fun `세로에서 아래로 달리는 열차 글자가 바로 선다`() {
-        assertEquals(270f, locoTextDeg(Heading.DOWN, 90f), 0f)  // 90 + 180
-        assertEquals(0f, screen(Heading.DOWN, 90f), 0f)         // 화면에서는 똑바로
-    }
-
-    /** 같은 세로변의 반대 방향(외선)은 종전 각이 이미 옳다 — 괜히 뒤집으면 안 된다. */
-    @Test
-    fun `세로에서 위로 달리는 열차는 안 건드린다`() {
-        assertEquals(-90f, locoTextDeg(Heading.UP, 90f), 0f)
-        assertEquals(0f, screen(Heading.UP, 90f), 0f)
+    fun `가로 화면 열번은 가로 좌우 세로 위아래`() {
+        assertEquals(0f, screen(Heading.RIGHT, 0f), 0f)
+        assertEquals(0f, screen(Heading.LEFT, 0f), 0f)
+        assertEquals(90f, screen(Heading.UP, 0f), 0f)     // v1.6.97 까지 −90(아래→위) 이었다
+        assertEquals(90f, screen(Heading.DOWN, 0f), 0f)
     }
 
     /**
-     * **경계 ±90 은 눕힌 채 둔다.** 옆으로 눕는 것은 역 이름과 같은 사정이라 읽을 수 있고,
-     * 여기서 한 번 더 뒤집으면 도로 거꾸로 선다.
+     * 세로 화면(`mapDeg = 90`) — 지도가 통째로 돌아 **가로/세로가 맞바뀐다**.
+     * 지도에서 좌우로 달리던 열차(윗변·아랫변)가 화면에서는 세로라 위→아래로 읽힌다.
      */
     @Test
-    fun `화면 90도 경계는 눕힌 채 둔다`() {
-        assertEquals(0f, locoTextDeg(Heading.RIGHT, 90f), 0f)
+    fun `세로 화면 열번도 가로 좌우 세로 위아래`() {
         assertEquals(90f, screen(Heading.RIGHT, 90f), 0f)
-        assertEquals(0f, locoTextDeg(Heading.RIGHT, -90f), 0f)
-        assertEquals(-90f, screen(Heading.RIGHT, -90f), 0f)
+        assertEquals(90f, screen(Heading.LEFT, 90f), 0f)
+        assertEquals(0f, screen(Heading.UP, 90f), 0f)
+        assertEquals(0f, screen(Heading.DOWN, 90f), 0f)
     }
 
-    /** 어떤 회전·어떤 머리 방향이든 화면 각은 (−90, 90] — 이 한 줄이 "거꾸로 없음"이다. */
+    /**
+     * 어떤 회전에서도 화면 각은 **0 아니면 +90** — 이 한 줄이 "거꾸로도 거울도 없다"이다.
+     * (−90 이 없다는 것이 v1.6.98 에서 새로 잠근 몫이다: 아래→위로 읽히는 열번이 사라졌다.)
+     */
     @Test
-    fun `어느 회전에서도 화면 각이 90도를 안 넘는다`() {
+    fun `어느 회전에서도 화면 각은 0 아니면 90`() {
         for (deg in floatArrayOf(0f, 90f, 180f, 270f, -90f)) for (h in Heading.values()) {
             val s = screen(h, deg)
-            assertTrue("$h@$deg = $s", s > -90f - 1e-3f && s <= 90f + 1e-3f)
+            assertTrue("$h@$deg = $s", abs(s) < 1e-3f || abs(s - 90f) < 1e-3f)
         }
     }
 
@@ -190,30 +186,106 @@ class LocoTest {
         return if (locoFlip(h, railX, railY)) -bx to -by else bx to by
     }
 
-    /**
-     * 본선 한 변의 (머리, 선로 쪽) — [MainLineMap] 의 `headingFor`·`spot` 과 **같은 계산**이다.
-     * 차선은 내선이 안쪽(`+nIn`)·외선이 바깥쪽(`−nIn`)이고, 선로는 늘 그 **반대쪽**에 있다.
-     */
-    private fun mainCase(tx: Float, ty: Float, inner: Boolean): Triple<Heading, Float, Float> {
-        val nx = -ty                       // 루프 안쪽 법선
-        val ny = tx
-        val d = if (inner) 1f else -1f     // 제 차선이 물러나는 쪽
-        return Triple(headingFor(tx, ty, inner), -nx * d, -ny * d)
-    }
+    /** 본선 네 변의 접선(인덱스가 커지는 쪽 = 내선 = 시계). */
+    private val edges = listOf(
+        "윗변" to (1f to 0f), "오른쪽변" to (0f to 1f),
+        "아랫변" to (-1f to 0f), "왼쪽변" to (0f to -1f),
+    )
 
-    /** 네 변 × 내선·외선 **여덟 경우** 모두 바퀴 벡터 = 선로 벡터. 이 한 줄이 규칙 4다. */
+    /**
+     * ## v1.6.98 보조설비 배치 — 네 변 × **내선·외선 여덟 경우**
+     *
+     * 사용자가 준 외선 운전실 화면 사진 그대로다:
+     * **가로 변은 열차가 선로 위**(윗변이면 루프 밖, 아랫변이면 루프 안) ·
+     * **세로 변은 열차가 루프 바깥**.
+     *
+     * ⚠ **차선은 한 줄뿐이다.** 반대 방향을 한 차선 밖에 세워 봤더니 그 열차들이 선로에서
+     * 떠 보였다(사용자: *"떠다니는데? 아니지?"*) — 그래서 내선·외선이 **같은 자리**에 서고
+     * 방향은 머리가 말한다. 여덟 경우의 선로 쪽 벡터가 넷뿐인 이유다.
+     *
+     * 잠그는 것 셋:
+     *  ① 바퀴 = 선로 쪽 (규칙 4)
+     *  ② 자리는 열차 쪽으로만 물러난다 — **역 이름 쪽으로 내려가는 칸이 하나도 없다**
+     *  ③ 가로 변에서는 **뒤집힘이 없다** = 몸통이 늘 바로 선다(사용자가 사진으로 지목한 자리)
+     */
     @Test
-    fun `본선 네 변 여덟 경우 모두 바퀴가 선로를 본다`() {
-        val edges = listOf(
-            "윗변" to (1f to 0f), "오른쪽변" to (0f to 1f),
-            "아랫변" to (-1f to 0f), "왼쪽변" to (0f to -1f),
-        )
-        for ((name, tan) in edges) for (inner in listOf(true, false)) {
-            val (h, rx, ry) = mainCase(tan.first, tan.second, inner)
-            val w = wheels(h, rx, ry)
+    fun `본선 네 변 내선 외선 여덟 경우 모두 바퀴가 선로를 본다`() {
+        for ((name, tan) in edges) for (inner in listOf(false, true)) {
+            val (tx, ty) = tan
+            val (ox, oy) = mainTrainSide(tx, ty)          // 열차 쪽 = 계단이 오르는 쪽
+            val rx = -ox                                   // 선로 쪽 = 그 반대
+            val ry = -oy
+            val h = headingFor(tx, ty, inner)
             val tag = "$name ${if (inner) "내선" else "외선"}($h)"
+            // ① 바퀴가 선로를 본다
+            val w = wheels(h, rx, ry)
             assertEquals("$tag 바퀴 x", rx, w.first, 0f)
             assertEquals("$tag 바퀴 y", ry, w.second, 0f)
+            // ② 가로 변은 늘 화면 위 · 세로 변은 늘 루프 바깥
+            val horiz = name == "윗변" || name == "아랫변"
+            if (horiz) assertSide("$tag 열차 쪽", 0f, -1f, ox to oy)
+            else assertSide("$tag 열차 쪽", ty, -tx, ox to oy)
+            // ③ 가로 변에서는 몸통이 바로 선다 — 뒤집히면 배가 하늘을 본다
+            if (horiz) assertFalse("$tag 가로 변인데 뒤집혔다", locoFlip(h, rx, ry))
+        }
+    }
+
+    /**
+     * **가로 변은 열차가 늘 선로 위**(v1.6.98) — 사용자 사진의 규칙 절반이다.
+     * 윗변이면 루프 밖, 아랫변이면 루프 안이지만 화면에서는 둘 다 `(0, −1)` 한 값이다.
+     * 이 한 줄이 *"아래 변 외선이 배를 하늘로 든 기관차"* 를 없앤 자리다.
+     */
+    @Test
+    fun `가로 변 열차는 늘 선로 위`() {
+        assertSide("윗변", 0f, -1f, mainTrainSide(1f, 0f))
+        assertSide("아랫변", 0f, -1f, mainTrainSide(-1f, 0f))
+    }
+
+    /** **세로 변은 열차가 늘 루프 바깥** — 역 이름이 안쪽 자리를 가져간다. */
+    @Test
+    fun `세로 변 열차는 늘 루프 바깥`() {
+        assertSide("오른쪽변", 1f, 0f, mainTrainSide(0f, 1f))    // 오른쪽 = 바깥
+        assertSide("왼쪽변", -1f, 0f, mainTrainSide(0f, -1f))    // 왼쪽 = 바깥
+    }
+
+    /**
+     * **계단으로 올라간 열차의 받침선은 늘 바퀴 밑**(v1.6.98).
+     *
+     * 겹침을 피해 선로에서 한 칸 물러난 열차는 그냥 두면 허공에 뜬다 — 사용자 확정
+     * *"떠 있는 열차 금지"*. 그래서 `MainLineMap` 이 중심에서 **선로 쪽(`-out`)** 으로
+     * 기관차 반높이만큼 내려간 자리에 짧은 초록 선분을 깐다. 그 자리가 실제로 바퀴가
+     * 보는 쪽인지를 여기서 잠근다 — 어긋나면 받침선이 지붕 위에 깔린다.
+     */
+    @Test
+    fun `계단 받침선은 늘 바퀴 밑에 깔린다`() {
+        for ((name, tan) in edges) for (inner in listOf(false, true)) {
+            val (tx, ty) = tan
+            val (ox, oy) = mainTrainSide(tx, ty)
+            val footX = -ox                                // 받침선이 깔리는 쪽 = 선로 쪽
+            val footY = -oy
+            val h = headingFor(tx, ty, inner)
+            val tag = "$name ${if (inner) "내선" else "외선"} 받침선"
+            assertSide(tag, footX, footY, wheels(h, footX, footY))
+        }
+    }
+
+    /** `−0.0f` 과 `0.0f` 은 `equals` 로는 다르다 — 벡터 비교는 늘 성분으로 본다. */
+    private fun assertSide(tag: String, x: Float, y: Float, got: Pair<Float, Float>) {
+        assertEquals("$tag x", x, got.first, 0f)
+        assertEquals("$tag y", y, got.second, 0f)
+    }
+
+    /**
+     * 모서리 호는 **가까운 변의 배치 규칙**을 따른다 — 잣대가 [headingFor] 와 같아야
+     * 머리와 차선이 한 순간에 같이 접힌다(따로 접히면 호 위에 배가 하늘을 보는 칸이 생긴다).
+     */
+    @Test
+    fun `모서리 호 배치는 머리 방향과 같은 순간에 접힌다`() {
+        for (t in listOf(0.866f to 0.5f, 0.5f to 0.866f, -0.866f to -0.5f, -0.5f to -0.866f)) {
+            val horizSide = mainTrainSide(t.first, t.second).second == -1f
+            val horizHead = headingFor(t.first, t.second, true)
+                .let { it == Heading.RIGHT || it == Heading.LEFT }
+            assertEquals("$t", horizHead, horizSide)
         }
     }
 

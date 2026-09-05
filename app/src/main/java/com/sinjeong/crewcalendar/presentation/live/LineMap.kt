@@ -185,11 +185,24 @@ private val KEY_STATIONS = setOf("신도림", "양천구청")
 /** 지선 열차를 **실제로 잡는** 근무 — 운휴(`지휴`)·대기(`지대`)는 여기 없다. */
 private val DRIVING_BRANCH = setOf(DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
-/** **아래 선로(신도림행 = 주 선로)** 두께 — 역 흰 점(지름 7dp)이 선 위에 살짝 얹혀 보이는 굵기다. */
-private val LINE_H = 6.dp
+/**
+ * 카드 한 단계 **축소**(v1.6.98) — 사용자: *"신정지선 에큘레이터 조금 더 작게 해줘서
+ * 최적화 되게해!"* 카드 높이가 약 **15% 준다**(폰 166.5 → 141dp · 펼침 191 → 162dp).
+ *
+ * 한 손잡이가 **선로 두께·기관차 배율·역명 글자·차선 여백**에 다 같이 먹어야 비율이 안
+ * 깨진다 — 하나만 줄이면 기관차가 선로를 밟거나 역 이름이 카드 밖으로 나간다.
+ *
+ * ⚠ **하한은 열번 판독**이다. 열번은 `11sp × 배수`([drawLoco])이고 위 차선은 [UP_LOCO_K]
+ * 가 한 번 더 곱해져 폰 기준 `11 × 0.85 × 0.85 = 7.9sp` — 본선에서 확인한 판독 하한
+ * 7.7sp 를 겨우 넘는다. **여기서 더 줄이지 말 것**(줄이려면 [drawLoco] 의 11 을 올려야 한다).
+ */
+private const val CARD_K = 0.85f
+
+/** **아래 선로(신도림행 = 주 선로)** 두께 — 역 흰 점이 선 위에 살짝 얹혀 보이는 굵기다. */
+private val LINE_H = 5.dp
 
 /** **위 선로(까치산행)** 두께 — 주 선로보다 한 단계 가늘다(v1.6.95 사용자 확정). */
-private val UP_LINE_H = 3.5.dp
+private val UP_LINE_H = 3.dp
 
 /**
  * 위 차선(까치산행) 기관차 크기 배수 — 아래(신도림행)가 주 차선이라 **0.85배**로 위계를 준다
@@ -399,7 +412,7 @@ private fun LineMapCard(
                 LocalDensity provides Density(d.density, d.fontScale.coerceAtMost(1.2f))
             ) {
                 val tm = rememberTextMeasurer()
-                val nameSp = if (big) 15f else 13f
+                val nameSp = (if (big) 15f else 13f) * CARD_K
                 /*
                  * **영업 열차는 전부 증기기관차**(v1.6.91 사용자 확정 — *"신도림행 네모 아이콘은
                  * 왜 따로 다녀?"*). 한 카드 안에서 열차가 기관차와 네모 배지 두 모양으로 그려지던
@@ -408,16 +421,18 @@ private fun LineMapCard(
                  *
                  * 기관차 한 칸 높이 = 차선 한 단. 계단식 회피가 **한 단**이므로 차선은 두 칸이다.
                  */
-                val locoScale = if (big) 54f / LOCO_LEN else 1f
+                val locoScale = (if (big) 54f / LOCO_LEN else 1f) * CARD_K
                 val locoH = (LOCO_BOX_H * locoScale).dp
                 /**
                  * 차선 하나 = 기관차 두 칸 + 단 사이 2dp + **제 선로 위 2dp**.
                  * 두 차선 다 선로 위에 기관차가 쌓이므로 높이가 같다(v1.6.95 복선).
                  * 위 차선 기관차는 [UP_LOCO_K] 배로 작아 그만큼 여유가 더 남는다 —
                  * 굴뚝 연기와 행선판이 카드 밖으로 안 나가는 자리가 그 여유다.
+                 *
+                 * ⚠ v1.6.98 — 이 아래 값들은 전부 [CARD_K] 가 한 번씩 곱해진다(카드 15% 축소).
                  */
-                val laneH = locoH * 2f + 4.dp
-                val nameH = if (big) 21.dp else 18.dp
+                val laneH = locoH * 2f + 4.dp * CARD_K
+                val nameH = (if (big) 21f else 18f).dp * CARD_K
                 /*
                  * 위→아래: 까치산행 차선 → 위 선로 → 신도림행 차선 → **아래 선로 → 역 이름**.
                  *
@@ -431,8 +446,7 @@ private fun LineMapCard(
                  * 칸)을 먼저 가져가므로, 지붕 위 행선판([LOCO_BOARD_H] = 17)은 비어 있는
                  * `r = 1` 칸(31 + 2dp) 안에 그대로 들어간다. 굴뚝 연기도 같은 자리다.
                  */
-                val canvasH =
-                    laneH + UP_LINE_H + 2.dp + laneH + LINE_H + 2.dp + nameH + 3.dp
+                val canvasH = laneH + UP_LINE_H + laneH + LINE_H + nameH + 7.dp * CARD_K
 
                 Column(Modifier.padding(vertical = 4.dp)) {
                     BranchHeader(nowMillis, big, onRefresh)
@@ -528,7 +542,7 @@ private fun LineMapCard(
                     )
 
                     Canvas(Modifier.fillMaxWidth().height(canvasH)) {
-                        val gapP = 2.dp.toPx()
+                        val gapP = 2.dp.toPx() * CARD_K
                         val laneP = laneH.toPx()
                         /** 기관차 높이·폭·행선판 — **차선마다** 다르다(위 = [UP_LOCO_K] 배). */
                         val locoP = locoH.toPx()
@@ -719,7 +733,23 @@ private fun LineMapCard(
                             for (r in 0..1) {
                                 val cy = rowY(up, r)
                                 val rect = Rect(tagL, cy - roof, tagR, cy + h / 2f)
-                                if (boxes.none { it.overlaps(rect) }) { boxes += rect; return Offset(cx, cy) }
+                                if (boxes.none { it.overlaps(rect) }) {
+                                    boxes += rect
+                                    /*
+                                     * 계단(`r = 1`)으로 올라간 열차는 발밑에 **받침선**을 깐다
+                                     * (v1.6.98 사용자 확정: *"떠 있는 열차 금지"*). 제 선로와
+                                     * 같은 색·같은 간격(`gapP`)이라 **한 칸 위에 놓인 선로**로
+                                     * 읽힌다. `r = 0` 은 진짜 선로가 이미 그 자리에 있다.
+                                     */
+                                    if (r > 0) {
+                                        val fy = cy + h / 2f + gapP
+                                        drawLine(if (up) LoopGreenSoft else LoopGreen,
+                                            Offset(cx - w / 2f, fy), Offset(cx + w / 2f, fy),
+                                            strokeWidth = if (up) upLineP else lineP,
+                                            cap = StrokeCap.Round)
+                                    }
+                                    return Offset(cx, cy)
+                                }
                             }
                             return null
                         }
