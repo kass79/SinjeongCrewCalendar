@@ -110,6 +110,10 @@ fun MainCalendarScreen(
     val themeMode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     // v1.7.0 — 실시간 지도 색 한 벌. 설정에서 바꾸면 다이얼로그를 다시 안 열어도 따라온다.
     val mapStyle by viewModel.themeController.mapStyle.collectAsStateWithLifecycle()
+    // v1.7.6 — 달력 색 한 벌(기본 / 클레이). 설정에서 바꾸면 곧바로 따라온다.
+    // **달력 탭만** 본다 — 상세시트·근무선택 시트·하단 탭바는 종전 테마 그대로다.
+    val calStyle by viewModel.themeController.calendarStyle.collectAsStateWithLifecycle()
+    val pal = calendarPalette(calStyle)
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
         ThemeMode.DARK -> true
@@ -159,8 +163,11 @@ fun MainCalendarScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보
-            Surface(color = MaterialTheme.colorScheme.surface) {
+            // 컴팩트 헤더(기본 TopAppBar 64dp → 40dp) — 남는 상단 공간을 달력에 양보.
+            // ⚠ `contentColor` 를 **명시**한다(v1.7.6). 크림 바탕은 M3 스킴에 없는 색이라
+            // `contentColorFor` 가 `Unspecified` 를 주고, 그러면 다크에서 밝은 회색 아이콘이
+            // 크림 위에 얹혀 사라진다. 기본 스타일 값은 종전과 같은 `onSurface` 다.
+            Surface(color = pal.headerBg, contentColor = pal.headerInk) {
                 /*
                  * ⚠ **한 줄이되, 안 들어가면 접힌다**(v1.6.93). 종전엔 고정 44dp `Row` 에
                  * 자식 일곱(월·휴칩·날씨칩·근무선택·아이콘 4)과 빈 `Spacer(weight(1f))` 뿐이라,
@@ -190,14 +197,15 @@ fun MainCalendarScreen(
                     )
                     // 휴무 칩은 "8월" 바로 옆 — 월과 같이 읽는 정보라 오른쪽 버튼 무리에서 떼어냈다(v1.6.17)
                     Spacer(Modifier.width(6.dp))
-                    RestCountChip(state.restDayCount)
+                    RestCountChip(state.restDayCount, pal)
                     // 날씨는 달력 빈 칸 카드에서 헤더로 올렸다(v1.6.59 사용자 요청) — 휴N개 바로 옆.
                     // 날씨가 없으면 스스로 아무것도 안 그린다(자리도 안 먹는다).
                     // v1.6.65: **이번 달을 볼 때만** 그린다 — 칩 값은 "지금" 날씨라 11월 달력 옆
                     // 오늘 기온이 붙으면 한 박자 멈칫한다.
                     if (state.month == YearMonth.now()) {
                         Spacer(Modifier.width(4.dp))
-                        WeatherChip()
+                        // 클레이 헤더는 앱이 다크여도 크림이라 **밝은 판**을 넘긴다(v1.7.6)
+                        WeatherChip(dark = pal.darkChips)
                     }
                   }
                   Row(verticalAlignment = Alignment.CenterVertically) {
@@ -208,7 +216,8 @@ fun MainCalendarScreen(
                     OutlinedButton(
                         onClick = { viewModel.openDutyPicker(LocalDate.now()) },
                         contentPadding = PaddingValues(horizontal = 6.dp),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                        border = BorderStroke(1.dp, pal.accent.copy(alpha = 0.7f)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = pal.accent),
                         // ⚠ 고정 `height` 가 아니라 **`heightIn(min = )`**(v1.6.93) — 28dp 에
                         // 9.5sp 를 넣어 뒀는데 배율 2.0(=19sp)에서 `근무선택` 의 아래가 잘렸다.
                         modifier = Modifier.heightIn(min = 28.dp),
@@ -271,14 +280,22 @@ fun MainCalendarScreen(
             }
         },
     ) { padding ->
-        Row(Modifier.padding(padding).fillMaxSize()) {
+        // 바탕 칠하는 자리가 접힘/펼침에 따라 다르다(v1.7.6). 이 화면은 `Scaffold` 안의
+        // `Scaffold` 라 **아래에 제스처 바 인셋만큼 빈 띠**가 남는다(에뮬 실측 24dp).
+        //  · 접힘 = `padding` **앞**에 칠해 그 띠까지 덮는다. 안 그러면 크림 달력 밑에 흰 줄이 그인다.
+        //  · 펼침 = `padding` **안**에만 칠한다. 오른쪽 상세 패널은 범위 밖이라 그 밑으로
+        //    크림이 새어 나오면 안 된다(다크에서 눈에 띈다).
+        // 기본 스타일 값은 어느 쪽이든 `Scaffold` 가 이미 칠한 색과 같아 한 픽셀도 안 바뀐다.
+        val bg = if (wide) Modifier.padding(padding).background(pal.screenBg)
+        else Modifier.background(pal.screenBg).padding(padding)
+        Row(bg.fillMaxSize()) {
             // 펼침 비율 50:50 — "폴더 펼쳤을 때 화면 반반"(v1.6.11 사용자 선택). v1.6.10은 38:62
             Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
                 NoticeBanner(notices)   // 관리자 공지(v1.6.89). 볼 게 없으면 높이 0
                 // 공휴일표(2026~2027) 밖의 해 — 신정·설날·추석이 조용히 평일로 계산된다.
                 // 표 자체를 늘리는 것이 정답이지만, 그때까지는 **틀릴 수 있다고 말한다**(v1.6.92 ①).
                 if (state.holidayTableMissing) HolidayTableBanner(state.month.year)
-                WeekdayHeader()
+                WeekdayHeader(pal)
 
                 if (state.isLoading) {
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
@@ -290,7 +307,7 @@ fun MainCalendarScreen(
                     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text(
                             "보여 줄 근무가 없습니다.\n앱을 다시 열거나 위 `근무선택`으로 내 근무를 골라 주세요.",
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = pal.textDim,
                             textAlign = TextAlign.Center,
                             modifier = Modifier.padding(horizontal = 32.dp),
                         )
@@ -308,13 +325,18 @@ fun MainCalendarScreen(
                         onOpenMenu = { showMenu = true },
                         frozenUntil = state.user?.frozenUntil,
                         onLongPress = { freezeAsk = it },
+                        pal = pal,
                         modifier = Modifier.weight(1f),
                     )
                 }
             }
             // 펼침: 오른쪽 상세 패널 — 바텀시트와 같은 내용(DayDetailContent) 재사용
             if (wide) Surface(
-                Modifier.weight(0.5f).fillMaxHeight(),
+                // ⚠ 패널 색은 **반투명**이라 뒤에 깔린 색이 비친다 — 달력이 클레이여도 이 패널은
+                // 범위 밖이므로 **테마 바탕을 먼저 깔아** 종전과 똑같이 섞이게 한다(v1.7.6).
+                // 안 깔면 다크 + 클레이에서 크림이 비쳐 밝은 판에 밝은 글자가 된다.
+                Modifier.weight(0.5f).fillMaxHeight()
+                    .background(MaterialTheme.colorScheme.background),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
             ) {
                 val day = detailDate?.let { d -> state.days.firstOrNull { it.date == d } }
@@ -557,8 +579,8 @@ private fun FreezeConfirmDialog(
 
 /* ── 앱바 휴일갯수 칩 (작고 옅게) ─────────────────────── */
 @Composable
-private fun RestCountChip(count: Int) {
-    val duty = LocalDutyColors.current
+private fun RestCountChip(count: Int, pal: CalendarPalette) {
+    val duty = pal.duty
     Surface(
         color = duty.rest.copy(alpha = 0.45f),
         contentColor = duty.onRest.copy(alpha = 0.8f),
@@ -598,8 +620,8 @@ private fun HolidayTableBanner(year: Int) {
 }
 
 @Composable
-private fun WeekdayHeader() {
-    val duty = LocalDutyColors.current
+private fun WeekdayHeader(pal: CalendarPalette) {
+    val duty = pal.duty
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
         listOf(DayOfWeek.SUNDAY, DayOfWeek.MONDAY, DayOfWeek.TUESDAY, DayOfWeek.WEDNESDAY,
             DayOfWeek.THURSDAY, DayOfWeek.FRIDAY, DayOfWeek.SATURDAY).forEach { dow ->
@@ -612,7 +634,7 @@ private fun WeekdayHeader() {
                 color = when (dow) {
                     DayOfWeek.SUNDAY -> duty.sunday
                     DayOfWeek.SATURDAY -> duty.saturday
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> pal.textDim
                 },
             )
         }
@@ -634,6 +656,8 @@ private fun CalendarGrid(
     /** 근무 저장(v1.6.69)으로 확정한 마지막 날. 이 날 이하 칸은 연녹색 바탕 */
     frozenUntil: LocalDate?,
     onLongPress: (LocalDate) -> Unit,
+    /** 달력 색 한 벌(v1.7.6) — 기본 / 클레이 */
+    pal: CalendarPalette,
     modifier: Modifier = Modifier,
 ) {
     val leading = month.atDay(1).dayOfWeek.value % 7
@@ -665,7 +689,7 @@ private fun CalendarGrid(
     val card2 = slots.getOrNull(1)
     val card3 = slots.getOrNull(2)
     val card4 = slots.getOrNull(3)
-    val duty = LocalDutyColors.current
+    val duty = pal.duty
     var dragX by remember { mutableFloatStateOf(0f) }
     val rows = (cells.size + 6) / 7
 
@@ -707,16 +731,17 @@ private fun CalendarGrid(
                     // 세 카드는 **같은 바탕색**(v1.6.59 사용자 요청 "같은 바탕화면으로 해줘야지").
                     // 나란히 붙어 있는 한 벌이라 색이 갈리면 서로 다른 종류의 것처럼 읽힌다.
                     // 구분은 아이콘(시계 vs 열차 vs 침대)과 글자가 맡는다.
-                    card1 -> TimetableCard("근무시각표", R.drawable.ic_tt_work, onOpenTimetable, cellHeight, duty.main, duty.onMain)
-                    card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.main, duty.onMain)
-                    card3 -> TimetableCard("침실배정표", R.drawable.ic_tt_room, onOpenRooms, cellHeight, duty.main, duty.onMain)
-                    card4 -> TimetableCard("주간식단표", R.drawable.ic_tt_menu, onOpenMenu, cellHeight, duty.main, duty.onMain)
+                    card1 -> TimetableCard("근무시각표", R.drawable.ic_tt_work, onOpenTimetable, cellHeight, duty.main, duty.onMain, pal)
+                    card2 -> TimetableCard("편승시각표", R.drawable.ic_tt_deadhead, onOpenDeadhead, cellHeight, duty.main, duty.onMain, pal)
+                    card3 -> TimetableCard("침실배정표", R.drawable.ic_tt_room, onOpenRooms, cellHeight, duty.main, duty.onMain, pal)
+                    card4 -> TimetableCard("주간식단표", R.drawable.ic_tt_menu, onOpenMenu, cellHeight, duty.main, duty.onMain, pal)
                     else -> if (day == null) Spacer(Modifier.height(cellHeight))
                     else DayCell(
                         day, isSelected = day.date == selected, height = cellHeight,
                         big = cellHeight >= 100.dp, // 펼침 화면 등 칸이 크면 글자도 키움
                         nameBelow = nameBelow,
                         frozen = frozenUntil != null && day.date <= frozenUntil,
+                        pal = pal,
                         onClick = { onSelect(day.date) },
                         onLongClick = { onLongPress(day.date) },
                     )
@@ -735,12 +760,15 @@ private fun TimetableCard(
     height: Dp,
     bg: Color,
     fg: Color,
+    pal: CalendarPalette,
 ) {
     // "근무시각표" → "근무\n시각표" 의도적 2줄 — 좁은 칸에서 어색한 중간 줄바꿈 방지 + 큰 글씨
     val twoLine = if (label.length >= 5) label.substring(0, 2) + "\n" + label.substring(2) else label
     Column(
         Modifier
             .height(height)
+            // 클레이 그림자 — 날짜 칸과 같은 손잡이. 기본이면 아무것도 안 그린다
+            .clayDrop(pal, 2.dp, 10.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg.copy(alpha = 0.6f))
             .clickable(onClick = onClick)
@@ -805,12 +833,14 @@ private fun DayCell(
     nameBelow: Boolean,
     /** 근무 저장(v1.6.69)으로 확정된 날 — 바탕이 연녹색 */
     frozen: Boolean,
+    /** 달력 색 한 벌(v1.7.6) — 기본 / 클레이 */
+    pal: CalendarPalette,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
-    val duty = LocalDutyColors.current
+    val duty = pal.duty
     val isToday = day.date == LocalDate.now()
-    val (chipBg, chipFg) = dutyCellColors(day.duty.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+    val (chipBg, chipFg) = dutyCellColors(day.duty.colorType, duty, pal.textDim)
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
     // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5, v1.6.11 6.5→6sp)
     val dateSize = if (big) 8.sp else 6.sp
@@ -827,9 +857,12 @@ private fun DayCell(
     // 다크는 #005229 45%가 바탕 위에서 주간 근무칩(#005229)보다 확실히 어두워져 칩이 안 묻힌다
     // (v1.6.41이 겪은 "오늘 바탕 = 주간 근무색" 함정을 알파로 피한다).
     // 오늘 칸과의 구분은 **2.5dp 초록 테두리 + 꽉 찬 날짜 배지**가 계속 맡는다.
-    val frozenBg = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-    val plainBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+    // (v1.7.6: 값은 [CalendarPalette] 로 옮겼다 — 기본 스타일 값은 위 설명 그대로다)
+    val frozenBg = pal.savedBg
+    val plainBg = pal.cellBg
     val baseBg = if (frozen) frozenBg else plainBg
+    // 클레이만 세로 그라데이션 — 근무 저장된 칸(민트)은 단색이라 제외한다
+    val baseBrush = if (frozen) null else pal.cellBrush
 
     // **메모가 다 안 보일 때만** 켜지는 점(v1.6.82). 메모 [Text]가 배치될 때 스스로 정한다.
     // 다 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
@@ -838,6 +871,10 @@ private fun DayCell(
     Column(
         Modifier
             .height(height)
+            // 클레이 그림자 — **블러 없이** 같은 둥근 사각형을 아래로 2dp 복제한다(지도 클레이와
+            // 같은 방식). `clip` **앞**에 둔다: 뒤에 두면 칸 안으로 잘려 나가 아무것도 안 보인다.
+            // 기본 스타일이면 [Modifier] 를 그대로 돌려주므로 노드조차 안 늘어난다.
+            .clayDrop(pal, 2.dp, 10.dp)
             .clip(RoundedCornerShape(10.dp))
             .then(
                 when {
@@ -848,26 +885,20 @@ private fun DayCell(
                     // 알파 얹기는 바탕이 칩보다 늘 어둡게(다크)/밝게(라이트) 남아 칩 대비가 다른 칸과 같다.
                     // 오늘 표시는 2.5dp 테두리 + 꽉 찬 날짜 배지 + 달력 위 오늘 카드가 함께 진다.
                     isToday -> Modifier
-                        .background(baseBg)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
-                        .border(2.5.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
-                    isSelected -> Modifier.background(
-                        if (frozen) frozenBg else MaterialTheme.colorScheme.surfaceVariant
-                    )
+                        .cellFill(baseBg, baseBrush)
+                        .background(pal.todayTint)
+                        .border(2.5.dp, pal.todayBorder, RoundedCornerShape(10.dp))
+                    isSelected -> Modifier.background(if (frozen) frozenBg else pal.selectedBg)
                     // 칸 구분: 희미한 라운드 사각형
                     else -> Modifier
-                        .background(baseBg)
-                        .border(
-                            1.dp,
-                            MaterialTheme.colorScheme.outline.copy(alpha = 0.18f),
-                            RoundedCornerShape(10.dp),
-                        )
+                        .cellFill(baseBg, baseBrush)
+                        .border(1.dp, pal.cellBorder, RoundedCornerShape(10.dp))
                 }
             )
             // 근무변경된 날: 오른쪽 아래 모서리 접힘. 폭·높이 비용 0dp(칸 위에 겹쳐 그린다)
             .then(
                 if (day.isOverridden)
-                    Modifier.changedCorner(MaterialTheme.colorScheme.primary, if (big) 12.dp else 10.dp)
+                    Modifier.changedCorner(pal.corner, if (big) 12.dp else 10.dp)
                 else Modifier
             )
             // 길게 누르기 = 근무 저장(v1.6.69 사용자 요청 *"1일 부터 길게 누른 날짜까지 저장되게~"*).
@@ -887,21 +918,18 @@ private fun DayCell(
                 fontSize = dateSize, lineHeight = dateSize * 1.05,
                 fontWeight = if (isToday) FontWeight.ExtraBold else FontWeight.SemiBold,
                 color = when {
-                    // 오늘은 숫자를 꽉 찬 primary 배지로 — 구글 캘린더식 "오늘 점"
-                    isToday -> MaterialTheme.colorScheme.onPrimary
+                    // 오늘은 숫자를 꽉 찬 강조색 배지로 — 구글 캘린더식 "오늘 점"
+                    isToday -> pal.onToday
                     day.holidayName != null || day.date.dayOfWeek == DayOfWeek.SUNDAY -> duty.sunday
                     day.date.dayOfWeek == DayOfWeek.SATURDAY -> duty.saturday
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> pal.text
                 },
                 // 날짜 숫자 뒤 아주 옅은 사각형 — onSurface 알파라 라이트/다크 자동 대응
                 // 여백 축소(v1.6.11 start 2→1, horizontal 2→1): 같은 줄 공휴일 이름에 폭 양보
                 modifier = Modifier
                     .padding(start = 1.dp)
                     .clip(RoundedCornerShape(4.dp))
-                    .background(
-                        if (isToday) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.07f)
-                    )
+                    .background(if (isToday) pal.todayBadge else pal.dateBadge)
                     .padding(horizontal = if (isToday) 3.dp else 1.dp, vertical = 1.dp),
             )
             // 이름은 날짜 옆 같은 줄에 붙인다(v1.6.11 사용자 요청). 넘치면 HolidayTag가 4.5sp까지 자동 축소
@@ -919,12 +947,16 @@ private fun DayCell(
                 DutyCode.parse(day.originalDutyRaw).display,
                 fontSize = 8.5.sp, fontWeight = FontWeight.Bold,
                 textDecoration = TextDecoration.LineThrough,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                color = pal.strike,
                 maxLines = 1,
             )
         }
         if (day.duty.raw.isNotBlank()) Box {
-            Surface(color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp)) {
+            Surface(
+                color = chipBg, contentColor = chipFg, shape = RoundedCornerShape(7.dp),
+                // 클레이 칩도 살짝 뜬다 — 칸(2dp)보다 얕게(1dp). 기본은 안 그린다
+                modifier = Modifier.clayDrop(pal, 1.dp, 7.dp),
+            ) {
                 // 칩 폭 통일(글자수 무관 동일) — 높이는 글자에 맞춰(시스템 글꼴 확대 시 짤림 방지)
                 // 충당 계열만 두 줄(`대기충당`⏎`지2`)로 온다 — DutyCode.gridLabel 참고.
                 val lines = day.duty.gridLabel.split('\n')
@@ -975,9 +1007,9 @@ private fun DayCell(
             // 날짜 줄이 아니라 칩 위에 오프셋으로 얹는다 — 날짜·공휴일 이름 폭을 한 픽셀도 안 뺏는다.
             if (day.duty.isNight) Icon(
                 Icons.Default.DarkMode, null,
-                // 라이트/다크 모두 보이는 노랑 — 배경 밝기로 고름(다이나믹 컬러에도 대응)
-                tint = if (MaterialTheme.colorScheme.surface.luminance() > 0.5f)
-                    Color(0xFFE09600) else Color(0xFFFFD54F),
+                // 라이트/다크 모두 보이는 노랑 — 기본은 배경 밝기로 고르고(다이나믹 컬러 대응),
+                // 클레이는 크림 고정이라 밝은 판 값 하나다([CalendarPalette.moon])
+                tint = pal.moon,
                 modifier = Modifier
                     .align(Alignment.TopStart)
                     .offset(x = (-4).dp, y = (-2).dp)
@@ -992,13 +1024,13 @@ private fun DayCell(
                     .align(Alignment.TopEnd)
                     .offset(x = 4.dp, y = (-2).dp)
                     .size(if (big) 5.dp else 4.dp)
-                    .background(MaterialTheme.colorScheme.onSurfaceVariant, CircleShape),
+                    .background(pal.textDim, CircleShape),
             )
         }
         if (day.signOn != null) {
             Text(
                 day.signOn, fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = pal.text,
             )
         } else if (day.duty.isWorkDay && day.duty.number != null && Bundled.isHolidayTimetable(day.date)) {
             // 휴일 운휴 다이아(본선 주간 26~29) — 시각이 아예 없어 칸이 비어 보이던 자리를 채운다
@@ -1025,7 +1057,9 @@ private fun DayCell(
                 day.memo, fontSize = memoSize,
                 // 두 줄이 되면서 1.06은 너무 좁다 — 한글 받침이 다음 줄 상자에 닿는다.
                 lineHeight = memoSize * 1.2,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                // ⚠ 클레이도 **본문 글자색**(`#4E463B`)이다 — 보조 글자(`#8C8172`)로 내리면
+                // 크림 위 대비가 3.8:1 로 떨어진다. 메모는 "더 보이게 해 달라"던 자리다(v1.6.99).
+                color = pal.text,
                 maxLines = memoLines, overflow = TextOverflow.Ellipsis,
                 onTextLayout = {
                     // ⚠ **`didOverflowHeight`를 쓰면 안 된다.** 그 값은 `didExceedMaxLines`를 포함해서

@@ -399,7 +399,15 @@ private fun wxColors(wx: Wx, dark: Boolean): Pair<Color, Color> = when (wx) {
  * 설정에서 "신정차량기지(고정)"([WX_LOC_FIXED_KEY])을 고르면 이 물음 자체가 없다(v1.6.68).
  */
 @Composable
-fun WeatherChip(modifier: Modifier = Modifier) {
+fun WeatherChip(
+    modifier: Modifier = Modifier,
+    /**
+     * 어두운 판을 쓸까 — 기본은 **실제 배경 밝기**다(앱 안 다크 토글이 시스템과 다를 수 있어
+     * isSystemInDarkTheme 을 안 쓴다). 달력 클레이는 앱이 다크여도 헤더가 크림이라
+     * false 를 넘긴다(v1.7.6) — 안 넘기면 어두운 판 칩이 크림 위에 얹힌다.
+     */
+    dark: Boolean = MaterialTheme.colorScheme.surface.luminance() < 0.5f,
+) {
     val ctx = LocalContext.current
     // 초기값을 캐시에서 읽는다 → 회전·월 이동 시 깜빡임 없이 바로 그려진다.
     var weather by remember { mutableStateOf(WxCache.value) }
@@ -441,8 +449,7 @@ fun WeatherChip(modifier: Modifier = Modifier) {
         Wx.RAIN -> R.drawable.ic_wx_rain to "비"
         Wx.SNOW -> R.drawable.ic_wx_snow to "눈"
     }
-    // 앱 안 다크 토글이 시스템과 다를 수 있어 isSystemInDarkTheme 대신 실제 배경 밝기로 판단한다.
-    val (bg, fg) = wxColors(w.wx, MaterialTheme.colorScheme.surface.luminance() < 0.5f)
+    val (bg, fg) = wxColors(w.wx, dark)
     // 모양은 옆의 RestCountChip 과 같은 알약 + 같은 글자 크기 — 헤더에서 한 쌍으로 읽히게.
     // 높이를 고정하지 않는다(글자배율이 커지면 같이 큰다 — 하단 탭에서 겪은 잘림의 원인이 고정 높이였다).
     Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(999.dp), modifier = modifier) {

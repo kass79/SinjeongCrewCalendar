@@ -1,6 +1,7 @@
 package com.sinjeong.crewcalendar.presentation.theme
 
 import android.content.Context
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +57,19 @@ class ThemeController @Inject constructor(
     fun setMapStyle(style: MapStyle) {
         _mapStyle.value = style
         prefs.edit().putString("map_style", style.name).apply()
+    }
+
+    /**
+     * 달력 스타일(v1.7.6) — 지도 스타일과 **같은 저장소·같은 방식**이다(`theme` prefs, 키
+     * `calendar_style`). 값이 바뀌면 달력 탭이 곧바로 다시 그려진다(앱 재시작 없음).
+     */
+    private val _calendarStyle =
+        MutableStateFlow(CalendarStyle.of(prefs.getString("calendar_style", null)))
+    val calendarStyle: StateFlow<CalendarStyle> = _calendarStyle
+
+    fun setCalendarStyle(style: CalendarStyle) {
+        _calendarStyle.value = style
+        prefs.edit().putString("calendar_style", style.name).apply()
     }
 
     /** 우상단 달 아이콘: 현재 보이는 테마의 반대로 강제 전환 */

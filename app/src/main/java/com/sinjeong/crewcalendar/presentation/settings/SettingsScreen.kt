@@ -30,6 +30,7 @@ import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
@@ -114,6 +115,9 @@ class SettingsViewModel @Inject constructor(
 
     /** 지도 스타일(v1.7.0) — 저장은 테마와 같은 저장소·같은 방식이다. */
     fun setMapStyle(style: MapStyle) = themeController.setMapStyle(style)
+
+    /** 달력 스타일(v1.7.6) — 지도 스타일과 같은 저장소·같은 방식이다. */
+    fun setCalendarStyle(style: CalendarStyle) = themeController.setCalendarStyle(style)
 
     /** 예약된 교번 변경 취소 — 아직 시작 안 한 구간만 버린다(지난 달력은 그대로) */
     fun cancelScheduledPattern() {
@@ -267,6 +271,36 @@ fun SettingsScreen(
                             selected = mapStyle == s,
                             onClick = { viewModel.setMapStyle(s) },
                             shape = SegmentedButtonDefaults.itemShape(i, MapStyle.entries.size),
+                        ) { Text(s.label, fontSize = 11.sp) }
+                    }
+                }
+            }
+
+            /*
+             * 달력 스타일(v1.7.6) — 사용자 원문 *"마지막으로 설정에 달력 스타일도 클레이로
+             * 되게 만들어줘!"*
+             *
+             * 지도 스타일 **바로 아래**다 — 둘 다 "같은 화면을 다른 색으로"라 한 벌로 읽힌다.
+             * 바꾸는 것은 **달력 탭뿐**이고(상세시트·동료·식단·설정·하단 탭바는 그대로),
+             * 근무 칩 색의 뜻(주간 초록·야간 보라·휴무 빨강…)은 클레이에서도 같다.
+             */
+            val calStyle by viewModel.themeController.calendarStyle.collectAsStateWithLifecycle()
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("달력 스타일", fontWeight = FontWeight.Bold)
+                Text(
+                    if (calStyle == CalendarStyle.CLAY)
+                        "달력 탭을 크림 바탕·파스텔 근무칩의 클레이 그림으로 (다크 모드에서도 밝게)"
+                    else "달력 탭을 앱 테마 그대로",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    CalendarStyle.entries.forEachIndexed { i, s ->
+                        SegmentedButton(
+                            selected = calStyle == s,
+                            onClick = { viewModel.setCalendarStyle(s) },
+                            shape = SegmentedButtonDefaults.itemShape(i, CalendarStyle.entries.size),
                         ) { Text(s.label, fontSize = 11.sp) }
                     }
                 }
