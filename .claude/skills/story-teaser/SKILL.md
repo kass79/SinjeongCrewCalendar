@@ -175,9 +175,40 @@ Network access → Custom에 `speech.platform.bing.com` 추가(새 세션부터 
 
 ```bash
 pip install --break-system-packages -q kokoro-onnx soundfile
-npx hyperframes tts "<문장>" -v jm_kumo -s 0.9 -o voice/01.wav   # 남성 성우 (기본 추천)
-npx hyperframes tts "<문장>" -v jf_alpha -s 0.95 -o voice/01.wav # 여성
 ```
+
+### 목소리는 이야기마다 내가 고른다 (카스 지시: "가장 적합하고 잘 읽는 사람을 항상 골라라")
+
+고정 기본값은 없다. 후보는 5명 — `jm_kumo`(남, 낮고 차분), `jf_alpha`(여, 또렷·중립),
+`jf_gongitsune`(여, 부드러움), `jf_nezumi`(여, 가벼움·젊음), `jf_tebukuro`(여, 따뜻함).
+`--list`에는 jf_alpha만 뜨지만 전부 동작한다.
+
+**1단계 — 이야기 톤으로 후보 압축:**
+
+| 이야기 | 1순위 | 2순위 |
+|---|---|---|
+| 괴담·야담·긴장감·남성 화자의 회고 | jm_kumo | jf_alpha |
+| 임사체험·조용한 회상·여성 화자 | jf_alpha | jf_tebukuro |
+| 가족·모정·따뜻한 눈물 | jf_tebukuro | jf_gongitsune |
+| 젊은 화자·밝은 시작 | jf_nezumi | jf_alpha |
+
+대본의 **화자 성별과 나이**가 있으면 그것을 최우선으로 맞춘다 (68세 여성 간호사의
+증언을 남성이 읽으면 어색하다). 카스가 목소리를 지정하면 그게 최우선.
+
+**2단계 — 오디션으로 확정.** 나는 소리를 못 들으니 측정으로 거른다:
+
+```bash
+python3 $S/make_narration.py spec.json --audition   # 1번 자막을 5명 전원이 읽음
+```
+
+표의 **오독 의심**(길이 비정상)·**빠름**은 탈락. 남은 후보 중 톤 1순위를 고르되,
+**명료도**(2~5kHz 비율)가 눈에 띄게 낮으면 2순위로. 결과 `audition/오디션.mp3`는
+카스가 원할 때 들려드리고, 카스가 고르면 그 선택이 이 이야기의 정답이다.
+확정한 목소리는 `--voice <id>`로 넘긴다.
+
+실측 (迎え火 1번 문장, 0.9): 명료도 jf_alpha **2.5%** ≫ jf_tebukuro 0.8 > 나머지 0.4.
+카스가 "흐리멍텅"하다고 한 목소리가 jm_kumo(0.4%)였다 — 남성 목소리를 쓸 때는
+선명도 처리가 필수이고, 화자가 여성이거나 톤이 중립이면 jf_alpha가 안전한 선택.
 
 ⚠️ **TTS 입력은 반드시 가나.** 한자를 주면 낭독이 망가져 5배쯤 길어진다
 (실측: 한자 24초 vs 가나 2.7초). 이 변환과 TTS·선명도 처리·길이 측정을

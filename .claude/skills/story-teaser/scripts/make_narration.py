@@ -56,11 +56,43 @@ CLEAN = ("highpass=f=90,equalizer=f=3000:width_type=q:width=1:g=3,"
          "acompressor=threshold=-20dB:ratio=3:attack=8:release=120:makeup=2,"
          "loudnorm=I=-15:TP=-1.5:LRA=7")
 
+JA_VOICES = ["jm_kumo", "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro"]  # 남1 여4
+
+def audition(kana: str, speed: str):
+    """후보 전원이 같은 문장을 읽는다. 지표 표 + 이어붙인 비교 mp3(audition/오디션.mp3)."""
+    import numpy as np, wave
+    Path("audition").mkdir(exist_ok=True)
+    def rd(f):
+        w = wave.open(f); sr = w.getframerate()
+        d = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(float) / 32768
+        return sr, (d[::2] if w.getnchannels() == 2 else d)
+    m = morae(kana); rows = []
+    print(f"오디션 문장: {kana}\n{'목소리':<14}{'길이s':>6}{'모라/초':>7}{'명료도':>7}{'억양':>6}  비고")
+    for v in JA_VOICES:
+        f = f"audition/{v}.wav"
+        subprocess.run(["npx","hyperframes","tts",kana,"-v",v,"-s",speed,"-o",f],capture_output=True,timeout=240)
+        if not Path(f).exists(): print(f"{v:<14} 생성 실패"); continue
+        sp = speech_dur(f, "/tmp/_au.wav"); sr, s_ = rd("/tmp/_au.wav")
+        spec = np.abs(np.fft.rfft(s_ * np.hanning(len(s_))))**2; fr = np.fft.rfftfreq(len(s_), 1/sr)
+        pres = spec[(fr>2000)&(fr<5000)].sum() / max(spec[(fr>100)&(fr<8000)].sum(), 1e-9)
+        fl = int(sr*0.05); rms = np.array([np.sqrt((s_[i:i+fl]**2).mean()) for i in range(0, len(s_)-fl, fl)])
+        dyn = rms.std()/max(rms.mean(),1e-9); rate = m/sp if sp else 0
+        note = ("오독 의심 " if dur(f) > m*0.25 else "") + ("빠름" if rate > 10.5 else "")
+        print(f"{v:<14}{dur(f):>6.2f}{rate:>7.1f}{pres*100:>6.1f}%{dyn:>6.2f}  {note}")
+        rows.append(f)
+    ins = " ".join(f"-i {f}" for f in rows)
+    pads = ";".join(f"[{i}:a]apad=pad_dur=0.6[a{i}]" for i in range(len(rows)))
+    cat = "".join(f"[a{i}]" for i in range(len(rows)))
+    subprocess.run(f'ffmpeg -y -v error {ins} -filter_complex "{pads};{cat}concat=n={len(rows)}:v=0:a=1,'
+                   f'loudnorm=I=-16:TP=-1.5[a]" -map "[a]" -c:a libmp3lame -q:a 3 audition/오디션.mp3', shell=True)
+    print("비교 청취: audition/오디션.mp3 (순서 = 위 표 순서, 0.6초 간격)")
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("spec"); ap.add_argument("--out", default="voice")
     ap.add_argument("--voice", default="jm_kumo"); ap.add_argument("--speed", default="0.9")
     ap.add_argument("--dry", action="store_true"); ap.add_argument("--no-end", action="store_true")
+    ap.add_argument("--audition", action="store_true", help="1번 자막을 후보 전원에게 읽혀 비교")
     a = ap.parse_args()
     spec = json.loads(Path(a.spec).read_text(encoding="utf-8"))
 
@@ -76,6 +108,8 @@ def main():
             kana = end.get("kana") or to_kana(text)
             items.append((f"{len(items)+1:02d}_end", text, kana, float(end.get("start", 0)), 0.0))
 
+    if a.audition:
+        audition(items[0][2], a.speed); return
     print(f"{'#':<7}{'자막':<28}→ 가나 (눈으로 확인!)")
     for tag, text, kana, *_ in items:
         print(f"{tag:<7}{text:<28}→ {kana}")
