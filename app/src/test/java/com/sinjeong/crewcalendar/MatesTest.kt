@@ -4,11 +4,13 @@ import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.Mate
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
+import com.sinjeong.crewcalendar.presentation.mates.MatesHeader
 import com.sinjeong.crewcalendar.presentation.roster.mergeRoster
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 
 /**
  * 동료 탭 전체 명단 합성 규칙([mergeRoster]) — v1.6.87.
@@ -17,6 +19,9 @@ import org.junit.Test
  * 옛 소속·옛 교번이고 uid가 없어 근무변경도 안 붙는 **틀린 줄**이라, 같은 이름의 live 줄이
  * 있으면 소속이 달라도 버린다. 단 **동명이인**(김지환·박두원·이용석)은 이름만 보고 지우면
  * 다른 사람이 증발하므로 종전대로 `이름+소속`으로만 지운다.
+ *
+ * 뒤쪽에 **구간 헤더 글자**([MatesHeader.periodLabel], v1.7.7 A4) 3건이 붙어 있다 — 같은 화면의
+ * 순수 규칙이라 파일을 따로 만들지 않았다.
  *
  * 실행법은 [PatternTest] KDoc 참고(JUnitCore 직접 실행 — `gradlew test`는 한글 경로에서 죽는다).
  */
@@ -121,6 +126,43 @@ class MatesTest {
         val rows = mergeRoster(null, emptyList(), listOf(Mate("박희수", CrewGroup.MAIN_DRIVER, 3)))
         assertEquals(2, rows.count { it.name == "박희수" })
         assertEquals(bundledOnly.size + 1, rows.size)
+    }
+
+    /* ── v1.7.7 A4: 구간 헤더 글자([MatesHeader.periodLabel]) ──────────────────────
+     *
+     * 구간은 `오늘 + p개월`부터 한 달이고 헤더는 그 처음·끝을 적는다. v1.7.6까지 `M/D ~ M/D`
+     * 뿐이라 `›`로 열두 번 민 화면이 **몇 년 뒤인지 알 길이 없었다**(`MatesViewModel.MAX_PERIOD`
+     * 주석의 v1.6.61 실측). 아래 세 경우가 규칙 전부다 — 오늘(2026-09-06) 기준으로 잡는다.
+     */
+
+    /** ① 같은 해·올해 = 종전 그대로. 진입 기본값(구간 0)이라 이 글자가 가장 많이 보인다 */
+    @Test fun period_label_keeps_the_bare_form_inside_this_year() {
+        assertEquals(
+            "9/6 ~ 10/5",
+            MatesHeader.periodLabel(
+                LocalDate.of(2026, 9, 6), LocalDate.of(2026, 10, 5), LocalDate.of(2026, 9, 6),
+            ),
+        )
+    }
+
+    /** ② 해를 넘는 구간(3구간) = **끝쪽에만** 붙는다. 시작은 올해라 안 붙어도 안 헷갈린다 */
+    @Test fun period_label_marks_the_year_only_where_it_changes() {
+        assertEquals(
+            "12/6 ~ 2027.1/5",
+            MatesHeader.periodLabel(
+                LocalDate.of(2026, 12, 6), LocalDate.of(2027, 1, 5), LocalDate.of(2026, 9, 6),
+            ),
+        )
+    }
+
+    /** ③ 통째로 내년(4구간) = **시작에만** 붙는다. 끝은 시작과 같은 해라 되풀이하지 않는다 */
+    @Test fun period_label_marks_the_year_once_when_the_whole_period_is_next_year() {
+        assertEquals(
+            "2027.1/6 ~ 2/5",
+            MatesHeader.periodLabel(
+                LocalDate.of(2027, 1, 6), LocalDate.of(2027, 2, 5), LocalDate.of(2026, 9, 6),
+            ),
+        )
     }
 
     /** 키 중복은 절대 남으면 안 된다 — `LazyColumn(key=)`가 앱을 죽인다(v1.6.60) */

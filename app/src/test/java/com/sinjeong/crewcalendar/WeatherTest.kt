@@ -1,6 +1,8 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.presentation.weather.Weather
 import com.sinjeong.crewcalendar.presentation.weather.Wx
+import com.sinjeong.crewcalendar.presentation.weather.WxCache
 import com.sinjeong.crewcalendar.presentation.weather.gridFor
 import com.sinjeong.crewcalendar.presentation.weather.parseUltraSrtFcst
 import com.sinjeong.crewcalendar.presentation.weather.toGrid
@@ -107,6 +109,26 @@ class WeatherTest {
         assertNull(toGrid(37.421998, -122.084))   // 미국 마운틴뷰 = 안드로이드 에뮬 기본 좌표
         assertNull(toGrid(35.6895, 139.6917))     // 도쿄
         assertNull(toGrid(0.0, 0.0))              // 좌표를 못 받았을 때 흔한 쓰레기값
+    }
+
+    /**
+     * **3시간 신선도 검사는 [WxCache.kept] 한 곳**이다(v1.7.7).
+     *
+     * v1.7.6 까지 헤더 칩의 **초기값만** 이 검사를 건너뛰어(`WxCache.value` 생값), 앱을 오래
+     * 띄워 두면 3시간 넘은 기온이 "지금"인 척 한 번 그려졌다. 검사를 두 벌 만들면 되살아난다.
+     */
+    @Test
+    fun `3시간 넘은 기온은 내주지 않는다`() {
+        val ok = 1_000_000L
+        val threeHours = 3 * 60 * 60_000L
+        WxCache.value = Weather(Wx.SUNNY, 21)
+        WxCache.okAtMs = ok
+        assertEquals(21, WxCache.kept(ok)?.tempC)                  // 방금 받은 값
+        assertEquals(21, WxCache.kept(ok + threeHours)?.tempC)     // **경계 3시간은 살려 둔다**
+        assertNull(WxCache.kept(ok + threeHours + 1))              // 1ms 만 넘어도 감춘다
+        WxCache.value = null
+        assertNull(WxCache.kept(ok))                               // 받은 적이 없으면 없는 것
+        WxCache.okAtMs = 0L                                        // 프로세스 캐시라 되돌려 둔다
     }
 
     /**

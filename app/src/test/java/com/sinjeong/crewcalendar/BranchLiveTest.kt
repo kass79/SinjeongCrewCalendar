@@ -265,6 +265,31 @@ class BranchLiveTest {
     }
 
     /**
+     * **`INFO-200`(해당하는 데이터가 없습니다)은 오류가 아니다**(v1.7.7).
+     *
+     * 서울 열린데이터 API 는 결과 0건일 때 이 코드를 준다 — **운행 종료 시각의 2호선**이
+     * 정확히 그 경우다(키 검증도 이 응답으로 했다). 종전엔 오류로 던져서
+     *  ① 빈 상태 칩이 `실시간 정보를 못 받았어요 · ↻ 다시 시도` 를 말했고
+     *     (증거 `_최종점검_v1.7.6` F06·F07 — 정상 상태를 고장이라고 했다)
+     *  ② `BranchLive.fetch` 의 재시도 루프가 한 바퀴 더 돌아 **호출이 두 배** 났다.
+     *
+     * `ERROR-337`(한도)은 **여전히 오류여야 한다** — 오류가 아니게 되면 키 로테이션이
+     * 멎어 온종일 빈 지도가 된다. 그래서 회귀를 같이 잠근다.
+     */
+    @Test
+    fun `INFO-200은 오류가 아니라 빈 목록이고 ERROR-337은 여전히 오류`() {
+        val 데이터없음 = """{"errorMessage":{"status":500,"code":"INFO-200","message":"해당하는 데이터가 없습니다.","link":"","developerMessage":"","total":0}}"""
+        assertNull(BranchLive.apiError(데이터없음))
+        assertTrue(BranchLive.parsePositions(데이터없음).isEmpty())
+        assertTrue(BranchLive.parseArrivals(데이터없음).isEmpty())
+
+        val 한도 = """{"errorMessage":{"status":500,"code":"ERROR-337","message":"일일 트래픽 제한을 넘었습니다."}}"""
+        val msg = BranchLive.apiError(한도)
+        assertEquals("일일 트래픽 제한을 넘었습니다. (ERROR-337)", msg)
+        assertTrue(BranchLive.isQuotaError(msg!!))      // 한도는 다음 키로 넘어간다
+    }
+
+    /**
      * v1.6.46 — 실패는 **사람 말로** 화면에 뜬다. 종전엔 `Snapshot.error`를 카드가 아예 안 읽어
      * 비행기 모드든 한도 소진이든 `"실시간 조회 중…"` 에 영원히 머물렀다.
      */

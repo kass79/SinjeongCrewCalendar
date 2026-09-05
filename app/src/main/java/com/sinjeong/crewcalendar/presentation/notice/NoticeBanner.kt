@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.Notice
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarPalette
 
 /** 닫은 공지 id — 편승 알람 예약과 같은 `settings` SharedPreferences 를 그대로 쓴다 */
 private const val KEY_DISMISSED = "dismissed_notices"
@@ -50,9 +51,14 @@ private const val KEY_DISMISSED = "dismissed_notices"
  *
  * 상태를 밖에서 받지 않고 화면이 스스로 들고 있는 이유: `MainCalendarScreen` 은 이 배너를
  * **한 줄로만** 끼우기로 했다(2차 계획 Global Constraints).
+ *
+ * ⚠ [pal] 을 받는 이유(v1.7.7 A8): 이 배너는 **달력 위**에 얹힌다. 종전엔 `surfaceVariant` 를
+ * 직접 써서, 앱이 다크인데 달력만 크림인 클레이에서 **이 배너만 어두운 판**으로 남았다
+ * (증거 `_최종점검_v1.7.6\F29b_확대_클레이다크_공지배너만_다크색.png`). 기본 팔레트 값은
+ * 종전에 여기서 쓰던 색 그대로라 **기본 스타일 화면은 한 픽셀도 안 바뀐다.**
  */
 @Composable
-fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
+internal fun NoticeBanner(notices: List<Notice>, pal: CalendarPalette, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("settings", Context.MODE_PRIVATE) }
     // ⚠ `rememberSaveable` 금지(CLAUDE.md) — 값은 어차피 prefs 가 들고 있다.
@@ -66,7 +72,7 @@ fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
             .fillMaxWidth()
             .padding(horizontal = 8.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .background(pal.noticeBg)
             .clickable { open = n }
             .padding(start = 10.dp, top = 8.dp, bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -75,7 +81,9 @@ fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
             Icons.Default.Campaign,
             null,
             Modifier.size(22.dp),
-            tint = MaterialTheme.colorScheme.primary,
+            // 기본은 종전대로 **강조색** 확성기(픽셀 회귀 0). 클레이는 크림 판이라 글자와 같은
+            // 잉크로 맞춘다 — 2호선 초록 확성기가 노란 판 위에서 겉돈다.
+            tint = if (pal.clay) pal.noticeInk else MaterialTheme.colorScheme.primary,
         )
         Column(Modifier.weight(1f).padding(horizontal = 8.dp)) {
             Text(
@@ -84,7 +92,7 @@ fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
                 fontSize = 13.5.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = pal.noticeInk,
             )
             if (n.body.isNotBlank()) Text(
                 n.body,
@@ -92,7 +100,7 @@ fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
                 lineHeight = 15.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = pal.noticeInk,
             )
         }
         IconButton(
@@ -108,7 +116,7 @@ fun NoticeBanner(notices: List<Notice>, modifier: Modifier = Modifier) {
                 Icons.Default.Close,
                 "공지 닫기",
                 Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                tint = pal.noticeInk,
             )
         }
     }

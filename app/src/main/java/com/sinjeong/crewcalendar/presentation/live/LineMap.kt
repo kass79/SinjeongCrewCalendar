@@ -196,6 +196,13 @@ private val UP_LINE_H = 3.dp
  * 위 차선(까치산행) 기관차 크기 배수 — 아래(신도림행)가 주 차선이라 **0.85배**로 위계를 준다
  * (v1.6.95 사용자 확정). 차선 높이는 큰 쪽(아래) 기준 하나로 잡고 그림만 줄인다.
  */
+/**
+ * ↻ **연타 방지 시간**(v1.7.7 A9). 강제 조회 한 번 = API 2회라 손가락 속도로 한도를
+ * 태울 수 있었다. 폴링 눈금(4초)보다 짧으면 막는 의미가 없고, 길면 진짜 다시 받고
+ * 싶을 때 답답하다 — **3초**가 그 사이다.
+ */
+private const val REFRESH_COOLDOWN_MS = 3_000L
+
 private const val UP_LOCO_K = 0.85f
 
 private const val DEPOT_RUN_END = 2.5f     // 도림천 지나 중간쯤에서 기지 진입(배지 소멸)
@@ -1008,18 +1015,31 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, pal: MapPalette, onRefre
 internal fun RefreshButton(pal: MapPalette, onRefresh: () -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     val spin by animateFloatAsState(tick * 360f, tween(700), label = "spin")
+    /*
+     * ⚠ **연타 방지 3초**(v1.7.7 A9). `onRefresh` 는 캐시를 건너뛰는 강제 조회라 **한 번에
+     * API 2회**를 쓴다(위치 + 양천구청 도착). 종전엔 막는 것이 없어 세 번 누르면 6회가
+     * 나갔다 — 키 6개 10000회/일을 282명이 나눠 쓰는 자원이다(`BranchLive.API_KEYS` 주석).
+     * 누르면 3초 동안 **버튼만 꺼지고** 회전 애니메이션은 그대로 돈다 — 눌린 것은 보이고
+     * 호출만 안 는다. 폴링(10초/4초)은 이 값과 무관하게 제 눈금대로 돈다.
+     */
+    var cooling by remember { mutableStateOf(false) }
+    LaunchedEffect(tick) {
+        if (tick > 0) { cooling = true; delay(REFRESH_COOLDOWN_MS); cooling = false }
+    }
     // ⚠ 누르는 것은 **[Surface] 자체**다(v1.6.93). 종전엔 안쪽 [Canvas] 만 13dp + 여백 10dp =
     // 23dp 라 손끝의 절반도 안 걸렸는데, 빈 상태 문구가 바로 이 ↻ 를 누르라고 안내한다.
     // `Surface(onClick = …)` 이 `minimumInteractiveComponentSize()` 로 터치만 48dp 로 넓힌다.
     Surface(
         onClick = { tick++; onRefresh() },
+        enabled = !cooling,
         color = if (pal.clay) pal.chip else Color.White.copy(alpha = 0.10f),
         shape = CircleShape,
-        border = BorderStroke(1.2.dp, pal.rail.copy(alpha = 0.75f)),
+        border = BorderStroke(1.2.dp, pal.rail.copy(alpha = if (cooling) 0.35f else 0.75f)),
         modifier = Modifier.padding(start = 8.dp),
     ) {
         Canvas(Modifier.padding(5.dp).size(13.dp).rotate(spin)) {
-            val c = if (pal.clay) pal.chipInk else Color(0xFFB9F5C0)
+            val c = (if (pal.clay) pal.chipInk else Color(0xFFB9F5C0))
+                .copy(alpha = if (cooling) 0.45f else 1f)
             drawArc(c, startAngle = -50f, sweepAngle = 290f, useCenter = false,
                 style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
             val r = size.minDimension / 2f
@@ -1055,7 +1075,11 @@ private fun BranchChip(
         Text(
             text,
             fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
-            color = if (pal.clay) pal.chipInk else if (fill) pal.mineInk else tint,
+            // ⚠ v1.7.7 D2 — **채운 칩의 글자는 남색 바탕색**이다. 종전 `pal.mineInk`(#B3261E)
+            // 는 `본선 전체 보기` 의 초록 바탕(#2FC24A) 위에서 **2.78:1** 로 안 읽혔다(실측
+            // 스샷 `F05b`). 흰 글자도 답이 아니다 — 초록이 밝아 **2.35:1** 로 더 나쁘다.
+            // 남색(#0E2A47)이면 **6.23:1** 이고 알약은 종전 초록 그대로다.
+            color = if (pal.clay) pal.chipInk else if (fill) pal.bg else tint,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
         )

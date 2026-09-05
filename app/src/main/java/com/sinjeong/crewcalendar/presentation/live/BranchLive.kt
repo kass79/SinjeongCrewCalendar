@@ -258,10 +258,25 @@ internal object BranchLive {
         }
     }
 
-    /** 응답 상태코드: INFO-000 외에는 에러(ERROR-337 = 일일 한도 초과) */
+    /**
+     * 응답 상태코드 → 사람이 읽는 오류 한 줄. **정상이면 `null`** (ERROR-337 = 일일 한도 초과).
+     *
+     * ⚠ **`INFO-200`(해당하는 데이터가 없습니다)도 정상이다**(v1.7.7). 서울 열린데이터 API 는
+     * 결과가 **0건일 때** 이 코드를 준다 — 운행 종료 시각의 2호선이 정확히 그 경우고,
+     * 키 검증도 이 응답으로 했다([API_KEYS] 주석 "INFO-200 = 키 인증 통과").
+     * 종전엔 오류로 던져서 두 가지가 났다:
+     *  1. 빈 상태 칩이 `실시간 정보를 못 받았어요 · ↻ 다시 시도` — 고장이 아닌데 고장이라고 했다
+     *     (증거 `_최종점검_v1.7.6` F06 지선카드 · F07 본선지도).
+     *  2. [fetch] 의 재시도 루프가 한 바퀴 더 돌아 **호출이 정확히 두 배**. 한도 문구가 아니라
+     *     `attempts >= 2` 로 빠져나가므로 키 로테이션은 안 타고 같은 키를 두 번 쓴다.
+     *
+     * `null` 을 주면 [parsePositions]·[parseArrivals] 가 자연스럽게 **빈 목록**을 돌려주고,
+     * 빈 상태 문구는 [inService] 가 `금일 운행 종료 (영업 05:30~)` / `실시간 조회 중…` 으로
+     * 알아서 가른다 — 지도 쪽은 고칠 것이 없다. **호출자가 전부 여기를 지나므로 한 줄이 근본이다.**
+     */
     internal fun apiError(json: String): String? {
         val code = field(json, "code") ?: return null
-        if (code == "INFO-000") return null
+        if (code == "INFO-000" || code == "INFO-200") return null
         return "${field(json, "message") ?: code} ($code)"
     }
 
@@ -852,13 +867,18 @@ internal object BranchLive {
 
     /** 실패한 갱신에서 화면이 텅 비지 않도록 2분 이내 직전 성공 데이터를 유지 */
     private fun retainLastGood(snap: Snapshot): Snapshot {
+        // ⚠ **지선·본선 어느 쪽이든 열차가 왔으면 "받은 것"이다**(v1.7.7). 종전엔 두 판정이
+        //   지선 [Snapshot.trains] 만 봐서, 위치 API 성공 + 도착 API 실패 + 그때 지선 열차 0대면
+        //   방금 받은 **본선 [Snapshot.mainTrains] 를 통째로 버리고** 2분 전 스냅샷으로
+        //   되돌렸다 — 본선 지도는 위치 API 하나로만 그려지는데도 그랬다. 기준은 한 곳이다.
+        val gotTrains = snap.trains.isNotEmpty() || snap.mainTrains.isNotEmpty()
         if (snap.error == null) {
-            if (snap.trains.isNotEmpty()) lastGood = snap
+            if (gotTrains) lastGood = snap
             return snap
         }
         // **부분 실패**(도착 API 셋 중 하나만 죽음)면 방금 받은 위치가 옛 스냅샷보다 낫다.
         // 호출이 3개로 늘어난 v1.6.70에서 이 경우가 그만큼 잦아졌다.
-        if (snap.trains.isNotEmpty()) return snap
+        if (gotTrains) return snap
         val lg = lastGood ?: return snap
         if (System.currentTimeMillis() - lg.fetchedAtMillis > STALE_KEEP_MS) return snap
         val ageSec = ((System.currentTimeMillis() - lg.fetchedAtMillis) / 1000).toInt()

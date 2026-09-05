@@ -47,14 +47,34 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
             .orEmpty()
     }
 
+    /**
+     * 이 운행에서 [stationName] 정차와 그 자리 — **[nowSec] 에 가장 가까운 정차**(v1.7.7).
+     *
+     * ⚠ 종전 `indexOfFirst` 는 **첫 정차만** 잡았다. 자산 CSV 에는 같은
+     * `(주중구분·내외선·열번)` 안에 **성수를 두 번 적은 조합이 1142건**이다
+     * (2026-09-06 전수 집계 — 47역 중 중복이 나는 역은 **성수뿐**이다).
+     * 시발 `성수 출발` 과 종착 `성수 도착` 이 한 목록에 같이 있고 둘 사이가
+     * **84~93분**(중앙값 89분, 89분 이상이 832건)이라, 종착으로 성수에 든 내 열차의
+     * 지금 시각을 **새벽 출고 시각**과 견줘 헤더가 `+89~90분 지연` 이라고 거짓말을 했다.
+     * 실측 예 — 평일 내선 `2060` 은 성수 **출발 06:49:00**(시발) · 성수 **도착 08:21:00**
+     * (종착)이라, 08:21 정시 도착이 종전 코드에서 **+92분 지연**이 됐다.
+     *
+     * 고르는 법은 [schedSecAt] 과 같다 — 대표 시각([eventSec])과 [nowSec] 의 차가 가장 작은 것.
+     * 대표 시각이 −1(도착·출발이 둘 다 없는 칸)이면 후보에서 뒤로 밀고,
+     * `nowSec < 0`(시각을 안 넘긴 호출)이거나 후보가 하나면 **종전대로 첫 정차**다.
+     */
     private fun stopAt(
         weekTag: Int, inout: Int, trainNo: String, stationName: String,
         nowSec: Int = -1, dest: String? = null,
     ): Pair<List<Stop>, Int>? {
         val list = runStops(weekTag, inout, trainNo, dest, nowSec)
         val idx = stationIdx(stationName)
-        val i = list.indexOfFirst { it.stationIdx == idx }
-        return if (i < 0) null else list to i
+        val hits = list.indices.filter { list[it].stationIdx == idx }
+        if (hits.isEmpty()) return null
+        if (hits.size == 1 || nowSec < 0) return list to hits.first()
+        return list to hits.minBy { i ->
+            eventSec(list[i]).let { if (it < 0) Int.MAX_VALUE else kotlin.math.abs(it - nowSec) }
+        }
     }
 
     /**
@@ -135,6 +155,11 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
     /**
      * 이 역 → 다음 역 소요 **초**. 지도의 열차 전진 속도가 이 값을 쓴다([stepMotion]).
      * 모르면 [DEFAULT_SEG_SEC](**110초**, v1.7.5 사용자 지정 — 종전 120).
+     *
+     * ⚠ [nowSec] 을 넘기면 [stopAt] 이 **지금에 가까운 정차**를 고른다(v1.7.7).
+     * 지금 유일한 호출자(`MainLineMap` 의 `segSecs`)는 안 넘겨서 기본값 −1 —
+     * 성수를 두 번 적은 1142건에서 **종전대로 첫 정차(시발)** 을 잡는다.
+     * 바꾸려면 그 호출에 `serviceClock` 의 초를 넘기면 된다(한 줄).
      */
     fun segmentSeconds(
         weekTag: Int, inout: Int, trainNo: String, stationName: String,

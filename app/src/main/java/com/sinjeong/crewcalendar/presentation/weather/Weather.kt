@@ -283,7 +283,7 @@ private fun parseOrThrow(json: String): Weather {
  * (Composable 쪽 `remember` 는 회전에서 날아가므로 여기서 잡아야 한다).
  * SharedPreferences 까지 갈 이유가 없다 — 45분 지난 기온은 어차피 다시 받아야 한다.
  */
-private object WxCache {
+internal object WxCache {
     /** 이 값이 어느 격자의 날씨인지. 격자가 바뀌면(=동네가 바뀌면) 통째로 버린다. */
     @Volatile var grid: Pair<Int, Int>? = null
     @Volatile var value: Weather? = null
@@ -295,6 +295,18 @@ private object WxCache {
      * 그대로 붙어 있었다. 칩에는 시각이 안 적혀 있어 사용자가 낡음을 알 길이 없다.
      */
     @Volatile var okAtMs = 0L
+
+    /**
+     * 지금 내줘도 되는 값 — **신선도 검사는 여기 한 곳뿐이다**(v1.7.7).
+     *
+     * v1.7.6 까지 [WeatherChip] 의 초기값만 [value] 를 **검사 없이** 읽었다. 그래서 앱을 오래
+     * 띄워 두면(탭을 옮겼다 돌아올 때마다 컴포지션이 처음부터 돈다) **3시간 넘은 기온이
+     * "지금"인 척** 한 번 그려졌다 — 곧 [currentWeather] 가 돌아와 지우지만 그 사이 사용자가
+     * 본 숫자는 거짓이고, 칩에는 시각이 안 적혀 있어 낡음을 알 길이 없다([okAtMs] KDoc).
+     * **함수를 두 벌 만들지 말 것** — 한쪽만 고치면 그대로 되살아난다.
+     */
+    fun kept(now: Long = System.currentTimeMillis()): Weather? =
+        value?.takeIf { now - okAtMs <= MAX_STALE_MS }
 }
 
 /** 이보다 낡은 기온은 **현재 기온이 아니다** — 칩을 아예 감춘다(틀린 값보다 없는 편이 낫다). */
@@ -311,9 +323,8 @@ private const val MAX_STALE_MS = 3 * 60 * 60_000L
 private fun currentWeather(ctx: Context): Weather? {
     val grid = gridOf(ctx)
     val now = System.currentTimeMillis()
-    // ⚠ 직전 성공값은 **3시간까지만** 내준다(v1.6.93). 그 너머는 현재 기온이 아니다.
-    fun kept() = WxCache.value?.takeIf { now - WxCache.okAtMs <= MAX_STALE_MS }
-    if (grid == WxCache.grid && now < WxCache.freshUntilMs) return kept()
+    // ⚠ 직전 성공값은 **3시간까지만** 내준다(v1.6.93) — 판정은 [WxCache.kept] 한 곳이다.
+    if (grid == WxCache.grid && now < WxCache.freshUntilMs) return WxCache.kept(now)
     if (grid != WxCache.grid) {
         WxCache.grid = grid
         WxCache.value = null
@@ -324,7 +335,7 @@ private fun currentWeather(ctx: Context): Weather? {
     // 성공 45분(발표 주기 1시간보다 짧게) / 실패 5분 — 지하에서 매번 3초 타임아웃을 물지 않게.
     WxCache.freshUntilMs = now + if (fetched != null) 45 * 60_000L else 5 * 60_000L
     if (fetched != null) { WxCache.value = fetched; WxCache.okAtMs = now }
-    return kept()
+    return WxCache.kept(now)
 }
 
 /**
@@ -410,7 +421,9 @@ fun WeatherChip(
 ) {
     val ctx = LocalContext.current
     // 초기값을 캐시에서 읽는다 → 회전·월 이동 시 깜빡임 없이 바로 그려진다.
-    var weather by remember { mutableStateOf(WxCache.value) }
+    // ⚠ **[WxCache.kept] 를 거친다**(v1.7.7). 생값 `WxCache.value` 를 읽으면 3시간 넘은
+    //   기온을 한 번 그린다 — 아래 [LaunchedEffect] 가 보는 것과 **같은 검사**여야 한다.
+    var weather by remember { mutableStateOf(WxCache.kept()) }
     var granted by remember { mutableStateOf(hasCoarse(ctx)) }
     // 허용되면 granted 가 바뀌어 아래 LaunchedEffect 가 한 번 더 돈다 → 현재 위치 격자로 재조회.
     val ask = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {

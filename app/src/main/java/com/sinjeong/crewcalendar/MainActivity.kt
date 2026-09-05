@@ -16,12 +16,17 @@ import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -38,6 +43,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sinjeong.crewcalendar.presentation.admin.AdminScreen
 import com.sinjeong.crewcalendar.presentation.auth.AuthViewModel
 import com.sinjeong.crewcalendar.presentation.auth.LoginScreen
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarArgb
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
 import com.sinjeong.crewcalendar.presentation.calendar.MainCalendarScreen
 import com.sinjeong.crewcalendar.presentation.contacts.OfficeContactsScreen
 import com.sinjeong.crewcalendar.presentation.mates.MatesScreen
@@ -79,14 +86,20 @@ class MainActivity : ComponentActivity() {
             // → 시스템은 라이트인데 앱만 다크로 두면 어두운 배경에 어두운 아이콘이라 안 보였다.
             // 테마를 그리는 값(dark)과 같은 값으로 매번 다시 맞춘다.
             val view = LocalView.current
+            /*
+             * 달력 탭 + 클레이면 **상태바 밑이 크림**이다(v1.7.7 M1) — 앱이 다크여도 그 띠만은
+             * 밝으므로 시계·배터리 아이콘을 **어둡게** 세운다. 값을 [AppRoot] 이 올려 주는
+             * 이유는 "지금 어느 탭인가"를 아는 곳이 거기(네비 백스택)뿐이기 때문이다.
+             */
+            var creamTop by remember { mutableStateOf(false) }
             SideEffect {
                 WindowCompat.getInsetsController(window, view).apply {
-                    isAppearanceLightStatusBars = !dark
+                    isAppearanceLightStatusBars = !dark || creamTop
                     isAppearanceLightNavigationBars = !dark
                 }
             }
             SinjeongTheme(darkTheme = dark) {
-                AppRoot()
+                AppRoot(themeController) { creamTop = it }
             }
         }
     }
@@ -141,7 +154,11 @@ private enum class Tab(val route: String, val label: String, val icon: ImageVect
 }
 
 @Composable
-private fun AppRoot() {
+private fun AppRoot(
+    themeController: ThemeController,
+    /** 상태바 밑이 크림인가 — 시스템 바 아이콘 명암을 [MainActivity] 가 이 값으로 맞춘다. */
+    onCreamTop: (Boolean) -> Unit,
+) {
     // 이름+사번 로그인 게이트
     val authVm: AuthViewModel = hiltViewModel()
     val user by authVm.user.collectAsStateWithLifecycle()
@@ -156,7 +173,27 @@ private fun AppRoot() {
 
     AlarmPermissionGate()
 
+    /*
+     * ── 달력 클레이면 **상태바 띠까지 크림** (v1.7.7 M1) ─────────
+     *
+     * 사용자: 달력만 크림인데 그 위 상태바 띠가 연보라로 남아 톤이 갈렸다(`AC02` 실측
+     * y 0~135px = 51.8dp). 그 띠는 달력 화면이 아니라 **이 `Scaffold` 의 바탕**이다 —
+     * 달력 목적지는 `NavHost` 의 `padding` 아래에서 시작하므로 제 화면 안에서는 위를 못 먹고,
+     * `AnimatedContent` 가 `clipToBounds` 를 걸어 위로 넘겨 그릴 수도 없다.
+     * 그래서 **여기서** 칠한다.
+     *
+     * ⚠ **하단 탭바는 그대로다**(사용자 확정 — 공용이라 손대지 않는다). [NavigationBar] 가
+     * 제 `Surface` 로 이 바탕을 덮으므로 색을 바꿔도 탭 줄은 종전 그대로다.
+     * ⚠ 달력 탭이 아니거나 기본 스타일이면 종전 `background` 라 화면이 한 픽셀도 안 바뀐다.
+     */
+    val calStyle by themeController.calendarStyle.collectAsState()
+    val creamTop = calStyle == CalendarStyle.CLAY &&
+        currentDest?.hierarchy?.any { it.route == Tab.Calendar.route } == true
+    LaunchedEffect(creamTop) { onCreamTop(creamTop) }
+
     Scaffold(
+        containerColor =
+            if (creamTop) Color(CalendarArgb.ClayBg) else MaterialTheme.colorScheme.background,
         bottomBar = {
             // M3 기본 80dp → 60dp. 달력에 세로 공간을 그만큼 돌려준다(사용자 요청 "3단계 줄여줘").
             // 제스처 바 높이는 따로 더해 준다 — 60dp 안에서 깎으면 탭이 제스처 바에 먹힌다.

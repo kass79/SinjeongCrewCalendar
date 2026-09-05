@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
@@ -167,6 +168,18 @@ fun MainCalendarScreen(
             // ⚠ `contentColor` 를 **명시**한다(v1.7.6). 크림 바탕은 M3 스킴에 없는 색이라
             // `contentColorFor` 가 `Unspecified` 를 주고, 그러면 다크에서 밝은 회색 아이콘이
             // 크림 위에 얹혀 사라진다. 기본 스타일 값은 종전과 같은 `onSurface` 다.
+            //
+            // ⚠ **상태바 띠(클레이에서 여기만 연보라)는 이 파일에서 못 고친다**(v1.7.7 M1, 알고 둔 대가).
+            // 증거 `_미리보기_v1.7.6\AC02_달력_클레이_9월.png` — 헤더는 크림인데 그 위
+            // **y 0~135px(실측 51.8dp)** 만 `cs.background`(#FEF7FF) 로 남아 톤이 갈린다.
+            // 그 띠는 바깥 `Scaffold`(MainActivity)의 `containerColor` 자리이고, 달력 화면은
+            // `NavHost` 의 `Modifier.padding(padding)` 때문에 **그 아래에서 시작**한다.
+            // 위로 넘겨 그리는 것도 막혀 있다 — `NavHost` 는 목적지에 `sizeTransform` 이 없으면
+            // `AnimatedContent` 가 `Modifier.clipToBounds()` 를 건다(navigation-compose 2.8.1 ·
+            // animation 1.7.6 바이트코드로 확인: `sizeTransform?.clip == false` 일 때만 clip 을
+            // 뺀다). 고치려면 ① MainActivity 바깥 `Scaffold` 의 `containerColor` 를 탭·스타일에
+            // 맞춰 주거나 ② 달력 목적지에 `sizeTransform = { SizeTransform(clip = false) }` 를
+            // 주고 여기서 헤더 뒤로 한 겹 더 칠하면 된다. 둘 다 MainActivity 를 건드린다.
             Surface(color = pal.headerBg, contentColor = pal.headerInk) {
                 /*
                  * ⚠ **한 줄이되, 안 들어가면 접힌다**(v1.6.93). 종전엔 고정 44dp `Row` 에
@@ -188,8 +201,20 @@ fun MainCalendarScreen(
                     maxItemsInEachRow = 2,
                 ) {
                   Row(verticalAlignment = Alignment.CenterVertically) {
+                    // **올해가 아니면 연도를 붙인다**(v1.7.7 M3). 종전엔 `M월` 하나뿐이라
+                    // 스와이프로 해를 넘겨도 `1월` — 2027년 1월인지 올해 1월인지 알 길이 없었다.
+                    // 올해면 종전 그대로 `1월`(픽셀 회귀 0).
+                    //
+                    // 폭: 다른 해를 볼 때는 `state.month != YearMonth.now()` 라 **날씨 칩이
+                    // 애초에 안 그려지므로**(아래 `if`) 늘어난 폭이 뺏을 자리가 없다. 배율 1.5
+                    // 실산: `2027년 1월` 15sp ≈ 111dp + 6dp + 휴칩 ≈ 71dp = 188dp 로
+                    // 가장 좁은 360dp 화면에도 든다. 그래도 모자라면 `FlowRow` 가 단추 묶음을
+                    // 아랫줄로 접는다(v1.6.93) — 글자가 잘리지는 않는다.
+                    val otherYear = state.month.year != java.time.Year.now().value
                     Text(
-                        state.month.format(DateTimeFormatter.ofPattern("M월")),
+                        state.month.format(
+                            DateTimeFormatter.ofPattern(if (otherYear) "yyyy년 M월" else "M월"),
+                        ),
                         fontSize = 15.sp,
                         fontWeight = FontWeight.ExtraBold,
                         maxLines = 1,
@@ -291,10 +316,13 @@ fun MainCalendarScreen(
         Row(bg.fillMaxSize()) {
             // 펼침 비율 50:50 — "폴더 펼쳤을 때 화면 반반"(v1.6.11 사용자 선택). v1.6.10은 38:62
             Column(Modifier.weight(if (wide) 0.5f else 1f).fillMaxHeight()) {
-                NoticeBanner(notices)   // 관리자 공지(v1.6.89). 볼 게 없으면 높이 0
+                // 관리자 공지(v1.6.89). 볼 게 없으면 높이 0.
+                // ⚠ 배너 둘도 **팔레트를 받는다**(v1.7.7 A8) — 안 받으면 앱이 다크인데 달력만
+                // 크림인 클레이에서 이 둘만 어두운 판으로 남는다(F29b).
+                NoticeBanner(notices, pal)
                 // 공휴일표(2026~2027) 밖의 해 — 신정·설날·추석이 조용히 평일로 계산된다.
                 // 표 자체를 늘리는 것이 정답이지만, 그때까지는 **틀릴 수 있다고 말한다**(v1.6.92 ①).
-                if (state.holidayTableMissing) HolidayTableBanner(state.month.year)
+                if (state.holidayTableMissing) HolidayTableBanner(state.month.year, pal)
                 WeekdayHeader(pal)
 
                 if (state.isLoading) {
@@ -597,9 +625,12 @@ private fun RestCountChip(count: Int, pal: CalendarPalette) {
 
 /* ── 요일 헤더 ────────────────────────────────────────── */
 @Composable
-private fun HolidayTableBanner(year: Int) {
+private fun HolidayTableBanner(year: Int, pal: CalendarPalette) {
     Surface(
-        color = MaterialTheme.colorScheme.errorContainer,
+        // ⚠ 팔레트에서 뽑는다(v1.7.7 A8) — 종전엔 `errorContainer` 를 박아 둬서 앱이 다크인데
+        // 달력만 크림인 클레이에서 **이 배너만 어두운 판**으로 남았다(F29b). 기본 팔레트 값은
+        // `errorContainer`/`onErrorContainer` 그대로라 기본 화면은 한 픽셀도 안 바뀐다.
+        color = pal.warnBg,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
         shape = RoundedCornerShape(8.dp),
     ) {
@@ -607,13 +638,13 @@ private fun HolidayTableBanner(year: Int) {
             Text(
                 "${year}년 공휴일 정보 없음 (직접 확인 필요)",
                 fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = pal.warnInk,
             )
             Text(
                 "이 앱은 ${Bundled.HOLIDAY_YEARS.first}~${Bundled.HOLIDAY_YEARS.last}년 공휴일만 알고 있습니다. " +
                     "이 달의 공휴일은 평일로 계산되어 출근시각·휴무가 틀릴 수 있습니다.",
                 fontSize = 11.sp,
-                color = MaterialTheme.colorScheme.onErrorContainer,
+                color = pal.warnInk,
             )
         }
     }
@@ -781,7 +812,10 @@ private fun TimetableCard(
         Image(painterResource(icon), null, Modifier.size(22.dp))
         Spacer(Modifier.height(4.dp))
         // 칸이 좁거나 시스템 글꼴 확대 시 가로로 짤리지 않게 자동 축소 (DayCell 다이아 칩과 같은 방식)
-        var fitSize by remember(twoLine, height) { mutableStateOf(12.5.sp) }
+        // 키에 **글자배율**이 든다(v1.7.7 D4) — 줄이기만 하는 루프라 없으면 작아진 채로 굳는다.
+        var fitSize by remember(twoLine, height, LocalDensity.current.fontScale) {
+            mutableStateOf(12.5.sp)
+        }
         Text(
             twoLine,
             fontSize = fitSize, lineHeight = fitSize * 1.28,
@@ -798,7 +832,9 @@ private fun TimetableCard(
  */
 @Composable
 private fun HolidayTag(name: String, size: TextUnit, color: Color, modifier: Modifier) {
-    var fit by remember(name, size) { mutableStateOf(size) }
+    // ⚠ 키에 **글자배율**이 든다(v1.7.7 D4) — [size] 는 sp 상수라 배율이 바뀌어도 안 변한다.
+    // 이 루프는 줄이기만 하므로 배율을 도로 낮춰도 작아진 채로 굳었다.
+    var fit by remember(name, size, LocalDensity.current.fontScale) { mutableStateOf(size) }
     Text(
         name, fontSize = fit, lineHeight = fit * 1.1, maxLines = 1,
         softWrap = false, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.End,
@@ -815,7 +851,8 @@ private fun HolidayTag(name: String, size: TextUnit, color: Color, modifier: Mod
 
 /**
  * 달력 칸 메모가 **처음 시도하는 줄 수**(v1.6.99). 실제로 보이는 줄 수는 칸에 남은 높이가
- * 정한다 — [DayCell] 이 여기서 시작해 마지막 줄이 상자 밑을 넘으면 한 줄씩 줄여 내려온다.
+ * 정한다 — [DayCell] 이 여기서 시작해 **상자 안에 줄상자가 다 든 줄만** 세어 한 번에 내려앉는다
+ * (v1.7.7 D4. 하한은 **0줄** — 한 줄도 못 담는 칸에서는 반 잘린 글자 대신 잘림 점만 남긴다).
  *
  * 8 인 근거(에뮬 1080x2400/420dpi, 5주 달): 출근시각 아래 남는 높이가 **86dp**, 폰 메모
  * 한 줄이 `9.5sp × 1.2 = 11.4dp` 라 배율 1.0에서 **7.5줄**이 든다. 배율 1.5면 17.1dp라
@@ -864,9 +901,21 @@ private fun DayCell(
     // 클레이만 세로 그라데이션 — 근무 저장된 칸(민트)은 단색이라 제외한다
     val baseBrush = if (frozen) null else pal.cellBrush
 
+    // ⚠ 아래 "안 들어가면 줄인다" 상태들의 `remember` 키에는 **글자배율**도 든다(v1.7.7 D4).
+    // 전부 한 방향(줄이기)이라, 배율을 도로 낮춰도 키가 그대로면 **줄어든 채로 굳는다.**
+    val fontScale = LocalDensity.current.fontScale
     // **메모가 다 안 보일 때만** 켜지는 점(v1.6.82). 메모 [Text]가 배치될 때 스스로 정한다.
     // 다 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
-    var memoCut by remember(day.memo, height, big) { mutableStateOf(false) }
+    var memoCut by remember(day.memo, height, big, fontScale) { mutableStateOf(false) }
+    // 칸에 남은 높이가 **근무 칩·출근시각조차** 못 담으면 켜진다(v1.7.7 D4) → 위 취소선(원래
+    // 근무)을 접는다. 순서는 사용자 확정: **칩·출근시각이 먼저, 나머지는 남는 만큼.**
+    var tightCell by remember(day.duty.raw, day.originalDutyRaw, height, big, fontScale) {
+        mutableStateOf(false)
+    }
+    /** 줄상자가 칸에 안 들어가면 = 이 줄이 잘리면 [tightCell] 을 켠다(한 방향이라 진동하지 않는다) */
+    val markTight: (TextLayoutResult) -> Unit = {
+        if (it.lineCount > 0 && it.getLineBottom(it.lineCount - 1) > it.size.height) tightCell = true
+    }
 
     Column(
         Modifier
@@ -942,10 +991,20 @@ private fun DayCell(
             HolidayTag(it, holSize, nameColor, Modifier.fillMaxWidth().padding(horizontal = 2.dp))
         }
         // 근무변경된 날: 원래 근무 작게(취소선) + 새 근무 2줄
-        if (day.isOverridden && day.originalDutyRaw != null) {
+        //
+        // ⚠ **`lineHeight` 를 반드시 준다**(v1.7.7 D4). 안 주면 M3 `bodyLarge` 의 `lineHeight`
+        // **24sp** 를 그대로 물려받는다 — 8.5sp 글자가 배율 1.5에서 줄상자만 **38dp**(칸 60dp의
+        // 내용 54dp 중 3분의 2)를 먹었다. [Column] 은 무게 없는 자식을 **차례로 남은 높이만큼**
+        // 재므로, 그 아래 근무 칩에 높이가 안 남아 **2.3dp 띠**만 남았다(증거
+        // `_최종점검_v1.7.6\F37b_확대_가로배율1.5_달력칸_메모글자_세로잘림.png` 2일 칸 — 실측
+        // 취소선 100px / 칩 6px, 420dpi). 1.1 을 주면 같은 자리가 **14dp** 다.
+        //
+        // ⚠ 그래도 모자라는 칸(가로 60dp + 배율 1.5 + 출근시각까지 있는 근무변경 날)에서는
+        // [tightCell] 이 켜져 **이 줄을 통째로 접는다** — 가위표 친 옛 근무보다 오늘 근무 칩이 먼저다.
+        if (day.isOverridden && day.originalDutyRaw != null && !tightCell) {
             Text(
                 DutyCode.parse(day.originalDutyRaw).display,
-                fontSize = 8.5.sp, fontWeight = FontWeight.Bold,
+                fontSize = 8.5.sp, lineHeight = 8.5.sp * 1.1, fontWeight = FontWeight.Bold,
                 textDecoration = TextDecoration.LineThrough,
                 color = pal.strike,
                 maxLines = 1,
@@ -987,7 +1046,7 @@ private fun DayCell(
                                 else -> chipSizeBig
                             }
                             // 다이아 텍스트 자동 맞춤: 칩 폭을 넘치면 들어갈 때까지 축소 (시스템 글꼴 확대에도 안 짤림)
-                            var fitSize by remember(label, big) { mutableStateOf(baseSize) }
+                            var fitSize by remember(label, big, fontScale) { mutableStateOf(baseSize) }
                             Text(
                                 label,
                                 fontSize = fitSize,
@@ -995,7 +1054,14 @@ private fun DayCell(
                                 lineHeight = fitSize * if (two) 1.05 else 1.15,
                                 fontWeight = FontWeight.ExtraBold,
                                 maxLines = 1, softWrap = false,
-                                onTextLayout = { if (it.hasVisualOverflow && fitSize > 7.sp) fitSize *= 0.92f },
+                                onTextLayout = {
+                                    // ⚠ **가로 넘침만** 본다(v1.7.7 D4). `hasVisualOverflow` 는
+                                    // 세로 넘침도 참이라, 칸이 모자라 칩이 눌린 순간 글자까지
+                                    // 7sp 로 줄여 놓고 키가 그대로인 동안 안 돌아왔다.
+                                    if (it.didOverflowWidth && fitSize > 7.sp) fitSize *= 0.92f
+                                    // 세로가 모자라 **칩이 잘리면** 위 취소선을 접어 자리를 낸다
+                                    markTight(it)
+                                },
                             )
                         }
                     }
@@ -1027,16 +1093,18 @@ private fun DayCell(
                     .background(pal.textDim, CircleShape),
             )
         }
+        // 출근시각(과 그 자리를 대신 쓰는 `운휴`)도 **칩과 같은 우선순위**다 — 잘리면
+        // [markTight] 가 위 취소선을 접는다(v1.7.7 D4).
         if (day.signOn != null) {
             Text(
                 day.signOn, fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
-                color = pal.text,
+                color = pal.text, onTextLayout = markTight,
             )
         } else if (day.duty.isWorkDay && day.duty.number != null && Bundled.isHolidayTimetable(day.date)) {
             // 휴일 운휴 다이아(본선 주간 26~29) — 시각이 아예 없어 칸이 비어 보이던 자리를 채운다
             Text(
                 "운휴", fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
-                color = duty.sunday,
+                color = duty.sunday, onTextLayout = markTight,
             )
         }
         // 메모 — **남는 높이만큼 여러 줄** (v1.6.82 "개인 일정" · v1.6.99 줄 수 상한 해제).
@@ -1044,16 +1112,23 @@ private fun DayCell(
         // 줄 수를 dp 산수로 미리 정하지 않고 **남은 높이에 직접 물어본다**:
         // `weight(1f, fill = false)`가 위 요소(날짜·공휴일·근무변경 취소선·다이아 칩·출근시각)를
         // 다 재고 **남은 높이만큼만** 최대 제약으로 주고, 그보다 작으면 제 높이만 차지한다.
-        // [MEMO_MAX_LINES]에서 시작해 마지막 줄이 상자 밑을 넘으면 **한 줄씩 줄여** 들어갈 때까지
-        // 내려간다(하한 1줄 + 말줄임).
+        // [MEMO_MAX_LINES]에서 시작해 **줄상자가 그 안에 온전히 든 줄만** 세어 거기까지 내려간다
+        // (하한 **0줄** — v1.7.7 D4. 마지막 줄은 말줄임).
         // → 6주 달·근무변경 취소선·충당 2줄 칩·글자배율이 뭘 하든 **자동으로 맞는다**(상수 1개).
         //
         // ⚠ v1.6.98까지는 상한이 **2줄 고정**이었다. 실측(emulator-5554 1080x2400/420dpi,
         // 9월=5주)에서 출근시각 아래 남는 높이가 **86dp**인데 두 줄은 21.7dp만 썼다 —
         // 자리의 4분의 1만 쓰고 나머지를 버리고 있었다(사용자: *"메모 한 내용이 좀 더 보일 수있게"*).
+        //
+        // ⚠ v1.7.6까지는 하한이 **1줄**이라, 남은 높이가 한 줄에도 못 미치는 칸에서 그 한 줄이
+        // 칸 clip 에 **아래가 잘린 채** 그려졌다 — `병원 예`가 `벽워 예`로 보였다(증거
+        // `_최종점검_v1.7.6\F37b_...` 1일 칸: 남은 높이 14.5dp, 한 줄 17.1dp). 이제 **0줄**까지
+        // 내려가 아예 안 그리고 잘림 점만 켠다(v1.7.7 D4).
         if (day.memo.isNotBlank()) {
-            var memoLines by remember(day.memo, height, big) { mutableIntStateOf(MEMO_MAX_LINES) }
-            Text(
+            var memoLines by remember(day.memo, height, big, fontScale) {
+                mutableIntStateOf(MEMO_MAX_LINES)
+            }
+            if (memoLines > 0) Text(
                 day.memo, fontSize = memoSize,
                 // 두 줄이 되면서 1.06은 너무 좁다 — 한글 받침이 다음 줄 상자에 닿는다.
                 lineHeight = memoSize * 1.2,
@@ -1067,16 +1142,19 @@ private fun DayCell(
                     // 자리가 남아도는 칸에서까지 한 줄로 내려앉았다(에뮬 실측). **높이가 모자란
                     // 것만** 잡아야 하므로 마지막 줄의 아래끝을 실제 상자 높이와 직접 견준다.
                     //
-                    // ⚠ **한 줄씩** 줄인다(v1.6.99). 종전엔 넘치면 곧바로 `= 1`이라 자리가
-                    // 다섯 줄어치 남아도 한 줄만 보였다. 한 칸씩 내려오면 배치가 최대
-                    // [MEMO_MAX_LINES]−1 번 더 도는데, 한 번 정해지면 `remember` 키
-                    // (메모·칸 높이·big)가 그대로인 동안 다시 재지 않는다.
-                    if (memoLines > 1 && it.lineCount > 0 &&
-                        it.getLineBottom(it.lineCount - 1) > it.size.height
-                    ) memoLines--
+                    // ⚠ **들어가는 줄 수를 바로 센다**(v1.7.7 D4). v1.6.99는 한 줄씩 내려와서
+                    // 배율 1.5 칸에서는 배치가 여덟 번 돌았고, 무엇보다 **하한이 1줄**이라
+                    // 그 한 줄이 반쯤 잘린 채 남았다. 이제 마지막 줄의 **줄상자 아래끝**이
+                    // 칸에 든 줄만 세므로 **0줄(=아예 안 그림)까지** 내려간다.
+                    // 세는 기준이 `it.size.height`인 이유: 이 [Text]는 `weight(1f, fill = false)`
+                    // 라 **열이 남겨 준 높이**가 그대로 최대 제약으로 들어오고, 넘치면 여기서
+                    // 잘려 들어온다 — 곧 칸 clip 이 자를 자리와 같은 값이다.
+                    var fits = 0
+                    while (fits < it.lineCount && it.getLineBottom(fits) <= it.size.height) fits++
+                    if (fits < memoLines) memoLines = fits
                     // 잘렸으면 다이아 칩 옆에 점을 켠다(위 `memoCut` 참고).
                     // 여기서는 `hasVisualOverflow`가 맞다 — 폭이든 줄 수든 "덜 보인다"가 곧 점이다.
-                    memoCut = it.hasVisualOverflow ||
+                    memoCut = fits < it.lineCount || it.hasVisualOverflow ||
                         (it.lineCount > 0 && it.isLineEllipsized(it.lineCount - 1))
                 },
                 modifier = Modifier.weight(1f, fill = false),

@@ -14,13 +14,19 @@ import java.time.LocalDateTime
  */
 class Line2TimetableTest {
     // 홍대입구(38) 07:00:00 도착·07:00:30 출발 → 신촌(39) 07:02:00/07:02:30 → 이대(40) 07:04:00 (내선 2006, 평일)
+    // 마지막 세 줄 = **자산 CSV 의 평일 내선 `2060` 실값**(v1.7.7 재현용):
+    //   성수(10) 시발 출발 06:49:00 → 건대입구(11) → 성수(10) 종착 도착 08:21:00.
+    //   한 운행이 같은 역을 **두 번** 적는 조합은 자산에 1142건이고 **전부 성수**다.
     private val csv = """
-        # fetched=2026-09-04 stations=47 rows=4
+        # fetched=2026-09-04 stations=47 rows=7
         # columns=...
         1,1,38,2006,25200,25230
         1,1,39,2006,25320,25350
         1,1,40,2006,25440,-1
         1,2,38,2513,90000,90030
+        1,1,10,2060,-1,24540
+        1,1,11,2060,24660,24690
+        1,1,10,2060,30060,-1
     """.trimIndent()
     private val tt = Line2Timetable.parse(csv)
 
@@ -42,6 +48,25 @@ class Line2TimetableTest {
         assertEquals(2, tt.delayMinutes(1, 1, "8006", "홍대입구", "1", 25200 + 120))
         assertEquals(2, tt.delayMinutes(1, 1, "4006", "홍대입구", "1", 25200 + 120))
         assertEquals(90, tt.segmentSeconds(1, 1, "6006", "홍대입구"))
+    }
+
+    /**
+     * 한 역이 **두 번 나오는 운행**은 지금에 가까운 정차를 쓴다(v1.7.7).
+     *
+     * 종전 `indexOfFirst` 는 종착으로 성수에 든 열차를 **새벽 출고 시각**과 견줘
+     * 헤더에 `+92분 지연`을 찍었다(30060 − 24540 = 5520초 = 92분). 실자산 1142건이 이 꼴이다.
+     */
+    @Test fun `같은 역을 두 번 지나면 지금에 가까운 정차로 지연을 잰다`() {
+        // 종착 08:21:00 정시 도착 → 0분. 첫 정차(06:49 시발)를 잡으면 +92분이다.
+        assertEquals(0, tt.delayMinutes(1, 1, "2060", "성수", "1", 30060))
+        assertEquals(3, tt.delayMinutes(1, 1, "2060", "성수", "1", 30060 + 180))
+        // 시발 쪽도 그대로 — 06:49 출발이면 첫 정차가 가깝다.
+        assertEquals(0, tt.delayMinutes(1, 1, "2060", "성수", "2", 24540))
+        // 라이브 접두가 달라도 같다(`sameRun`) · API 꼬리 붙은 역명도 같다
+        assertEquals(0, tt.delayMinutes(1, 1, "8060", "성수종착", "1", 30060))
+        // 같은 stopAt 을 쓰는 segmentSeconds — nowSec 을 넘기면 종착(다음 역 없음)을 고른다
+        assertEquals(120, tt.segmentSeconds(1, 1, "2060", "성수"))          // nowSec 없음 → 첫 정차 → 성수→건대입구
+        assertEquals(110, tt.segmentSeconds(1, 1, "2060", "성수", 30060))   // 종착 → 다음 역 없음 → 기본값
     }
 
     /** 지선 `5xxx` 는 본선 `25xx` 와 뒤 세 자리가 겹친다 — 행선이 본선 종착일 때만 받는다. */

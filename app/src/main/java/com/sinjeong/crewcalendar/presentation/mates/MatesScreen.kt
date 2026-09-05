@@ -20,7 +20,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.*
@@ -35,6 +35,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -164,12 +165,17 @@ class MatesViewModel @Inject constructor(
          * 왼쪽에만 한계가 있는 건 그 자체로 비대칭 결함이라 어차피 막아야 한다.
          *
          * **1년으로 정한 근거 — 그 너머는 앱이 책임질 수 없는 값이다:**
-         *  · `Bundled.PUBLIC_HOLIDAYS`는 **2026년치뿐**이다. 통상근무(`restOnHolidays`)는 공휴일을
-         *    휴무로 덮으므로, 표에 없는 해로 넘어가면 설날·추석이 **근무일로 그려진다.**
-         *    순환 교번은 계산이 되니까 화면은 멀쩡해 보이는데 값만 틀린다 — 조용히 틀리는 자리다.
          *  · 교번표·명단은 해마다 개정된다(v1.6.54·57의 `4·7 개정 행로표`가 그 예).
          *  · 승무원이 실제로 확인하는 범위(다음 몇 달)를 한참 넘는다.
          * 상한에 닿으면 `›`가 `‹`와 같은 방식으로 **꺼진다** — 눌러도 안 움직이는 대신 못 누른다.
+         *
+         * ⚠ **이 상수만으로는 공휴일표 밖을 못 막는다**(v1.7.7 A4). 통상근무(`restOnHolidays`)는
+         * 공휴일을 휴무로 덮으므로 [Bundled.PUBLIC_HOLIDAYS] 밖의 해로 넘어가면 설날·추석이
+         * **근무일로 그려진다** — 순환 교번은 멀쩡히 계산되니 화면은 정상으로 보이고 값만 틀리는,
+         * 조용히 틀리는 자리다. v1.6.61에 12를 고를 때는 표가 2026년치뿐이라 12구간이 이미 표
+         * 밖이었는데, v1.6.92에서 표가 2027년까지 늘어 **지금(2026-09) 기준으로는 12구간도 표 안**
+         * 이다. 어느 쪽이든 상수 하나로 맞출 수 없는 값이라(오늘 날짜가 흐르면 경계가 움직인다)
+         * `›`는 **다음 구간의 마지막 날을 [Bundled.holidayTableCovers]에 직접 물어보고** 막는다.
          */
         const val MAX_PERIOD = 12
     }
@@ -268,6 +274,38 @@ private fun chipWeight(label: String): Float =
     CHIP_PAD_H.value * 2 + CHIP_FONT_DP * label.sumOf { if (it.code < 128) 0.6 else 1.0 }.toFloat()
 
 /**
+ * 구간 헤더 글자 한 곳 (v1.7.7 A4).
+ *
+ * ⚠ **왜 `object` 안에 있나** — 테스트 하네스(`tools/runtests.ps1`의 JUnitCore)에는 Compose가
+ * 없다. 이 파일의 최상위 `val`([CHIP_PAD_H]·[CHIP_H]가 `Dp`)이 파일 클래스 `MatesScreenKt`의
+ * static 초기화에 들어 있어서, 최상위 함수로 두면 **테스트가 부르는 순간 `NoClassDefFoundError`**
+ * 로 터진다. `presentation/live/MapStyle.kt`의 `MapArgb`와 같은 처방이다.
+ */
+internal object MatesHeader {
+    /**
+     * `9/6 ~ 10/5` · `12/6 ~ 2027.1/5` · `2027.1/5 ~ 2/3`.
+     *
+     * **연도를 붙이는 이유**: `›`로 열두 번 밀면 내년 구간인데 종전 글자는 `1/5 ~ 2/3`뿐이라
+     * 몇 년 뒤인지 알 길이 없었다([MatesViewModel.MAX_PERIOD] 주석의 v1.6.61 실측과 같은 자리).
+     *
+     * **달라질 때만 한 번 붙인다** — 시작은 올해와 다를 때, 끝은 시작과 다를 때.
+     * 한 번만 붙여도 안 붙은 쪽은 **바로 앞 값과 같은 해**로 읽혀 모호하지 않고, 무엇보다
+     * **헤더 폭이 그만큼밖에 없다.** 폴드7 접힘(411dp)·배율 1.5 실산(글자폭 = 숫자 0.568em ·
+     * `/` 0.45 · `.`와 공백 0.26 · `~` 0.52 · 한글 1.0):
+     *  · 한 번 붙인 최장 `2027.11/20 ~ 12/19` = 9.02em × 18dp = **162dp** → 제목 몫 68dp 남음 ✓
+     *  · 두 번 붙인 최장 `2026.12/20 ~ 2027.1/19` = 10.98em × 18dp = **198dp** → 33dp만 남아
+     *    제목 `동료`(51dp)가 `동…`으로 잘린다.
+     * 헤더의 다른 칸은 못 줄인다 — `‹ ›` 60dp · 여백 8dp · `265명` 48.7dp · `동료 추가` 36dp.
+     */
+    fun periodLabel(start: LocalDate, end: LocalDate, today: LocalDate): String {
+        fun md(d: LocalDate) = "${d.monthValue}/${d.dayOfMonth}"
+        val head = if (start.year != today.year) "${start.year}." else ""
+        val tail = if (end.year != start.year) "${end.year}." else ""
+        return "$head${md(start)} ~ $tail${md(end)}"
+    }
+}
+
+/**
  * 동료 탭 — v1.6.39에서 상단바 `동료근무`(RosterScreen)를 흡수한 **통합 화면**.
  *
  * 종전엔 같은 매트릭스를 두 화면이 그렸다. 상단바 동료근무는 사업소 전 인원, 하단 동료 탭은
@@ -321,12 +359,25 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     // 세 글자 이름이 말줄임된다(v1.6.68). 배율을 태운 값은 여기서만 나온다.
     val m = rememberMatrixMetrics()
     val period by viewModel.period.collectAsStateWithLifecycle()
+    // 진입 시점에 한 번만 읽는다 — 아래 셋(구간 날짜·헤더 글자·`›` 잠금)이 **같은 오늘**을 봐야
+    // 자정을 넘겨 앱을 켜 둬도 서로 어긋나지 않는다([MatesViewModel.monthOverrides] 주석과 같은 이유).
+    val today = remember { LocalDate.now() }
     // 한 구간 = 시작일부터 한 달. `plusMonths(1)`이라 2월이면 28일, 8월이면 31칸.
     // period 0이면 시작일이 오늘, 1이면 한 달 뒤(9/21~10/20) — 헤더 표기와 같은 값이다.
-    val dates = remember(period) {
-        val start = LocalDate.now().plusMonths(period.toLong())
+    val dates = remember(period, today) {
+        val start = today.plusMonths(period.toLong())
         val end = start.plusMonths(1)
         generateSequence(start) { it.plusDays(1) }.takeWhile { it < end }.toList()
+    }
+    // **다음 구간의 마지막 날** — `›`를 열어 둘지 정한다(A4). 구간 시작은 언제나 `오늘 + p개월`이라
+    // `dates.first().plusMonths(1)`로 계산하면 안 된다: 1/31 기준이면 전자는 3/31, 후자는 3/28로
+    // 갈린다(`plusMonths`의 말일 보정). 위 `dates`와 **글자 그대로 같은 규칙**을 쓴다.
+    val nextPeriodEnd = remember(period, today) {
+        today.plusMonths(period + 1L).plusMonths(1).minusDays(1)
+    }
+    // 이 구간에서 **공휴일표가 모르는 해**(있으면). 구간이 한 달이라 걸치는 해는 처음·끝 둘뿐이다.
+    val holidayGapYear = remember(dates) {
+        listOf(dates.first(), dates.last()).firstOrNull { !Bundled.holidayTableCovers(it) }?.year
     }
     // 첫 칸이 언제나 구간 시작일이라 가로 시작 위치는 0 — 헤더와 전 행이 이 하나를 공유해 같이 움직인다.
     val hScroll = rememberScrollState()
@@ -414,7 +465,23 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("동료", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp)
+                    /*
+                     * 폭이 모자라면 **제목이 먼저 양보한다**(달력 헤더 `HEAD_LADDER`와 같은 순서).
+                     * 이 줄에서 대신 말해 주는 데가 있는 건 제목뿐이다 — 하단 탭에 `동료`가 늘 떠
+                     * 있다. 날짜·인원수·버튼은 대신 말해 줄 곳이 없으므로 안 줄인다.
+                     * `weight`이 없으면 **줄 맨 끝에 놓이는 `동료 추가` 버튼이 통째로 밀려나
+                     * 사라진다**(Row는 앞에서부터 재고 남은 폭만 뒤에 준다).
+                     *
+                     * 아래 `Spacer`(오른쪽 정렬용)와 남는 폭을 **4 : 1**로 나눈다. 제목이 필요한
+                     * 폭은 `17sp × 한글 2자 × 배율 1.5` = **51dp**이고, 폴드7 접힘(411dp)·배율 1.5
+                     * 에서 가장 긴 라벨(연도 붙은 `2027.11/20 ~ 12/19` ≈ 162dp)일 때 남는 폭이
+                     * **68dp**다 — 4/5면 54dp라 제목이 살고, 1 : 1이면 34dp라 `동…`으로 잘린다.
+                     */
+                    Text(
+                        "동료", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(4f, fill = false),
+                    )
                     Spacer(Modifier.width(4.dp))
                     // ⑦ 구간 이동. `‹`는 오늘 구간에서 꺼진다 — 과거로는 안 간다(v1.6.42).
                     IconButton(
@@ -422,18 +489,22 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                         enabled = period > 0,
                         modifier = Modifier.size(30.dp),
                     ) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "이전 구간", Modifier.size(22.dp)) }
+                    // 해가 달라지면 연도가 붙는다 — 규칙과 근거는 [MatesHeader.periodLabel](v1.7.7 A4).
                     Text(
-                        "${dates.first().monthValue}/${dates.first().dayOfMonth}" +
-                            " ~ ${dates.last().monthValue}/${dates.last().dayOfMonth}",
+                        MatesHeader.periodLabel(dates.first(), dates.last(), today),
                         fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, softWrap = false,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     // `›`도 `‹`와 똑같이 꺼진다(v1.6.61). 종전엔 오른쪽만 무제한이라 연타하면
-                    // 몇십 년 뒤까지 갔다 — 공휴일표가 2026년치뿐이라 그쪽 값은 이미 틀린다
-                    // ([MatesViewModel.MAX_PERIOD]에 근거).
+                    // 몇십 년 뒤까지 갔다.
+                    // **한 번 더 막는 것이 공휴일표**(v1.7.7 A4): 다음 구간의 마지막 날이 표 밖이면
+                    // 12구간에 닿기 전이라도 거기서 멈춘다. 표 밖은 통상근무 휴무가 안 덮여
+                    // 설날·추석이 조용히 근무일로 그려진다([MatesViewModel.MAX_PERIOD]에 근거).
                     IconButton(
                         onClick = { viewModel.movePeriod(1) },
-                        enabled = period < MatesViewModel.MAX_PERIOD,
+                        enabled = period < MatesViewModel.MAX_PERIOD &&
+                            Bundled.holidayTableCovers(nextPeriodEnd),
                         modifier = Modifier.size(30.dp),
                     ) { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, "다음 구간", Modifier.size(22.dp)) }
                     Spacer(Modifier.width(4.dp))
@@ -442,13 +513,26 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     Text(
                         "${rows.size}명",
                         fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                        maxLines = 1, softWrap = false,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    Spacer(Modifier.weight(1f))
+                    /*
+                     * **동료 추가는 FAB이 아니라 상단바 버튼이다**(v1.7.7 D6).
+                     *
+                     * FAB은 `Scaffold` 위에 떠 있어 265명 목록을 **스크롤하는 동안 화면 한가운데
+                     * 행의 근무 칸을 덮었다**(배율 1.5 실측 — 김영득 행). 목록 아래 여백
+                     * (`contentPadding = 88.dp`)은 **끝까지 내렸을 때만** 듣는 처방이라 이 증상엔
+                     * 아무 효과가 없다. 그래서 여백을 늘리는 대신 **데이터를 가릴 자리 자체를
+                     * 없앴다** — 상단바는 목록 밖이라 무엇을 덮을 일이 없다.
+                     * 동작(`showAdd = true`)은 그대로다.
+                     */
+                    IconButton(
+                        onClick = { showAdd = true },
+                        modifier = Modifier.size(36.dp),
+                    ) { Icon(Icons.Default.PersonAdd, "동료 추가", Modifier.size(22.dp)) }
                 }
             }
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showAdd = true }) { Icon(Icons.Default.Add, "동료 추가") }
         },
     ) { padding ->
         Column(Modifier.padding(padding).fillMaxSize()) {
@@ -614,9 +698,30 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                     else -> EmptyHint("표시할 사람이 없습니다", "명단이 갱신되면 자동으로 나타납니다.")
                 }
             } else {
+                // 공휴일표 밖 구간 안내(v1.7.7 A4) — **달력의 `HolidayTableBanner`와 같은 문구**다.
+                // 두 화면이 다른 말을 하면 어느 쪽을 믿을지 알 수 없다.
+                // `›`가 표 경계에서 멈추므로 여기 걸리는 건 **오늘이 이미 표 끝자락**일 때(표가
+                // 2027년까지면 2027-12 즈음)뿐이지만, 그 때 아무 말도 안 하면 통상근무의 설날·추석이
+                // 조용히 근무일로 그려진다 — 조용히 틀리느니 모른다고 말한다.
+                holidayGapYear?.let { y ->
+                    Surface(
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
+                        shape = RoundedCornerShape(8.dp),
+                    ) {
+                        Text(
+                            "${y}년 공휴일 정보 없음 (직접 확인 필요)",
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            fontSize = 12.sp, fontWeight = FontWeight.ExtraBold,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
                 MatrixDateHeader(dates, m, hScroll, duty)
                 HorizontalDivider()
-                LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 88.dp)) {
+                // 아래 여백 88dp는 **FAB 자리였다** — 그 FAB을 상단바로 올렸으므로(v1.7.7 D6)
+                // 비켜 줄 것이 없다. 하단 탭바 인셋은 `AppRoot`의 `Scaffold`가 이미 빼 준다.
+                LazyColumn(state = listState) {
                     items(rows.size, key = { rows[it].key }) { i ->
                         val p = rows[i]
                         MatrixRow(p, dates, m, hScroll, duty,

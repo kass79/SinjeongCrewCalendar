@@ -85,10 +85,28 @@ internal object CalendarArgb {
     val ClayText = 0xFF4E463BL
     /** 보조 글자 — 요일 평일·취소선·잘림 점 */
     val ClayTextDim = 0xFF8C8172L
-    /** 일요일·공휴일 (지도 클레이 성수 빨강과 같은 값) */
-    val ClaySunday = 0xFFE4573FL
-    /** 토요일 (지도 클레이 운전취급역 파랑과 같은 값) */
-    val ClaySaturday = 0xFF3F87C9L
+    /**
+     * 일요일·공휴일 **글자**.
+     *
+     * v1.7.6 은 지도 클레이 성수 빨강(`#E4573F`)을 그대로 가져다 썼는데 **글자로는 너무 옅었다** —
+     * 크림 3.25:1 · 칸 바탕 3.60:1 · 날짜 배지 3.06:1 · 고른 칸 2.98:1 로 본문 AA(4.5:1) 미달이다
+     * (지도에서는 **역 점**이라 비문자 3:1 로 충분했다). 한 단계 진하게 내렸다(v1.7.7 A3).
+     *
+     * **실화면 실측**(에뮬 1080x2400/420dpi, `_미리보기_v1.7.7\G03_A3…`):
+     * 요일 줄(크림 `#F6F1E7`) **4.59:1** · 날짜 숫자(칸 맨 위 `#FEFCF6`) **5.04:1** ·
+     * **칸 그라데이션 맨 아래**(`#F5EFE4`) **4.52:1**.
+     *
+     * ⚠ **하한은 칸 밑동의 4.52:1 이다** — AA(4.5:1)를 0.02 차로 넘긴다. [ClayCell] 계열을
+     * 더 밝게 하면 **여기가 먼저 깨진다.** 재는 자리는 배지·칸 위여야 한다(크림만 재면 통과한다).
+     *
+     * ⚠ **글자 전용이다.** 칩 바탕([ClayDutyRest] 등)은 손대지 않는다 — 뜻이 바뀐다.
+     */
+    val ClaySunday = 0xFFC2402BL
+    /**
+     * 토요일 **글자**. [ClaySunday] 와 같은 이유로 `#3F87C9`(3.38:1)에서 내렸다 —
+     * 실측 요일 줄 **4.71:1** · 날짜 숫자 **5.17:1** · 칸 밑동 **4.63:1**.
+     */
+    val ClaySaturday = 0xFF2F6FA8L
     /** 오늘 테두리 */
     val ClayToday = 0xFF5CC98AL
     /** 오늘 날짜 배지 — 흰 글자가 살게 [ClayToday] 보다 진하다(5.3:1) */
@@ -119,6 +137,20 @@ internal object CalendarArgb {
     val ClayDutyOnStandby = 0xFF86660FL
     val ClayDutyBranch = 0xFFDCEEF3L
     val ClayDutyOnBranch = 0xFF1B6771L
+
+    /* ── 달력 위에 얹히는 배너 둘 — 클레이는 **밝은 판**이다(v1.7.7 A8) ─────────
+     * 종전엔 두 배너가 팔레트를 안 보고 `surfaceVariant`/`errorContainer` 를 그대로 써서,
+     * 앱이 다크인데 달력만 크림일 때 **이 둘만 어두운 판**으로 남았다
+     * (증거 `_최종점검_v1.7.6\F29b_확대_클레이다크_공지배너만_다크색.png`).
+     */
+    /** 공지 배너 바탕 — 크림 계열에서 한 톤 노랗게(공지는 눈에 띄어야 한다) */
+    val ClayNoticeBg = 0xFFFFF4DCL
+    /** 공지 배너 글자·아이콘 — 위 바탕에서 7.06:1 */
+    val ClayNoticeInk = 0xFF6B4E12L
+    /** 공휴일표 없음 안내 바탕 — 휴무 칩([ClayDutyRest])과 **같은 값**(경고 = 빨강 계열) */
+    val ClayWarnBg = 0xFFFBE4DCL
+    /** 공휴일표 없음 안내 글자 — [ClayDutyOnRest] 와 같은 값, 위 바탕에서 4.89:1 */
+    val ClayWarnInk = 0xFFB23A22L
 }
 
 /**
@@ -165,6 +197,14 @@ internal data class CalendarPalette(
     val corner: Color,
     /** 야간 초승달 */
     val moon: Color,
+    /** 관리자 공지 배너 바탕 (v1.7.7 A8) */
+    val noticeBg: Color,
+    /** 관리자 공지 배너 글자·아이콘 */
+    val noticeInk: Color,
+    /** 공휴일표 없음 안내 바탕 */
+    val warnBg: Color,
+    /** 공휴일표 없음 안내 글자 */
+    val warnInk: Color,
     /** 근무 종별 칩 — **뜻은 그대로**, 클레이는 채도만 낮춘 같은 색상군 */
     val duty: DutyColors,
     /** 날씨 칩이 어두운 판을 쓸까 — 클레이는 늘 밝은 판이다 */
@@ -210,6 +250,10 @@ internal val CLAY_PALETTE = CalendarPalette(
     accent = Color(CalendarArgb.ClayAccent),
     corner = Color(CalendarArgb.ClayAccent),
     moon = Color(CalendarArgb.ClayMoon),
+    noticeBg = Color(CalendarArgb.ClayNoticeBg),
+    noticeInk = Color(CalendarArgb.ClayNoticeInk),
+    warnBg = Color(CalendarArgb.ClayWarnBg),
+    warnInk = Color(CalendarArgb.ClayWarnInk),
     duty = CLAY_DUTY,
     darkChips = false,
 )
@@ -245,6 +289,11 @@ internal fun calendarPalette(style: CalendarStyle): CalendarPalette {
         corner = cs.primary,
         // 라이트/다크 모두 보이는 노랑 — 배경 밝기로 고른다(다이나믹 컬러에도 대응)
         moon = if (cs.surface.luminance() > 0.5f) Color(0xFFE09600) else Color(0xFFFFD54F),
+        // 배너 둘은 종전 값 그대로 — `NoticeBanner`·`HolidayTableBanner` 가 직접 쓰던 색이다(v1.7.7)
+        noticeBg = cs.surfaceVariant,
+        noticeInk = cs.onSurfaceVariant,
+        warnBg = cs.errorContainer,
+        warnInk = cs.onErrorContainer,
         duty = LocalDutyColors.current,
         darkChips = cs.surface.luminance() < 0.5f,
     )
