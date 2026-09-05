@@ -54,7 +54,9 @@ def build(spec):
     dur = float(spec["duration"])
     shots = spec["shots"]
     caps = spec["captions"]
-    end = spec.get("endcard", {})
+    end = dict(spec.get("endcard", {}))
+    if spec.get("cold_open"):   # 본편 맨 앞에 붙이는 티저: '본편에서 확인' CTA 없음
+        end["cta"] = ""
     src_w, src_h = spec.get("source_size", [1376, 768])
 
     # cap_scale: 자막 크기 배율 (1.0 기본, 1.25 = "큰 자막" 요청 시)
