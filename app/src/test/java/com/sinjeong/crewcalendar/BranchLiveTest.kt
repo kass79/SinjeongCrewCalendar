@@ -589,6 +589,60 @@ class BranchLiveTest {
     }
 
     /**
+     * **신정 입고는 양쪽에서 들어온다**(v1.7.2). 내선 `4xxx` 는 대림 쪽, 외선 `6xxx` 는 문래 쪽.
+     * 종전엔 대림 쪽 표만 있어 외선 입고가 통째로 안 잡혔다.
+     */
+    @Test
+    fun `입고는 내선 대림 쪽과 외선 문래 쪽 양쪽 8역까지`() {
+        val rows = BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"사당","trainNo":"4340","updnLine":"0","statnTnm":"신도림","trainSttus":"1"},""" +
+            """{"subwayId":"1002","statnNm":"아현","trainNo":"6341","updnLine":"1","statnTnm":"성수종착","trainSttus":"1"}]""")
+        val inbound = BranchLive.inboundFromPositions(rows)
+        assertEquals(listOf("4340", "6341"), inbound.map { it.trainNo }.sorted())
+        assertEquals(8 * 110, inbound.first { it.trainNo == "4340" }.etaSec)
+        // ⚠ `6341` 은 **행선이 아직 `성수종착`** 인데도 잡혀야 한다 — 접두가 먼저 말한다.
+        assertEquals(8 * 110, inbound.first { it.trainNo == "6341" }.etaSec)
+    }
+
+    /**
+     * 열번은 그 운행이 **끝내** 신정으로 들어간다는 뜻일 뿐, 지금 신도림 쪽으로 달린다는
+     * 뜻이 아니다. 자리·접두·`updnLine` 셋이 다 맞아야 입고다(2026-09-05 실호출로 잡은 자리).
+     */
+    @Test
+    fun `방향이 어긋난 입고 대역은 거부한다`() {
+        fun nos(json: String) =
+            BranchLive.inboundFromPositions(BranchLive.parsePositions(json)).map { it.trainNo }
+        // 4xxx(내선 입고)인데 외선 쪽(아현)에 있다
+        assertTrue(nos("""[{"subwayId":"1002","statnNm":"아현","trainNo":"4340","updnLine":"1","statnTnm":"신도림","trainSttus":"1"}]""").isEmpty())
+        // 대림에 있지만 updnLine=1(외선) — 신도림을 막 떠난 참이다(실호출 `8341`)
+        assertTrue(nos("""[{"subwayId":"1002","statnNm":"대림","trainNo":"8341","updnLine":"1","statnTnm":"성수종착","trainSttus":"1"}]""").isEmpty())
+        // 입고 대역도 아니고 행선도 신도림이 아니다
+        assertTrue(nos("""[{"subwayId":"1002","statnNm":"신림","trainNo":"2340","updnLine":"0","statnTnm":"성수종착","trainSttus":"1"}]""").isEmpty())
+        // 방배는 어느 쪽 8역에도 없다(실호출 `6333` — 신도림까지 19역)
+        assertTrue(nos("""[{"subwayId":"1002","statnNm":"방배","trainNo":"6333","updnLine":"1","statnTnm":"성수종착","trainSttus":"1"}]""").isEmpty())
+    }
+
+    /**
+     * 입고 ETA 는 **시간표를 먼저 본다**(지연 반영) — 못 찾거나 근사와 5분 넘게 어긋나면
+     * 근사 그대로 둔다. 라이브 `4340` 을 자산의 `2340` 으로 잇는 것이 [sameRun] 이다.
+     */
+    @Test
+    fun `입고 ETA 는 시간표가 있으면 그쪽을 쓴다`() {
+        // 신도림 = stationIdx 33. 내선(inout 1) `2340` 이 07:00:00 에 도착한다.
+        val tt = com.sinjeong.crewcalendar.domain.model.Line2Timetable.parse(
+            "1,1,25,2340,24600,24630\n1,1,33,2340,25200,25230")
+        val rows = BranchLive.parsePositions(
+            """[{"subwayId":"1002","statnNm":"사당","trainNo":"4340","updnLine":"0","statnTnm":"신도림","trainSttus":"1"}]""")
+        val approx = BranchLive.inboundFromPositions(rows)
+        assertEquals(880, approx[0].etaSec)
+        // 사당(24600) 도착이 60초 늦었다 → 신도림도 60초 늦게 25260. 지금 24660 → 600초 남음.
+        val refined = BranchLive.refineInbound(approx, tt, 1, 24660)
+        assertEquals(600, refined[0].etaSec)
+        // 시간표를 모르면 근사 그대로
+        assertEquals(880, BranchLive.refineInbound(approx, null, 1, 24660)[0].etaSec)
+    }
+
+    /**
      * 회송 열번(`59xx`)은 지선 선로를 타도 **승객이 못 탄다** — 편승 지도에서 뺀다.
      * 근거는 행로표(`RouteTable`): 지선 야간 다이아 꼬리 `5901`~`5907`(막차 입고)과
      * 본선 다이아 전반 첫 열번 `5922`·`5930`·`5949`·`5961`(신정기지 출고)이 전부 회송이다.

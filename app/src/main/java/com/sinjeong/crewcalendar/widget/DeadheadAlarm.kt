@@ -279,7 +279,8 @@ object DeadheadAlarm {
                     val delay = tt?.delayMinutes(
                         Line2Timetable.weekTagOf(d),
                         Line2Timetable.inoutOf(row.updnLine.trim() == "0"),
-                        row.trainNo, row.statnNm, row.trainSttus, sec,
+                        // 행선까지 넘겨야 시간표가 같은 운행을 찾는다(`8340` → `2340`, v1.7.2)
+                        row.trainNo, row.statnNm, row.trainSttus, sec, row.statnTnm,
                     )
                     liveLine(row, delay)
                 }

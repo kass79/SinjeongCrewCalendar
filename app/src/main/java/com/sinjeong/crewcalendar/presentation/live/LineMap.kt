@@ -36,6 +36,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -67,7 +68,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
+import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
+import com.sinjeong.crewcalendar.domain.model.sameRun
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -311,10 +314,22 @@ internal fun BranchLiveMap(
             ?.let { dutyTrainNumbers(it, date) }.orEmpty()
     }
 
+    /*
+     * 입고 ETA 를 **시간표로 다듬는다**(v1.7.2) — 근사(역 수 × 110초)는 지연을 모른다.
+     * 시간표는 자산이라 **API 호출이 안 늘고**, 못 찾으면 근사가 그대로 남는다.
+     */
+    val tt by produceState<Line2Timetable?>(null) {
+        value = withContext(Dispatchers.IO) { Line2TimetableLoader.get(ctx) }
+    }
+    val inbound = remember(snap.inbound, tt, now / 30_000) {
+        val (d, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
+        BranchLive.refineInbound(snap.inbound, tt, Line2Timetable.weekTagOf(d), sec)
+    }
+
     LineMapCard(
         onFullMap = { showFull = true },
         trains = snap.trains,
-        inbound = snap.inbound,
+        inbound = inbound,
         candidates = candidates,
         fetchedAtMillis = snap.fetchedAtMillis,
         nowMillis = now,
@@ -367,7 +382,11 @@ private fun LineMapCard(
         else no to (4f - minOf(4f - DEPOT_RUN_END, e * ((4f - DEPOT_RUN_END) / DEPOT_RUN_SEC)))
     }
     // 후보 중 **실제로 API 에 살아 있는** 첫 번째가 내 열차다. 없으면 없는 것이다.
-    val mine = candidates.firstNotNullOfOrNull { no -> trains.firstOrNull { it.trainNo == no } }
+    // ⚠ 잣대는 [sameRun] — 같은 운행이 다른 접두로 뜬다(v1.7.2, 본선 지도와 같은 함수).
+    // 지선 후보(`5xxx`)는 그 함수가 **정확히 같은 번호만** 받으므로 종전 동작 그대로다.
+    val mine = candidates.firstNotNullOfOrNull { no ->
+        trains.firstOrNull { sameRun(no, it.trainNo) }
+    }
 
     Card(
         shape = RoundedCornerShape(16.dp),

@@ -33,6 +33,29 @@ class Line2TimetableTest {
     @Test fun `전역출발은 직전 역 출발시각 기준`() { assertEquals(1, tt.delayMinutes(1, 1, "2006", "신촌", "3", 25230 + 60)) }
     @Test fun `빠르면 음수`() { assertEquals(-1, tt.delayMinutes(1, 1, "2006", "홍대입구", "1", 25200 - 60)) }
     @Test fun `모르는 열번은 null`() { assertNull(tt.delayMinutes(1, 1, "9999", "홍대입구", "1", 25200)) }
+
+    /**
+     * 자산 CSV 열번은 `2xxx` 인데 라이브는 `8340` 처럼 온다(v1.7.2 실측) — [sameRun] 으로 잇는다.
+     * 못 이으면 지연·다음 역·이동 속도가 **조용히 사라진다.**
+     */
+    @Test fun `접두가 달라도 같은 운행의 시간표를 찾는다`() {
+        assertEquals(2, tt.delayMinutes(1, 1, "8006", "홍대입구", "1", 25200 + 120))
+        assertEquals(2, tt.delayMinutes(1, 1, "4006", "홍대입구", "1", 25200 + 120))
+        assertEquals(90, tt.segmentSeconds(1, 1, "6006", "홍대입구"))
+    }
+
+    /** 지선 `5xxx` 는 본선 `25xx` 와 뒤 세 자리가 겹친다 — 행선이 본선 종착일 때만 받는다. */
+    @Test fun `접두 5 는 행선을 봐야 본선 운행으로 받는다`() {
+        assertNull(tt.delayMinutes(1, 2, "5513", "홍대입구", "1", 90000))
+        assertEquals(0, tt.delayMinutes(1, 2, "5513", "홍대입구", "1", 90000, "성수종착"))
+    }
+
+    /** 입고 안내가 쓰는 신도림 도착 시각 — 지나간 정차는 안 준다. */
+    @Test fun `역 도착 시각은 지금 이후 첫 번째`() {
+        assertEquals(25320, tt.arriveSecAt(1, 1, "8006", "신촌", 25200))
+        assertNull(tt.arriveSecAt(1, 1, "8006", "홍대입구", 25400))
+        assertNull(tt.arriveSecAt(1, 1, "8006", "신도림", 25200))
+    }
     /**
      * v1.6.88 안전장치 — 기기 시계가 틀리면(GMT 에뮬 실측 "534분 빠름") 시간표와 몇 시간씩
      * 어긋난다. 그런 숫자는 보여 주지 않는 편이 낫다. **경계 120분은 살려 둔다.**

@@ -95,6 +95,7 @@ import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.MyTrain
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
+import com.sinjeong.crewcalendar.domain.model.sameRun
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -425,9 +426,25 @@ internal fun MainLineMapDialog(
         duty?.let { myTrainAt(it, date, LocalDateTime.now()) }
     }
     val shown = snap.mainTrains
-    // 후보 중 **실제로 API 에 살아 있는** 첫 번째가 내 열차다(추정하지 않는다 — MyTrain KDoc)
-    val mineMark = remember(candidates, shown) {
-        candidates.firstNotNullOfOrNull { no -> shown.firstOrNull { it.trainNo == no } }
+    /*
+     * 후보 중 **실제로 API 에 살아 있는** 첫 번째가 내 열차다(추정하지 않는다 — MyTrain KDoc).
+     *
+     * ⚠ 견주는 잣대는 [sameRun] 이다(v1.7.2) — 행로표의 `2340` 이 API 에는 **`8340`** 으로
+     * 뜬다. 글자 그대로 견주던 종전 코드는 사용자 실측에서 `44` 다이아를 통째로 놓쳤다.
+     * [mineRoute] 는 그때 맞은 **행로표 번호**(헤더가 괄호로 같이 보여 준다).
+     */
+    val minePair = remember(candidates, shown) {
+        candidates.firstNotNullOfOrNull { no ->
+            shown.firstOrNull { sameRun(no, it.trainNo, it.destName) }?.let { no to it }
+        }
+    }
+    val mineMark = minePair?.second
+    val mineRoute = minePair?.first
+    // 내 열번이 **여럿 살아 있으면 전부 노랑**(헤더·칩은 첫 번째만). 야간처럼 전·후반 열번이
+    // 같이 굴러가는 시간대엔 두 대가 동시에 뜬다 — 하나만 칠하면 나머지가 남의 열차로 보인다.
+    val mineNos = remember(candidates, shown) {
+        shown.filter { m -> candidates.any { sameRun(it, m.trainNo, m.destName) } }
+            .mapTo(HashSet()) { it.trainNo }
     }
     val eff = filter
         ?: mineMark?.let { if (it.inner) DirFilter.INNER else DirFilter.OUTER }
@@ -496,12 +513,12 @@ internal fun MainLineMapDialog(
                         // ⚠ **회전각을 안으로 내려 준다**(v1.6.91). 캔버스는 자기가 돌아간
                         // 줄 모르므로, 열번·행선판 글자를 화면 기준으로 바로 세우려면
                         // 그리는 쪽이 이 값을 알아야 한다([locoTextDeg]).
-                        CabScreen(ch, inset, now, shown, mine, mineMark, candidates,
+                        CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, candidates,
                             snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss,
                             mapDeg = 90f, pal = pal)
                     }
                 } else {
-                    CabScreen(ch, inset, now, shown, mine, mineMark, candidates,
+                    CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, candidates,
                         snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss,
                         mapDeg = 0f, pal = pal)
                 }
@@ -514,7 +531,12 @@ internal fun MainLineMapDialog(
 @Composable
 private fun CabScreen(
     ch: Dp, inset: PaddingValues, nowMillis: Long,
-    trains: List<MainTrainMark>, mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
+    trains: List<MainTrainMark>, mine: MyTrain?, mineMark: MainTrainMark?,
+    /** [mineMark] 를 맞힌 **행로표 번호** — API 번호와 다를 때만 헤더가 괄호로 보여 준다. */
+    mineRoute: String?,
+    /** 지금 살아 있는 **내 열번 전부**(API 번호). 전부 노란 기관차로 그린다. */
+    mineNos: Set<String>,
+    candidates: List<String>,
     error: String?, picked: String?, onPick: (String?) -> Unit,
     eff: DirFilter, onFilter: (DirFilter) -> Unit, onDismiss: () -> Unit,
     /** 지도 전체 회전 — 세로 창 90f. 글자를 바로 세우는 데 쓴다([drawLoco] `mapDeg`). */
@@ -566,8 +588,12 @@ private fun CabScreen(
         if (m == null || t == null) null to null else {
             val (d, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
             val w = Line2Timetable.weekTagOf(d); val io = Line2Timetable.inoutOf(m.inner)
-            val dl = t.delayMinutes(w, io, m.trainNo, m.statnNm, m.trainSttus, sec)
-            dl to dl?.let { t.secondsToNextStop(w, io, m.trainNo, m.statnNm, it, sec) }
+            // 시간표에는 `2340` 만 있고 API 는 `8340` 을 준다 — 행선까지 넘겨야
+            // [Line2Timetable] 이 같은 운행을 찾는다(지선 `5xxx` 충돌 가림, v1.7.2).
+            val dl = t.delayMinutes(w, io, m.trainNo, m.statnNm, m.trainSttus, sec, m.destName)
+            dl to dl?.let {
+                t.secondsToNextStop(w, io, m.trainNo, m.statnNm, it, sec, m.destName)
+            }
         }
     }
 
@@ -575,13 +601,12 @@ private fun CabScreen(
     // ⚠ 여기서 한 번만 거른다(v1.6.94). 상태바가 "왜 비었는지"를 말하려면 **거른 뒤**가
     // 비었는지(이 방향만 없다)와 **거르기 전**이 비었는지(진짜 없다)를 둘 다 알아야 한다.
     val drawn = trains.filter {
-        eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
-            it.trainNo == mineMark?.trainNo
+        eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner || it.trainNo in mineNos
     }
     val emptyMsg = mainEmptyReason(trains.isEmpty(), drawn.isEmpty(), error)
 
     Column(Modifier.fillMaxSize().padding(inset)) {
-        CabHeader(nowMillis, mineMark, candidates, delay, nextSec, big, pal, onDismiss)
+        CabHeader(nowMillis, mineMark, mineRoute, candidates, delay, nextSec, big, pal, onDismiss)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             val d = LocalDensity.current
             // 지도 안 글자배율 상한 — 그림은 dp, 글자만 sp라 배율을 키우면 역 이름이 넘친다.
@@ -619,6 +644,7 @@ private fun CabScreen(
                             a.animateTo(goal, tween(1000, easing = LinearEasing))
                             val seg = tt?.segmentSeconds(
                                 weekTag, Line2Timetable.inoutOf(t.inner), t.trainNo, t.statnNm,
+                                dest = t.destName,
                             ) ?: 120
                             val dir = if (t.inner) 1f else -1f
                             val nextStop = if (t.inner) floor(goal) + 1f else ceil(goal) - 1f
@@ -658,7 +684,7 @@ private fun CabScreen(
                         }
                     }
                 ) {
-                    hit = drawCabLoop(tm, placed, mineMark?.trainNo, big, picked,
+                    hit = drawCabLoop(tm, placed, mineNos, big, picked,
                         labelSp, otherK, phase, mapDeg, pal)
                 }
             }
@@ -727,10 +753,15 @@ private fun shortNos(nos: List<String>, take: Int = 2): String =
  * 그 두 토막만 조용히 빠진다(없는 값을 지어내지 않는다 — [MyTrain] KDoc 과 같은 규칙).
  */
 private fun mineHead(
-    mineMark: MainTrainMark?, candidates: List<String>, delay: Int?, nextSec: Int?,
+    mineMark: MainTrainMark?, mineRoute: String?, candidates: List<String>,
+    delay: Int?, nextSec: Int?,
 ): String? = when {
     mineMark != null ->
-        "내 열차 " + mineMark.trainNo + " · " + (if (mineMark.inner) "내선" else "외선") +
+        // 열번은 **API 번호 그대로**다(`8340`). 행로표와 다를 때만 괄호로 같이 적는다 —
+        // 승무원이 지도에서 보는 숫자와 행로표 숫자가 다른 이유를 화면이 스스로 말해야 한다(v1.7.2).
+        "내 열차 " + mineMark.trainNo +
+            (mineRoute?.takeIf { it != mineMark.trainNo }?.let { "(행로표 $it)" }.orEmpty()) +
+            " · " + (if (mineMark.inner) "내선" else "외선") +
             delay?.let {
                 when {
                     it > 0 -> " · +${it}분 지연"
@@ -812,7 +843,7 @@ private val HEAD_LADDER = listOf(
  */
 @Composable
 private fun CabHeader(
-    nowMillis: Long, mineMark: MainTrainMark?, candidates: List<String>,
+    nowMillis: Long, mineMark: MainTrainMark?, mineRoute: String?, candidates: List<String>,
     delay: Int?, nextSec: Int?, big: Boolean, pal: MapPalette, onDismiss: () -> Unit,
 ) {
     val t = remember(nowMillis / 1_000) {
@@ -823,7 +854,7 @@ private fun CabHeader(
     val clockSp = if (big) 14f else 11.5f
     // 크림 바탕에서는 노랑이 안 보인다 — 팔레트가 스타일에 맞는 강조색을 준다.
     val mineColor = if (mineMark != null) pal.mineText else pal.dim
-    val head = mineHead(mineMark, candidates, delay, nextSec)
+    val head = mineHead(mineMark, mineRoute, candidates, delay, nextSec)
     val tm = rememberTextMeasurer()
 
     fun build(s: HeadSpec): Pair<AnnotatedString, TextStyle> {
@@ -1372,7 +1403,8 @@ private fun DrawScope.layoutLabels(
 private fun DrawScope.drawCabLoop(
     tm: TextMeasurer,
     trains: List<Pair<MainTrainMark, Float>>,
-    mineNo: String?,
+    /** 지금 살아 있는 **내 열번 전부**(API 번호) — 전부 노란 기관차다(v1.7.2). */
+    mineNos: Set<String>,
     big: Boolean,
     picked: String?,
     /** 역 이름 크기 — 방향 필터가 켜져 있으면 커진다([CabScreen]) */
@@ -1538,8 +1570,8 @@ private fun DrawScope.drawCabLoop(
     val centers = mutableMapOf<String, Offset>()
     /** 계단으로 한 칸 이상 올라간 열차 — 발밑에 **받침선**을 깐다(v1.6.98). */
     val raised = mutableSetOf<String>()
-    for ((t, pos) in trains.sortedByDescending { it.first.trainNo == mineNo }) {
-        val isMine = t.trainNo == mineNo
+    for ((t, pos) in trains.sortedByDescending { it.first.trainNo in mineNos }) {
+        val isMine = t.trainNo in mineNos
         val head = headOf(t.trainNo)
         val (base, out) = spot(pos)
         /*
@@ -1589,7 +1621,7 @@ private fun DrawScope.drawCabLoop(
      * 진짜 선로가 이미 그 자리에 있다.
      */
     spots.filter { it.first.trainNo in raised }.forEach { (t, c, out) ->
-        val k = if (t.trainNo == mineNo) locoScale else otherScale
+        val k = if (t.trainNo in mineNos) locoScale else otherScale
         val half = (LOCO_LEN * k * 0.5f).dp.toPx()
         val foot = (LOCO_BOX_H / 2f * k).dp.toPx()
         // 바퀴 자리 = 중심에서 **선로 쪽**(-out)으로 반높이. 선분은 선로와 나란하다(out 에 수직).
@@ -1616,7 +1648,7 @@ private fun DrawScope.drawCabLoop(
         // 아예 안 보인다(v1.7.0 실측: 남색에서는 하늘색 점이 잘 보이던 자리다).
         if (t.trainNo !in drawnNos) drawCircle(
             when {
-                t.trainNo == mineNo -> if (pal.clay) pal.mineInk else pal.mineBody
+                t.trainNo in mineNos -> if (pal.clay) pal.mineInk else pal.mineBody
                 // 열번색(빨강)은 정차 빨간 점과 헷갈린다 — 바퀴색이 "너무 작아 못 그린 열차"로 읽힌다.
                 pal.clay -> pal.wheel
                 else -> pal.otherBody
@@ -1624,7 +1656,7 @@ private fun DrawScope.drawCabLoop(
             2.5.dp.toPx(), centers.getValue(t.trainNo))
     }
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 열차에 가리면 "표시가 안 된다"는 말이 된다.
-    val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
+    val (mineRows, others) = spots.partition { it.first.trainNo in mineNos }
     // 다른 열차 — 같은 기관차, **몸통만 짧고**(otherK) 연기·물결은 없다.
     // `railTowards = -out` — 바퀴는 늘 선로 쪽이다(v1.6.96 규칙 4).
     /*
@@ -1674,7 +1706,7 @@ private fun DrawScope.drawCabLoop(
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
     picked?.let { no -> centers[no]?.let { c ->
         trains.firstOrNull { it.first.trainNo == no }?.let { (t, _) ->
-            drawTip(tm, c, t, no == mineNo, pal)
+            drawTip(tm, c, t, no in mineNos, pal)
         }
     } }
     return hits

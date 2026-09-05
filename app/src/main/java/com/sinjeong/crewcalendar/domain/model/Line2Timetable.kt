@@ -21,8 +21,37 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
 
     fun stops(weekTag: Int, inout: Int, trainNo: String): List<Stop> = rows[Key(weekTag, inout, trainNo)].orEmpty()
 
-    private fun stopAt(weekTag: Int, inout: Int, trainNo: String, stationName: String): Pair<List<Stop>, Int>? {
-        val list = stops(weekTag, inout, trainNo)
+    /** `(주중구분, 내외선, 뒤 세 자리)` → 그 운행으로 적힌 자산 열번들. [runStops] 의 색인. */
+    private val byRun: Map<Triple<Int, Int, String>, List<String>> =
+        rows.keys.groupBy({ Triple(it.weekTag, it.inout, runKey(it.trainNo)) }, { it.trainNo })
+
+    /**
+     * 이 **운행**의 정차 목록 — 라이브 열번의 **접두가 달라도** 찾는다(v1.7.2).
+     *
+     * ⚠ 자산 CSV(`assets/timetable/line2.csv`)의 열번은 `1xxx`(성수지선)·`2xxx`(본선)·
+     * `5xxx`(신정지선)뿐이다(2026-09-05 grep: `2340` 132행 · `4340`·`6340`·`8340` **0행**).
+     * 라이브 `8340` 을 글자 그대로 찾으면 늘 빈손이라 **지연·다음 역·이동 속도가 조용히
+     * 사라진다.** 그래서 [sameRun] 으로 같은 운행을 찾는다.
+     *
+     * 후보가 여럿이면(지선 `5501` ↔ 본선 `2501` 처럼) **[nowSec] 에 가장 가까운 행**.
+     * `nowSec < 0` 이면 첫 번째.
+     */
+    private fun runStops(weekTag: Int, inout: Int, trainNo: String, dest: String?, nowSec: Int): List<Stop> {
+        stops(weekTag, inout, trainNo).let { if (it.isNotEmpty()) return it }
+        val cands = byRun[Triple(weekTag, inout, runKey(trainNo))].orEmpty()
+            .filter { sameRun(it, trainNo, dest) }
+        if (cands.isEmpty()) return emptyList()
+        if (cands.size == 1 || nowSec < 0) return stops(weekTag, inout, cands.first())
+        return cands.map { stops(weekTag, inout, it) }
+            .minByOrNull { l -> l.minOf { kotlin.math.abs(eventSec(it) - nowSec) } }
+            .orEmpty()
+    }
+
+    private fun stopAt(
+        weekTag: Int, inout: Int, trainNo: String, stationName: String,
+        nowSec: Int = -1, dest: String? = null,
+    ): Pair<List<Stop>, Int>? {
+        val list = runStops(weekTag, inout, trainNo, dest, nowSec)
         val idx = stationIdx(stationName)
         val i = list.indexOfFirst { it.stationIdx == idx }
         return if (i < 0) null else list to i
@@ -38,8 +67,11 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
      * 나왔다면 기기 시계가 틀렸거나(GMT 에뮬 실측 "534분 빠름") 시간표 판이 다이아와 어긋난
      * 것이고, 둘 다 숫자를 보여 주는 쪽이 안 보여 주는 쪽보다 나쁘다.
      */
-    fun delayMinutes(weekTag: Int, inout: Int, trainNo: String, stationName: String, trainSttus: String, nowSec: Int): Int? {
-        val (list, i) = stopAt(weekTag, inout, trainNo, stationName) ?: return null
+    fun delayMinutes(
+        weekTag: Int, inout: Int, trainNo: String, stationName: String, trainSttus: String,
+        nowSec: Int, dest: String? = null,
+    ): Int? {
+        val (list, i) = stopAt(weekTag, inout, trainNo, stationName, nowSec, dest) ?: return null
         val s = list[i]
         fun pick(primary: Int, fallback: Int) = if (primary >= 0) primary else fallback.takeIf { it >= 0 }
         val event = when (trainSttus) {
@@ -53,22 +85,50 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
     }
 
     /** 다음 역 도착까지 남은 **초**(지연을 그대로 얹는다). 0 이하면 곧 도착. API 호출 0회. */
-    fun secondsToNextStop(weekTag: Int, inout: Int, trainNo: String, stationName: String, delayMin: Int, nowSec: Int): Int? {
-        val (list, i) = stopAt(weekTag, inout, trainNo, stationName) ?: return null
+    fun secondsToNextStop(
+        weekTag: Int, inout: Int, trainNo: String, stationName: String, delayMin: Int,
+        nowSec: Int, dest: String? = null,
+    ): Int? {
+        val (list, i) = stopAt(weekTag, inout, trainNo, stationName, nowSec, dest) ?: return null
         val next = list.getOrNull(i + 1) ?: return null
         val arrive = if (next.arriveSec >= 0) next.arriveSec else next.leftSec
         if (arrive < 0) return null
         return arrive + delayMin * 60 - nowSec
     }
 
+    /**
+     * 이 운행이 **[stationName] 에 도착**하는 시각(자정 기준 초) — [nowSec] 이후 첫 번째.
+     * 지연은 안 얹는다(부르는 쪽이 [delayMinutes] 로 더한다). 모르면 null.
+     *
+     * 신정 입고 안내가 "역 수 × 110초" 근사 대신 이 값을 먼저 쓴다(v1.7.2).
+     */
+    fun arriveSecAt(
+        weekTag: Int, inout: Int, trainNo: String, stationName: String, nowSec: Int,
+        dest: String? = null,
+    ): Int? {
+        val idx = stationIdx(stationName).takeIf { it >= 0 } ?: return null
+        // ⚠ **지나간 정차는 버린다.** 순환선 한 운행이 같은 역을 두 번 스치는 판이 있어
+        // 그냥 첫 행을 잡으면 이미 지난 시각으로 "0분 후"를 말한다. 60초는 도착 직후 여유.
+        return runStops(weekTag, inout, trainNo, dest, nowSec)
+            .filter { it.stationIdx == idx }
+            .map(::eventSec).filter { it >= nowSec - 60 }
+            .minOrNull()
+    }
+
     /** 이 역 → 다음 역 소요 **초**. 지도의 열차 전진 속도가 이 값을 쓴다. 모르면 120. */
-    fun segmentSeconds(weekTag: Int, inout: Int, trainNo: String, stationName: String): Int {
-        val (list, i) = stopAt(weekTag, inout, trainNo, stationName) ?: return 120
+    fun segmentSeconds(
+        weekTag: Int, inout: Int, trainNo: String, stationName: String,
+        nowSec: Int = -1, dest: String? = null,
+    ): Int {
+        val (list, i) = stopAt(weekTag, inout, trainNo, stationName, nowSec, dest) ?: return 120
         val here = list[i]; val next = list.getOrNull(i + 1) ?: return 120
         val from = if (here.leftSec >= 0) here.leftSec else here.arriveSec
         val to = if (next.arriveSec >= 0) next.arriveSec else next.leftSec
         return if (from >= 0 && to > from) to - from else 120
     }
+
+    /** 이 정차의 대표 시각 — 도착이 있으면 도착, 없으면(시·종착역) 출발. 둘 다 없으면 −1. */
+    private fun eventSec(s: Stop): Int = if (s.arriveSec >= 0) s.arriveSec else s.leftSec
 
     companion object {
         /** [delayMinutes] 가 믿어 주는 지연의 한계(분). 넘으면 시계·시간표가 어긋난 것으로 보고 표시를 접는다. */

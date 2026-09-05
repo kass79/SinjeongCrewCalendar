@@ -2,6 +2,10 @@ package com.sinjeong.crewcalendar.presentation.live
 
 import android.util.Log
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
+import com.sinjeong.crewcalendar.domain.model.Line2Timetable
+import com.sinjeong.crewcalendar.domain.model.depotBoundInner
+import com.sinjeong.crewcalendar.domain.model.isDepotBoundSinjeong
+import com.sinjeong.crewcalendar.domain.model.sameRun
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -71,8 +75,19 @@ internal data class TrainMark(
     val statusText: String,
 )
 
-/** 본선에서 신도림으로 들어오는 입고 열차 */
-internal data class InboundTrain(val trainNo: String, val etaSec: Int)
+/**
+ * 본선에서 신도림으로 들어오는 **신정기지 입고** 열차.
+ *
+ * [statnNm]·[trainSttus]·[inner] 는 시간표로 ETA 를 다듬을 때만 쓴다([BranchLive.refineInbound]).
+ */
+internal data class InboundTrain(
+    val trainNo: String,
+    val etaSec: Int,
+    val statnNm: String = "",
+    val trainSttus: String = "",
+    val inner: Boolean = true,
+    val destName: String = "",
+)
 
 /** 실시간 위치 1건 (realtimePosition 스키마 중 쓰는 필드만) */
 internal data class PositionRow(
@@ -449,27 +464,60 @@ internal object BranchLive {
         }.distinctBy { it.trainNo }
 
     /**
-     * 본선 → 신도림 입고 열차: **남은 역 수 × 110초**로 ETA 근사.
+     * 신도림까지 **남은 역 수**와 그 자리로 오려면 **내선이어야 하는가**.
      *
-     * ⚠ v1.6.91 에서 신림(4역)까지였던 것을 **사당(8역)까지** 늘렸다. 창만 900초로 넓히면
-     * 아무것도 안 바뀐다 — 4역이면 최대 440초라 종전 600초 창에 **이미 다 들어왔다.**
-     * 15분(900초)을 실제로 채우려면 8역(880초)까지 봐야 한다(사용자: *"15분 이내로 .."*).
-     * 역 순서는 [Line2Stations.MAIN] 기준: 사당 → 낙성대 → 서울대입구 → 봉천 → 신림 →
-     * 신대방 → 구로디지털단지 → 대림 → 신도림.
+     * 신도림은 양쪽에서 들어온다([Line2Stations.MAIN] 순서 기준) —
+     *  · **내선**(인덱스 증가, 신정 도착 `4xxx`): 사당 → 낙성대 → 서울대입구 → 봉천 → 신림 →
+     *    신대방 → 구로디지털단지 → 대림 → **신도림**
+     *  · **외선**(인덱스 감소, 신정 도착 `6xxx`): 아현 → 이대 → 신촌 → 홍대입구 → 합정 →
+     *    당산 → 영등포구청 → 문래 → **신도림**
+     *
+     * ⚠ v1.7.2 에서 **외선 8역을 채웠다.** 종전엔 내선 쪽만 있어 `6xxx` 입고가 통째로 안 잡혔다.
+     * 양쪽 다 8역까지인 이유는 창이 15분(900초)이고 근사가 역당 110초라 **9역(990초)은
+     * 어차피 창 밖**이기 때문이다.
      */
-    private val MAINLINE_AWAY = mapOf(
-        "대림" to 1, "구로디지털단지" to 2, "신대방" to 3, "신림" to 4,
-        "봉천" to 5, "서울대입구" to 6, "낙성대" to 7, "사당" to 8,
+    private val MAINLINE_AWAY: Map<String, Pair<Int, Boolean>> = mapOf(
+        "대림" to (1 to true), "구로디지털단지" to (2 to true), "신대방" to (3 to true),
+        "신림" to (4 to true), "봉천" to (5 to true), "서울대입구" to (6 to true),
+        "낙성대" to (7 to true), "사당" to (8 to true),
+        "문래" to (1 to false), "영등포구청" to (2 to false), "당산" to (3 to false),
+        "합정" to (4 to false), "홍대입구" to (5 to false), "신촌" to (6 to false),
+        "이대" to (7 to false), "아현" to (8 to false),
     )
 
+    /**
+     * 본선 → 신도림 **신정기지 입고** 열차: 남은 역 수 × 110초로 ETA 근사, 15분(900초) 창.
+     *
+     * ## 판정이 왜 넓어졌나 (v1.7.2)
+     *
+     * 종전 잣대는 `statnTnm == "신도림"` 하나였다. 그런데 **행선 필드는 늦게 바뀐다** —
+     * 2026-09-05 19:59 실호출 36대 중 본선 34대가 **전부 `성수종착`** 이었다(입고 대역인
+     * `6333` 도 그랬다). 행선만 보면 입고 열차를 통째로 놓친다.
+     *
+     * 그래서 **접두**를 먼저 본다: `4xxx`(내선 신정 도착)·`6xxx`(외선 신정 도착)이면 입고다
+     * ([isDepotBoundSinjeong]). 행선이 이미 신도림으로 바뀐 열차도 종전대로 받는다.
+     *
+     * ⚠ **접두와 방향이 어긋나면 거부한다.** 열번은 그 운행이 *끝내* 신정으로 들어간다는
+     * 뜻일 뿐 지금 신도림 쪽으로 달린다는 뜻이 아니다 — 같은 실호출에서 `6333` 은 **방배**에
+     * 있었고(신도림까지 19역), `8341` 은 대림에 있었지만 `updnLine=1`(외선)이라 신도림을
+     * 막 떠난 참이었다. 자리(내선 쪽/외선 쪽) · 접두 · `updnLine` 셋이 다 맞아야 입고다.
+     */
     internal fun inboundFromPositions(rows: List<PositionRow>): List<InboundTrain> =
         rows.asSequence()
             .filter { it.subwayId == BranchLine.SUBWAY_ID_LINE2 }
-            .filter { norm(it.statnTnm) == "신도림" && norm(it.statnNm) in MAINLINE_AWAY }
-            .map { r ->
-                val away = MAINLINE_AWAY[norm(r.statnNm)] ?: 1
-                InboundTrain(r.trainNo,
-                    (away * 110 - if (r.trainSttus == "2") 40 else 0).coerceAtLeast(30))
+            .mapNotNull { r ->
+                val (away, innerSide) = MAINLINE_AWAY[norm(r.statnNm)] ?: return@mapNotNull null
+                if (!isDepotBoundSinjeong(r.trainNo) && norm(r.statnTnm) != "신도림")
+                    return@mapNotNull null
+                depotBoundInner(r.trainNo)?.let { if (it != innerSide) return@mapNotNull null }
+                if (r.updnLine.isNotBlank() && (r.updnLine.trim() == "0") != innerSide)
+                    return@mapNotNull null
+                InboundTrain(
+                    r.trainNo,
+                    (away * 110 - if (r.trainSttus == "2") 40 else 0).coerceAtLeast(30),
+                    statnNm = norm(r.statnNm), trainSttus = r.trainSttus,
+                    inner = innerSide, destName = r.statnTnm,
+                )
             }
             // 15분(900초) 이내만 남긴다. ⚠ v1.6.91 에서 10분 → **15분** — 사용자 요청
             // *"입고 열차정보 없앤건 아니지? 15분 이내로 .."*. 칩 문구는 그대로다.
@@ -477,6 +525,31 @@ internal object BranchLive {
             .distinctBy { it.trainNo }
             .sortedBy { it.etaSec }
             .toList()
+
+    /**
+     * 입고 ETA 를 **시간표의 신도림 도착 시각**으로 다듬는다(v1.7.2) — 지연이 반영된다.
+     *
+     * 근사(역 수 × 110초)는 지연을 모른다. 시간표에서 그 운행의 신도림 도착을 찾을 수 있으면
+     * `도착시각 + 지연 − 지금` 을 쓰고, 못 찾거나 값이 **터무니없으면 근사 그대로 둔다.**
+     *
+     * ⚠ 라이브 열번(`4340`)은 자산 CSV 에 없다 — 같은 운행의 `2340` 을 [Line2Timetable] 이
+     * [sameRun] 으로 찾아 준다. 창(900초)은 근사로 이미 좁혀 놓은 뒤라 여기서 다시 안 건다.
+     */
+    internal fun refineInbound(
+        inbound: List<InboundTrain>, tt: Line2Timetable?, weekTag: Int, nowSec: Int,
+    ): List<InboundTrain> {
+        if (tt == null || inbound.isEmpty()) return inbound
+        return inbound.map { t ->
+            val io = Line2Timetable.inoutOf(t.inner)
+            val arrive = tt.arriveSecAt(weekTag, io, t.trainNo, "신도림", nowSec, t.destName)
+                ?: return@map t
+            val delay = tt.delayMinutes(
+                weekTag, io, t.trainNo, t.statnNm, t.trainSttus, nowSec, t.destName) ?: 0
+            val eta = arrive + delay * 60 - nowSec
+            // 근사와 5분 넘게 어긋나면 다른 바퀴(순환선이라 같은 역을 또 지난다)를 잡은 것이다.
+            if (eta in 0..1200 && kotlin.math.abs(eta - t.etaSec) <= 300) t.copy(etaSec = eta) else t
+        }.sortedBy { it.etaSec }
+    }
 
     /**
      * 위치 API(역 단위) + 도착 API(초 단위)를 융합해 **역 [at] 접근 상행 열차**를 정밀화.
@@ -711,7 +784,10 @@ internal object BranchLive {
      * 지도 폴링과 같은 키 로테이션을 타고 호출은 딱 한 번이다(하루 한도에 실질적 영향 없음).
      */
     suspend fun locate(trainNos: List<String>): PositionRow? =
-        fetchPositions().getOrNull()?.firstOrNull { it.trainNo in trainNos }
+        fetchPositions().getOrNull()?.firstOrNull { row ->
+            // ⚠ 글자 그대로 견주지 않는다 — 같은 운행이 `2340`·`8340` 처럼 다른 접두로 뜬다(v1.7.2).
+            trainNos.any { sameRun(it, row.trainNo, row.statnTnm) }
+        }
 
     private suspend fun fetchArrivals(station: String) =
         fetch("realtimeStationArrival/0/12/${URLEncoder.encode(station, "UTF-8")}").map(::parseArrivals)
