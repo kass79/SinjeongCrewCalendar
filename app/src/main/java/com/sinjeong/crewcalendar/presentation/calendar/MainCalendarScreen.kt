@@ -10,6 +10,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -335,6 +336,7 @@ fun MainCalendarScreen(
                         onChangeDuty = { viewModel.openDutyChange(day.date) },
                         onRevert = { viewModel.changeDuty(day.date, null) },
                         onClose = { panelEpochDay = null },
+                        recentMemos = viewModel.recentMemos.collectAsStateWithLifecycle().value,
                         compact = false,
                         // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
                         // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다.
@@ -389,6 +391,7 @@ fun MainCalendarScreen(
                     onChangeDuty = { viewModel.openDutyChange(date) },
                     onRevert = { viewModel.changeDuty(date, null) },
                     onClose = { viewModel.selectDate(null) },
+                    recentMemos = viewModel.recentMemos.collectAsStateWithLifecycle().value,
                     modifier = Modifier.verticalScroll(scroll),
                 )
             }
@@ -777,6 +780,16 @@ private fun HolidayTag(name: String, size: TextUnit, color: Color, modifier: Mod
     )
 }
 
+/**
+ * 달력 칸 메모가 **처음 시도하는 줄 수**(v1.6.99). 실제로 보이는 줄 수는 칸에 남은 높이가
+ * 정한다 — [DayCell] 이 여기서 시작해 마지막 줄이 상자 밑을 넘으면 한 줄씩 줄여 내려온다.
+ *
+ * 8 인 근거(에뮬 1080x2400/420dpi, 5주 달): 출근시각 아래 남는 높이가 **86dp**, 폰 메모
+ * 한 줄이 `9.5sp × 1.2 = 11.4dp` 라 배율 1.0에서 **7.5줄**이 든다. 배율 1.5면 17.1dp라
+ * 5줄이고, 그때는 자동으로 5까지 내려간다. 더 키워 봐야 첫 배치만 헛돌아 8이 상한이다.
+ */
+private const val MEMO_MAX_LINES = 8
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun DayCell(
@@ -800,7 +813,9 @@ private fun DayCell(
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
     val signOnSize = if (big) 8.sp else 7.sp
-    val memoSize = if (big) 9.5.sp else 8.sp
+    // 메모는 v1.6.99에서 **한 단계 키웠다**(폰 8→9.5 / 펼침 9.5→11sp). 사용자:
+    // *"메모 한 내용이 좀 더 보일 수있게 가능?"* — 줄 수 상한도 같이 풀었다(아래 [MEMO_MAX_LINES]).
+    val memoSize = if (big) 11.sp else 9.5.sp
 
     // 근무 저장된 칸의 연녹색(v1.6.69 사용자 요청 — 참고 앱의 "저장된 근무는 바탕이 연녹색").
     // 새 색을 만들지 않고 앱 고유색 `primaryContainer`를 얹는다: 라이트는 #A8F2C1 45% → 연녹색,
@@ -812,8 +827,7 @@ private fun DayCell(
     val baseBg = if (frozen) frozenBg else plainBg
 
     // **메모가 다 안 보일 때만** 켜지는 점(v1.6.82). 메모 [Text]가 배치될 때 스스로 정한다.
-    // 두 줄이 통째로 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
-    // 칸 폭이 54dp(접힘)라 9.5sp 두 줄이면 한글 12~14자쯤에서 갈린다(실측은 커밋 메시지 표).
+    // 다 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
     var memoCut by remember(day.memo, height, big) { mutableStateOf(false) }
 
     Column(
@@ -988,19 +1002,20 @@ private fun DayCell(
                 color = duty.sunday,
             )
         }
-        // 메모 — **자리가 남으면 두 줄**, 아니면 한 줄 말줄임 (v1.6.82 사용자 요청 "개인 일정").
+        // 메모 — **남는 높이만큼 여러 줄** (v1.6.82 "개인 일정" · v1.6.99 줄 수 상한 해제).
         //
         // 줄 수를 dp 산수로 미리 정하지 않고 **남은 높이에 직접 물어본다**:
         // `weight(1f, fill = false)`가 위 요소(날짜·공휴일·근무변경 취소선·다이아 칩·출근시각)를
         // 다 재고 **남은 높이만큼만** 최대 제약으로 주고, 그보다 작으면 제 높이만 차지한다.
-        // 두 줄이 그 높이를 넘치면(`didOverflowHeight`) 한 줄로 내려가 말줄임한다.
-        // → 근무변경 2줄·충당 2줄 칩·글자배율이 뭘 하든 **자동으로 맞는다**(상수 관리 0개).
+        // [MEMO_MAX_LINES]에서 시작해 마지막 줄이 상자 밑을 넘으면 **한 줄씩 줄여** 들어갈 때까지
+        // 내려간다(하한 1줄 + 말줄임).
+        // → 6주 달·근무변경 취소선·충당 2줄 칩·글자배율이 뭘 하든 **자동으로 맞는다**(상수 1개).
         //
-        // 실측(emulator-5554 1080x2400/420dpi, 9월=5주, 칸 136.4dp): 출근시각 아래 남는 높이
-        // **86dp**, 두 줄이 필요한 높이는 배율 1.0에서 21.7dp · 1.5에서 32.6dp라 두 줄이 늘 산다.
-        // 근무변경(취소선 +10dp)·충당 2줄 칩(+12dp)을 다 겹쳐도 배율 1.5에서 55dp가 남는다.
+        // ⚠ v1.6.98까지는 상한이 **2줄 고정**이었다. 실측(emulator-5554 1080x2400/420dpi,
+        // 9월=5주)에서 출근시각 아래 남는 높이가 **86dp**인데 두 줄은 21.7dp만 썼다 —
+        // 자리의 4분의 1만 쓰고 나머지를 버리고 있었다(사용자: *"메모 한 내용이 좀 더 보일 수있게"*).
         if (day.memo.isNotBlank()) {
-            var memoLines by remember(day.memo, height, big) { mutableIntStateOf(2) }
+            var memoLines by remember(day.memo, height, big) { mutableIntStateOf(MEMO_MAX_LINES) }
             Text(
                 day.memo, fontSize = memoSize,
                 // 두 줄이 되면서 1.06은 너무 좁다 — 한글 받침이 다음 줄 상자에 닿는다.
@@ -1012,9 +1027,14 @@ private fun DayCell(
                     // "줄 수를 넘겼다"(= 긴 메모면 언제나 참)일 때도 true다 — 처음에 그걸 썼다가
                     // 자리가 남아도는 칸에서까지 한 줄로 내려앉았다(에뮬 실측). **높이가 모자란
                     // 것만** 잡아야 하므로 마지막 줄의 아래끝을 실제 상자 높이와 직접 견준다.
+                    //
+                    // ⚠ **한 줄씩** 줄인다(v1.6.99). 종전엔 넘치면 곧바로 `= 1`이라 자리가
+                    // 다섯 줄어치 남아도 한 줄만 보였다. 한 칸씩 내려오면 배치가 최대
+                    // [MEMO_MAX_LINES]−1 번 더 도는데, 한 번 정해지면 `remember` 키
+                    // (메모·칸 높이·big)가 그대로인 동안 다시 재지 않는다.
                     if (memoLines > 1 && it.lineCount > 0 &&
                         it.getLineBottom(it.lineCount - 1) > it.size.height
-                    ) memoLines = 1
+                    ) memoLines--
                     // 잘렸으면 다이아 칩 옆에 점을 켠다(위 `memoCut` 참고).
                     // 여기서는 `hasVisualOverflow`가 맞다 — 폭이든 줄 수든 "덜 보인다"가 곧 점이다.
                     memoCut = it.hasVisualOverflow ||
@@ -1036,6 +1056,8 @@ private fun DayDetailContent(
     onChangeDuty: () -> Unit,
     onRevert: () -> Unit,
     onClose: () -> Unit,
+    /** 메모칸 위 **빠른 입력 칩** 문구 — 비면 칩 줄 자체를 안 그린다(v1.6.99) */
+    recentMemos: List<String> = emptyList(),
     compact: Boolean = true,   // true=접힘 바텀시트(기존 그대로), false=펼침 오른쪽 패널
     modifier: Modifier = Modifier,
 ) {
@@ -1347,6 +1369,25 @@ private fun DayDetailContent(
             // 키보드 바로 위에 그대로 남는다**(v1.6.12/v1.6.28이 지킨 그 동작). 상한을 없애면
             // 긴 메모에서 버튼이 밀려 올라가 다시 가린다 — 그래서 무한이 아니라 8이다.
             // ⚠ `imeAction`은 여전히 안 넣는다(v1.6.69): 여러 줄이라 Enter가 줄바꿈이어야 한다.
+            // **빠른 입력 칩** (v1.6.99 *"메모기능을 조금 더 업그레이드 해줘!"*) — 앞뒤 달까지에서
+            // 모은 최근 메모 첫 줄([recentMemoPhrases]). 승무원 메모는 `연차`·`병원`처럼 몇 개가
+            // 돌고 돌아, 다시 치는 대신 한 번 누르는 편이 빠르다.
+            // 비어 있으면 대입, 이미 쓴 말이 있으면 **줄을 바꿔 덧붙인다**(있는 글을 지우지 않는다).
+            // 메모가 하나도 없는 사람에게는 줄 자체가 안 뜬다.
+            if (recentMemos.isNotEmpty()) Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                recentMemos.forEach { phrase ->
+                    SuggestionChip(
+                        onClick = {
+                            memo = if (memo.isBlank()) phrase else memo.trimEnd() + "\n" + phrase
+                        },
+                        label = { Text(phrase, fontSize = 12.sp, maxLines = 1, softWrap = false) },
+                    )
+                }
+            }
             OutlinedTextField(
                 value = memo, onValueChange = { memo = it },
                 label = { Text("메모") }, modifier = Modifier.fillMaxWidth(),

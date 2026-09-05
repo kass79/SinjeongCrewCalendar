@@ -1,9 +1,16 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.presentation.calendar.memoFirstLine
+import com.sinjeong.crewcalendar.presentation.calendar.memoMatches
+import com.sinjeong.crewcalendar.presentation.calendar.recentMemoPhrases
 import com.sinjeong.crewcalendar.presentation.calendar.routeSampleSize
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.time.LocalDate
 
 /**
  * v1.6.82 순수 로직 두 가지를 잠근다.
@@ -75,5 +82,38 @@ class MemoImageTest {
     /** 윈도우 줄바꿈(\r\n)이 섞여도 \r 이 남지 않는다 — 붙여넣기로 들어올 수 있다. */
     @Test fun memoFirstLine_handlesCrlf() {
         assertEquals("교육", memoFirstLine("교육\r\n9시 본사"))
+    }
+
+    /* ── v1.6.99 메모 업그레이드 ─────────────────────────────────────── */
+
+    private fun memo(m: Int, day: Int, memo: String) =
+        DaySchedule(LocalDate.of(2026, m, day), DutyCode.parse("1"), memo = memo)
+
+    /** 빠른 입력 칩: **최신순 · 중복 제거 · 상한**. 빈 첫 줄짜리 메모는 칩이 안 된다. */
+    @Test fun recentMemoPhrases_newestFirstDistinctCapped() {
+        val days = listOf(
+            memo(8, 30, "연차"),
+            memo(9, 2, "병원\n9시"),
+            memo(9, 5, "연차"),          // 같은 말이 또 — 최신 것 하나만 남는다
+            memo(9, 9, "   "),           // 공백뿐 = 첫 줄이 비어 칩이 안 된다
+            memo(10, 1, "가족 모임"),     // 다음 달까지 모은다
+        )
+        assertEquals(listOf("가족 모임", "연차", "병원"), recentMemoPhrases(days))
+        // 상한이 먹는다 — 최신 두 개만
+        assertEquals(listOf("가족 모임", "연차"), recentMemoPhrases(days, limit = 2))
+        assertEquals(emptyList<String>(), recentMemoPhrases(emptyList()))
+    }
+
+    /** 모아보기 검색: 빈 검색어는 전부 통과, 그 밖에는 **메모 전체**에서 부분 일치. */
+    @Test fun memoMatches_filtersBySubstring() {
+        assertTrue(memoMatches("연차\n오전만", ""))
+        assertTrue(memoMatches("연차\n오전만", "   "))
+        assertTrue(memoMatches("연차\n오전만", "연차"))
+        // 첫 줄이 아니라 둘째 줄에 있어도 찾는다
+        assertTrue(memoMatches("연차\n오전만", "오전"))
+        assertTrue(memoMatches("Health checkup", "health"))   // 대소문자 무시
+        assertTrue(memoMatches("연차", " 연차 "))              // 검색어 양끝 공백은 무시
+        assertFalse(memoMatches("연차\n오전만", "병원"))
+        assertFalse(memoMatches("", "연차"))
     }
 }

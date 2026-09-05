@@ -210,6 +210,27 @@ class MainCalendarViewModel @Inject constructor(
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), emptyList())
 
+    /**
+     * 상세시트 **빠른 입력 칩** 문구 (v1.6.99) — 최근에 쓴 메모 첫 줄 최대 8개.
+     *
+     * 범위가 [weeklyHours] 와 똑같이 **앞뒤 달까지**인 이유: 달을 막 넘긴 1~2일에 이 달만 보면
+     * 칩이 하나도 안 뜬다(그때가 지난달 문구를 가장 많이 다시 쓰는 때다). 저장소·스키마는
+     * 손대지 않는다 — 메모는 기기 로컬이고 이 화면들이 이미 읽어 온 값을 모으기만 한다.
+     *
+     * 모으는 규칙은 순수함수 [recentMemoPhrases] 한 곳(테스트가 잠근다).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val recentMemos: StateFlow<List<String>> = month
+        .flatMapLatest { m ->
+            combine(
+                getMonthSchedule(m.minusMonths(1)).onStart { emit(emptyList()) },
+                getMonthSchedule(m),
+                getMonthSchedule(m.plusMonths(1)).onStart { emit(emptyList()) },
+            ) { prev, cur, next -> recentMemoPhrases(prev + cur + next) }
+        }
+        .catch { emit(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(0), emptyList())
+
     // 달력 위 오늘 카드 전용 `cardDays`(오늘·다음달 두 달치 합본)는 카드와 함께 v1.6.45에서 제거.
     // 되살리려면 `git show da7cacf`.
 

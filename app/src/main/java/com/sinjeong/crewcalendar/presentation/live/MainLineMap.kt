@@ -358,6 +358,15 @@ private const val DIAG = -35f
 private val SIDE_LANE2 = 34.dp
 
 /**
+ * 가로 변 라벨이 **변을 따라** 흘러도 되는 칸 수(v1.6.99 — [layoutLabels]). 한 칸은 11dp 이고
+ * 실제 이동은 `push.x = ±0.7` 이 곱해진 값이라 **≈23dp** 다.
+ *
+ * 잣대는 **역 간격**이다: 폴드 펼침의 윗변이 ≈32dp, 폰이 ≈41dp 라 23dp 는 어느 쪽에서도
+ * 이웃을 못 넘는다 = **역 순서가 안 뒤집힌다.** 종전 8칸(≈62dp)은 펼침에서 두 역을 건너뛰었다.
+ */
+private const val LATERAL_STEPS = 3f
+
+/**
  * 방향 필터 — 한쪽만 그리면 배지가 반으로 줄어 역명·열번을 크게 쓸 수 있다.
  *
  * 기본값은 **내 열차 방향**이다(사용자 확정). 아직 아무 칩도 안 눌렀으면 상태는 `null` 이고
@@ -1129,15 +1138,35 @@ private fun DrawScope.layoutLabels(
     val gap = 30.dp.toPx()
     val placed = mutableListOf<Lab>()
 
-    // **신도림·성수 먼저** → 윗변·아랫변(대각선) → 좌·우변(가로).
+    /**
+     * 좌·우변 라벨이 **변을 따라** 밀릴 수 있는 최대 거리 = **그 변 역 간격의 절반**(v1.6.99).
+     *
+     * ⚠ 종전엔 `6dp × 12칸 = ±36dp` 상수였다. 그 값은 **폰 세로**(세로 변 간격 ≈63dp)에서 고른
+     * 것이라, 세로 변이 짧아지는 화면에서는 **이웃 역 점을 넘어간다**. 폰 가로 실측:
+     * 세로 변 간격이 43dp 뿐인데 `영등포구청`이 36dp 올라가 **`당산` 점 위**에 앉았다.
+     * 여기서 매번 재면 폰 세로·폰 가로·폴드 펼침이 각자 제 값을 쓴다 — 손댈 상수가 없다.
+     */
+    val alongLimit = abs(
+        loop.at(loop.sOf(TOP_N)).first.y - loop.at(loop.sOf(TOP_N + 1)).first.y
+    ) / 2f
+
+    // **신도림·성수 먼저** → **모서리에 붙은 세로변 끝 역 넷** → 윗변·아랫변(대각선) → 나머지 좌·우변.
     // 먼저 놓는 쪽이 자리를 지킨다 — 두 중요 역은 아무 라벨에도 안 밀리고, 나머지가 피해 간다.
-    // 좌·우변이 맨 나중인 건 **2차 시도(안쪽 차선)를 가진 쪽이 마지막에 맞춰 들어가야** 하기
-    // 때문이다(위 KDoc "모서리는 …").
+    //
+    // ⚠ v1.6.99 — **세로 변의 양 끝 역(대림·당산·건대입구·잠실)을 대각선보다 먼저** 놓는다.
+    // 이 넷은 자리를 옮길 데가 없다: 변을 따라 밀면 곧바로 **모서리 밖**(= 이웃 변의 이름
+    // 자리)이고, 안쪽 차선([SIDE_LANE2])마저 모서리 대각선 라벨이 이미 깔고 앉아 있다.
+    // 폴드 펼침 실측(v1.6.98)에서 `당산`이 그래서 모서리를 넘어 **`홍대입구` 점 옆**에 가
+    // 앉았다. 대각선은 루프 안쪽 전체(48칸·528dp)를 쓸 수 있으니 **양보는 넓은 쪽이 한다** —
+    // 이 파일 KDoc이 좌·우변 2차 차선을 만들 때 세운 원칙 그대로다.
+    // 좌·우변의 **가운데 역들**은 위아래가 비어 있어 종전대로 맨 나중이다.
     val order = (0 until LOOP_N).sortedBy { k ->
         when {
             Line2Stations.MAIN[(k + start) % LOOP_N] in KEY_STATIONS -> 0
-            k < TOP_N || k in (TOP_N + RIGHT_N) until (TOP_N + RIGHT_N + BOTTOM_N) -> 1
-            else -> 2
+            k == TOP_N || k == TOP_N + RIGHT_N - 1 ||
+                k == TOP_N + RIGHT_N + BOTTOM_N || k == LOOP_N - 1 -> 1
+            k < TOP_N || k in (TOP_N + RIGHT_N) until (TOP_N + RIGHT_N + BOTTOM_N) -> 2
+            else -> 3
         }
     }
 
@@ -1219,10 +1248,22 @@ private fun DrawScope.layoutLabels(
         // 안전장치). 종전 14칸(154dp)은 폰 기준이라 **폴드 펼침에서 모자랐다** — 펼침은 윗변
         // 17역이 30dp 간격으로 붙는데 안쪽 높이는 ≈530dp 라, 열어 주면 부채꼴로 다 펴진다
         // (실측: 14칸에서는 `을지로4가`·`동대문역사문화공원`·`상왕십리`가 서로 포갰다).
+        //
+        // ⚠ v1.6.99 — 좌·우변의 **양 끝 역은 모서리 쪽으로 안 민다.** 번갈아 밀기는 안쪽이
+        // 막히면 **바깥(모서리 너머)** 으로 빠져나가는데, 거기는 이미 이웃 변의 이름 자리다.
+        // 폴드 펼침 실측(v1.6.98): `당산`(왼쪽 변 맨 위)이 안쪽 자리를 `합정` 대각선에 다 막혀
+        // **모서리 밖으로 30dp 나갔고**, 그 자리가 하필 윗변 둘째 역 옆이라 화면에서는
+        // `홍대입구` 점의 이름처럼 읽혔다(사용자: *"몇개 역사 텍스트가 … 위치가 어긋나 있는거
+        // 같던데"*). 바깥을 막으면 제자리 탐색이 실패하고 **아래 `lane2`(루프 안쪽 한 칸)** 로
+        // 내려가는데, 그게 v1.6.98이 모서리용으로 만들어 둔 바로 그 처방이다.
+        // 한 방향만 쓰므로 횟수를 반으로 줄여 **밀리는 거리(±36dp)는 종전과 같게** 둔다.
         val alternate = !horiz
+        val edgeFirst = if (onRight) TOP_N else TOP_N + RIGHT_N + BOTTOM_N
+        val edgeLast = edgeFirst + (if (onRight) RIGHT_N else LEFT_N) - 1
+        val atEdgeEnd = alternate && (k == edgeFirst || k == edgeLast)
         val pad = 3.dp.toPx()
         val step = if (alternate) 6.dp.toPx() else 11.dp.toPx()
-        val maxTries = if (alternate) 12 else 48
+        val maxTries = if (!alternate) 48 else if (atEdgeEnd) 6 else 12
         // ⚠ 잘림 판정은 **돌린 상자의 네 꼭짓점**으로 본다(v1.6.98). 종전의 반높이 하나로는
         // −35° 로 누운 긴 이름의 실제 높이(폭 × sin35 가 더해진다)를 못 잰다 — 아랫변이
         // 루프 **바깥**으로 나오면서 그 오차가 그대로 캔버스 밑 잘림이 된다.
@@ -1231,7 +1272,8 @@ private fun DrawScope.layoutLabels(
             // 윗변은 루프 세로 한가운데를 안 넘는다 — 넘으면 아랫변 열차 차선을 문다.
             return !onTop || lab.pivot.y <= size.height / 2f
         }
-        fun search(from: Offset): Boolean {
+        /** [limit] = 변을 따라 밀어도 되는 최대 거리. 넘겨야 한다면 이 차선은 포기한다. */
+        fun search(from: Offset, limit: Float): Boolean {
             lab.pivot = from
             var t = 0
             while (t < maxTries) {
@@ -1239,22 +1281,42 @@ private fun DrawScope.layoutLabels(
                 if (inBounds(q) && placed.none { overlaps(it.quad(pad), q) } &&
                     obstacles.none { overlaps(it.quad(), q) }) return true
                 t++
-                val d = if (alternate) (if (t % 2 == 1) 1f else -1f) * ((t + 1) / 2) * step
+                // 양 끝 역은 [push] 가 가리키는 **변 안쪽 한 방향**으로만 간다(위 주석).
+                val d = if (alternate && !atEdgeEnd)
+                            (if (t % 2 == 1) 1f else -1f) * ((t + 1) / 2) * step
                         else t * step
+                if (abs(d) > limit) return false
                 val base = from
-                // ⚠ 가로로 흘리는 건 **모서리 회피용**이지 이동 수단이 아니다 — 여덟 칸에서
+                // ⚠ 가로로 흘리는 건 **모서리 회피용**이지 이동 수단이 아니다 — 몇 칸에서
                 // 멈춘다. 안 그러면 깊이 밀린 긴 이름이 루프 반대편 변까지 건너간다
                 // (실측: 펼침에서 `동대문역사문화공원`이 왼쪽 세로변 위로 올라탔다).
-                val dx = if (d > 8f * step) 8f * step else d
+                //
+                // ⚠ v1.6.99 — 여덟 칸(88dp × 0.7 ≈ **62dp**)은 **폴드 펼침에서 이웃을 두 역씩
+                // 건너뛰었다.** 펼침은 윗변 17역이 ≈32dp 간격으로 붙어서, 오른쪽 절반의 라벨이
+                // 모서리 반대쪽(=앞 역 쪽)으로 62dp 흐르면 **순서가 뒤집힌다**(실측 외선:
+                // `을지로3가`가 `시청` 위에 올라앉았다). 세 칸이면 `33 × 0.7 ≈ 23dp` 라
+                // 폴드(32dp)·폰(≈41dp) 어느 쪽에서도 **역 간격을 못 넘는다** — 순서가 지켜진다.
+                val dx = if (d > LATERAL_STEPS * step) LATERAL_STEPS * step else d
                 lab.pivot = Offset(base.x + push.x * dx, base.y + push.y * d)
             }
             return false
         }
         // 좌·우변은 막히면 **루프 안쪽 한 칸**에서 한 번 더 찾는다(위 KDoc "모서리는 …").
         // 끝내 못 찾으면 제자리에 둔다 — 43개가 다 적히는 편이 낫다(사용자 확정).
+        //
+        // ⚠ v1.6.99 — 좌·우변은 **가까운 자리를 먼저** 훑는다: ① 제자리 차선에서 [alongLimit]
+        // 안 → ② 안쪽 차선에서 [alongLimit] 안 → ③ 제자리 차선 끝까지 → ④ 안쪽 차선 끝까지.
+        // ①②를 앞에 둔 건 **이웃 역 점을 넘는 자리보다 한 칸 안쪽이 낫기** 때문이고,
+        // ③④를 남긴 건 그 넷마저 막혔을 때 **겹치는 것보다는 먼 자리가 낫기** 때문이다
+        // (한계를 딱 잘랐더니 폰 가로에서 `영등포구청`이 갈 데가 없어 `합정`·`홍대입구` 위에
+        // 그대로 겹쳤다 — 실측).
         val lane2 = Offset(
             pivot.x + (if (onRight) -1f else 1f) * SIDE_LANE2.toPx(), pivot.y)
-        if (!search(pivot) && !(alternate && search(lane2))) lab.pivot = pivot
+        val placedOk =
+            if (!alternate) search(pivot, Float.MAX_VALUE)
+            else search(pivot, alongLimit) || search(lane2, alongLimit) ||
+                search(pivot, Float.MAX_VALUE) || search(lane2, Float.MAX_VALUE)
+        if (!placedOk) lab.pivot = pivot
         placed += lab
     }
     return placed
