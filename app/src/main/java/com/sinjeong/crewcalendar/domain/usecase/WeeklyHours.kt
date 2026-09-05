@@ -154,11 +154,17 @@ object WeeklyHours {
         return null
     }
 
-    /** `"1주 50.1h"`. 달에 걸쳐 잘린 주만 날짜 범위를 붙인다 — `"1주(1~6일) 12.5h"` */
-    fun label(w: Week): String {
-        val span = if (ChronoUnit.DAYS.between(w.from, w.to) == 6L) ""
+    /**
+     * `"1주 50.1h"`. 달에 걸쳐 잘린 주만 날짜 범위를 붙인다 — `"1주(1~6일) 12.5h"`
+     *
+     * @param span 날짜 범위를 붙이나. `false` 는 **주52 줄이 한 줄에 안 들어갈 때만**
+     *   쓴다(v1.7.5 — `MemoListSheet.Week52Line` 사다리의 마지막 단). 경계 주라는 사실은
+     *   `일부만 집계` 꼬리표가 이미 말하므로 날짜가 빠져도 오해가 안 생긴다.
+     */
+    fun label(w: Week, span: Boolean = true): String {
+        val range = if (!span || ChronoUnit.DAYS.between(w.from, w.to) == 6L) ""
         else "(${w.from.dayOfMonth}~${w.to.dayOfMonth}일)"
-        return "${w.index}주$span ${String.format(Locale.US, "%.1f", w.minutes / 60.0)}h"
+        return "${w.index}주$range ${String.format(Locale.US, "%.1f", w.minutes / 60.0)}h"
     }
 
     /** `"10:04"`·`"25:20"` → 분. 24시+ 표기(`MyTrain.legTime` 과 같은 규칙)도 그대로 읽는다 */

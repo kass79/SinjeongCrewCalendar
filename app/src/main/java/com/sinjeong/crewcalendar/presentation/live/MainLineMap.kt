@@ -4,8 +4,6 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import android.util.Log
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.AnimationVector1D
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -49,6 +47,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,15 +88,20 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import androidx.core.view.WindowCompat
 import com.sinjeong.crewcalendar.R
+import com.sinjeong.crewcalendar.domain.model.DEFAULT_SEG_SEC
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.LiveRef
 import com.sinjeong.crewcalendar.domain.model.MyTrain
+import com.sinjeong.crewcalendar.domain.model.TrainMotion
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
+import com.sinjeong.crewcalendar.domain.model.myDestination
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
 import com.sinjeong.crewcalendar.domain.model.pickRun
+import com.sinjeong.crewcalendar.domain.model.pruneMotions
 import com.sinjeong.crewcalendar.domain.model.sameRun
+import com.sinjeong.crewcalendar.domain.model.stepMotion
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -111,7 +115,6 @@ import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.math.PI
 import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.floor
 import kotlin.math.hypot
@@ -333,15 +336,31 @@ private const val OTHER_K_DIR = 0.82f
  * 기관차는 **타 열차(0.7배)** 기준이다(전체 보기의 남의 열차가 다 이 크기다 — [OTHER_K_ALL]).
  * 폰 `14 + 10.85 + 3.75 + 2 = 30.6dp` · 펼침 `18 + 12.74 + 4.5 + 2 = 37.2dp`.
  *
- * ⚠ **내 열차는 몸통이 1배**라 반높이가 15.5dp 다 — 틈에 서면 몸통 윗날이 반대편 선로에
- * 4.7dp 만큼 닿고, **지붕 위 행선판**(17dp)은 그 위로 넘어간다. 이건 알고 둔 대가다:
- * 행선판까지 넣어 틈을 재면(폰 46.5dp) 안쪽 루프가 폰에서 130dp 밑으로 내려가 역 이름이
- * 서로 포갠다. 내 열차는 **맨 나중에 그려 무엇 위에도 얹히므로** 판이 선로를 스쳐도 읽힌다.
+ * ## v1.7.5 — **모든 열차가 같은 크기**라 틈 하나로 다 잰다
+ *
+ * 사용자: *"본인열차 크기도 다른열차 크기랑 동일하게 해! 이미 색상을 다르게 했잖어!"* —
+ * 내 열차도 남의 열차와 **같은 배율**(전체 0.7 · 단독 0.82)이다. 구분은 **노란 몸통 · 빨간
+ * 열번 · 흰 테 · 연기 · 갈매기 · 행선판**뿐이다([drawCabLoop]).
+ *
+ * 그러면 틈은 **가장 큰 상자 하나**만 재면 된다 = 행선판을 단 내 열차([roofHalf]):
+ * 외곽 2겹([LOCO_RING_H] 17.9dp — 회피 상자보다 2.4dp 크다) + 행선판([LOCO_BOARD_H] 17dp).
+ *
+ * 폰 `14 + 24.43 + 3.75 + 2 = 44.18dp` · 펼침 `18 + 28.68 + 4.5 + 2 = 53.18dp`.
+ *
+ * ⚠ v1.7.4 는 내 열차가 **1배**여서 행선판까지 재면 46.5dp 였고, 그러면 안쪽 루프가 역 이름을
+ * 포갰다 — 그래서 판이 반대편 선로를 밟는 것을 *알고 둔 대가*로 뒀다. 이제 0.7 배라 같은
+ * 계산이 **44.18dp** 로 내려와 그 대가를 안 치른다(실화면 `_미리보기_v1.7.5\AB03` 로 확인).
  */
 private fun laneGap(big: Boolean): Dp =
-    badgeOff(big) +
-        ((LOCO_BOX_H / 2f) * locoScale(big) * OTHER_K_ALL).dp +
-        railW(big) / 2f + 2.dp
+    badgeOff(big) + roofHalf(big, OTHER_K_ALL).dp + railW(big) / 2f + 2.dp
+
+/**
+ * **지붕 쪽 반높이** — 가장 큰 상자(행선판 단 내 열차) 기준. 모든 열차가 같은 배율이므로
+ * 이 함수 하나가 [laneGap](틈)과 [trainPad](여백)를 같이 재고, 배수 [k] 만 달리 받는다
+ * (전체 [OTHER_K_ALL] · 단독 [OTHER_K_DIR]).
+ */
+private fun roofHalf(big: Boolean, k: Float): Float =
+    (LOCO_RING_H + LOCO_BOARD_H) * locoScale(big) * k
 
 /**
  * 열차 쪽이 선로에서 먹는 깊이 — **가로 변은 위, 세로 변은 루프 바깥**(v1.6.98 보조설비 배치).
@@ -353,11 +372,14 @@ private fun laneGap(big: Boolean): Dp =
  * 넘었고 `coerceIn` 이 안쪽으로 밀어 초록 선을 밟았다. 사용자 확정 처방:
  * *"캔버스 밖으로 나가면 clamp 대신 여백을 늘려라."*
  *
- * 그래서 `차선 오프셋 + (반높이 + 행선판) × 배수` — **가장 큰 상자(내 열차)** 기준이다.
+ * 그래서 `차선 오프셋 + (지붕 + 행선판) × 배수` — **가장 큰 상자** 기준이다([roofHalf]).
  * 계단으로 올라간 열차가 캔버스를 넘는 것은 [drawCabLoop] 가 그 단을 건너뛰어 막는다.
+ *
+ * ⚠ v1.7.5 — 기준이 **내 열차 1배** 에서 **모두 같은 배율**로 바뀌면서 다시 쟀다. 두 화면 중
+ * 기관차가 큰 쪽(단독 보기 [OTHER_K_DIR] 0.82)으로 잡는다 — 폰 46.5 → **42.62dp**,
+ * 펼침 56.15 → **51.62dp** 로 그만큼이 루프에 돌아간다.
  */
-private fun trainPad(big: Boolean) =
-    badgeOff(big) + ((LOCO_BOX_H / 2f + LOCO_BOARD_H) * locoScale(big)).dp
+private fun trainPad(big: Boolean) = badgeOff(big) + roofHalf(big, OTHER_K_DIR).dp
 
 /**
  * **아래 변 역명**이 루프 밖으로 먹는 깊이(v1.6.98) — 가로 변은 역 이름이 늘 선로 **아래**라
@@ -457,6 +479,15 @@ internal fun MainLineMapDialog(
     }
     LaunchedEffect(Unit) { while (isActive) { now = System.currentTimeMillis(); delay(1_000) } }
 
+    /*
+     * 헤더 ↻ — **캐시를 건너뛰고 즉시 1회**(v1.7.5 ⑤). 사용자: *"지금 신정지선에 에뮬레이터
+     * 오른쪽 위에있는 리프레시 버튼 본선 전체보기에도 하나 만들어줘."*
+     * 지선 카드와 **똑같이** [rememberCoroutineScope] 의 일회성 launch 다 — 컴포지션에 묶여
+     * 있어 지도를 닫으면 같이 취소되고, 폴링 눈금은 그대로라 조회 수가 늘지 않는다.
+     */
+    val scope = rememberCoroutineScope()
+    val refresh: () -> Unit = { scope.launch { snap = BranchLive.loadSnapshot(force = true) } }
+
     // 오늘 근무가 잡는 열번 **전부**가 후보다(본선·지선 무관 — 사용자 확정).
     val candidates = remember(duty, date) {
         duty?.let { dutyTrainNumbers(it, date) }.orEmpty()
@@ -499,6 +530,20 @@ internal fun MainLineMapDialog(
     // 내 열번이 **여럿 살아 있으면 전부 노랑**(헤더·칩은 첫 번째만). 야간처럼 전·후반 열번이
     // 같이 굴러가는 시간대엔 두 대가 동시에 뜬다 — 하나만 칠하면 나머지가 남의 열차로 보인다.
     val mineNos = remember(minePairs) { minePairs.mapTo(HashSet()) { it.second.trainNo } }
+    /*
+     * **내 열차 행선판 글자**(v1.7.5) — `API 열번 → "홍대입구행"`. 여기 없으면 **안 단다.**
+     *
+     * ⚠ 종전엔 API 행선(`destName`)을 그대로 달았는데, 그 필드는 타절·입고 열차에서 전부
+     * `성수종착` 이라 사용자 실측(`8401`)에서 **홍대입구행에 `성수행` 을 달았다**. 이제
+     * [myDestination] 이 행로표 주박·입고 표지 → 접두 → **없음** 순으로 정한다.
+     */
+    val mineBoards = remember(minePairs, duty, date) {
+        duty?.let { d ->
+            minePairs.mapNotNull { (_, m) ->
+                myDestination(d, date, m.trainNo)?.let { m.trainNo to it }
+            }
+        }.orEmpty().toMap()
+    }
     val eff = filter
         ?: mineMark?.let { if (it.inner) DirFilter.INNER else DirFilter.OUTER }
         ?: DirFilter.ALL
@@ -566,13 +611,15 @@ internal fun MainLineMapDialog(
                         // ⚠ **회전각을 안으로 내려 준다**(v1.6.91). 캔버스는 자기가 돌아간
                         // 줄 모르므로, 열번·행선판 글자를 화면 기준으로 바로 세우려면
                         // 그리는 쪽이 이 값을 알아야 한다([locoTextDeg]).
-                        CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, candidates,
-                            snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss,
+                        CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
+                            snap.error, picked, { picked = it }, eff, { filter = it },
+                            userPicked = filter != null, onRefresh = refresh, onDismiss = onDismiss,
                             mapDeg = 90f, pal = pal)
                     }
                 } else {
-                    CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, candidates,
-                        snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss,
+                    CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
+                        snap.error, picked, { picked = it }, eff, { filter = it },
+                        userPicked = filter != null, onRefresh = refresh, onDismiss = onDismiss,
                         mapDeg = 0f, pal = pal)
                 }
             }
@@ -589,9 +636,22 @@ private fun CabScreen(
     mineRoute: String?,
     /** 지금 살아 있는 **내 열번 전부**(API 번호). 전부 노란 기관차로 그린다. */
     mineNos: Set<String>,
+    /**
+     * 내 열차 **행선판 글자**(v1.7.5) — `API 열번 → "홍대입구행"`. **없으면 안 단다**
+     * ([myDestination] — API 행선은 못 믿는다). 헤더도 같은 값을 말한다([mineHead]).
+     */
+    mineBoards: Map<String, String>,
     candidates: List<String>,
     error: String?, picked: String?, onPick: (String?) -> Unit,
-    eff: DirFilter, onFilter: (DirFilter) -> Unit, onDismiss: () -> Unit,
+    eff: DirFilter, onFilter: (DirFilter) -> Unit,
+    /**
+     * 사용자가 **내선/외선 칩을 직접 눌렀나**(v1.7.5 ⑥). 참이면 방향이 다른 내 열차도
+     * 안 그린다. 거짓(기본 화면)이면 [eff] 가 내 열차 방향을 따라온 것이라 종전 그대로다.
+     */
+    userPicked: Boolean,
+    /** 헤더 ↻ — 캐시를 건너뛰고 즉시 1회 조회(`loadSnapshot(force = true)`). */
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
     /** 지도 전체 회전 — 세로 창 90f. 글자를 바로 세우는 데 쓴다([drawLoco] `mapDeg`). */
     mapDeg: Float,
     /** 색 한 벌 — 스타일이 정한다([MapPalette]). 배치 값은 여기서 하나도 안 온다. */
@@ -619,7 +679,8 @@ private fun CabScreen(
      * ⚠ **하한은 열번 판독**이다. 열번은 `11sp × scale`([drawLoco]) 이라 0.7 배에서 **7.7sp** —
      * 4자리 ExtraBold 가 몸통 열번 띠(폭 −23…16dp × 0.7 ≈ 27dp) 안에 그대로 든다(실측 확인).
      * 더 내리면 글자가 몸통을 넘거나 안 읽힌다 — **0.7 밑으로는 가지 말 것.**
-     * ⚠ **내 열차는 [locoScale] 그대로**다. 여기 값은 남의 열차 전용이다.
+     * ⚠ v1.7.5 — **내 열차도 이 값이다**(사용자 확정 *"본인열차 크기도 다른열차 크기랑 동일하게"*).
+     *   종전엔 내 열차만 [locoScale](1배)이었다. 구분은 색·테·연기·행선판이 한다.
      * ⚠ 지선 카드(`LineMap.kt`)의 `UP_LOCO_K` 는 별개다 — 사용자가 본선만 지목했다.
      * ⚠ 전체(0.7 = [OTHER_K_ALL])는 [laneGap] 이 두 선로 사이 간격을 잴 때 **같이 본다**.
      */
@@ -651,16 +712,32 @@ private fun CabScreen(
         }
     }
 
-    // 방향 필터 — **내 열차는 어느 모드에서든 그린다**(사용자 확정).
-    // ⚠ 여기서 한 번만 거른다(v1.6.94). 상태바가 "왜 비었는지"를 말하려면 **거른 뒤**가
-    // 비었는지(이 방향만 없다)와 **거르기 전**이 비었는지(진짜 없다)를 둘 다 알아야 한다.
+    /*
+     * 방향 필터 — **사용자가 직접 고르면 내 열차도 예외가 아니다**(v1.7.5 ⑥).
+     *
+     * 사용자: *"외선에 내열차 표시는 잘되고 있는데.. 내선버튼을 눌렀는데도 나타나면 안되잖아!!!!"*
+     * v1.6.88~v1.7.4 는 내 열차를 **어느 모드에서든** 그렸다 — 그래서 `내선` 칩을 눌러도
+     * 외선인 내 열차가 내선 선로 위에 홀로 서 있었다(거짓 자리다).
+     *
+     * 가르는 것은 [userPicked] 다. **기본 화면**(아직 아무 칩도 안 누른 상태)은 종전대로
+     * 내 열차 방향을 따라가고 전체 보기도 그대로다 — 사용자가 **고른 것만** 절대 규칙이다.
+     * 헤더의 `내 열차 …` 문구는 필터와 무관하게 남고, 숨은 상태면 한 토막이 붙는다([mineHead]).
+     *
+     * ⚠ 여기서 한 번만 거른다(v1.6.94). 상태바가 "왜 비었는지"를 말하려면 **거른 뒤**가
+     * 비었는지(이 방향만 없다)와 **거르기 전**이 비었는지(진짜 없다)를 둘 다 알아야 한다.
+     * 툴팁도 이 목록에서만 잡히므로(`centers`) 숨은 열차는 눌러도 안 뜬다.
+     */
     val drawn = trains.filter {
-        eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner || it.trainNo in mineNos
+        eff == DirFilter.ALL || (eff == DirFilter.INNER) == it.inner ||
+            (!userPicked && it.trainNo in mineNos)
     }
     val emptyMsg = mainEmptyReason(trains.isEmpty(), drawn.isEmpty(), error)
+    /** 내 열차가 **필터에 가려** 지도에 없나 — 헤더가 그 한 토막을 말한다. */
+    val mineHidden = mineMark != null && drawn.none { it.trainNo == mineMark.trainNo }
 
     Column(Modifier.fillMaxSize().padding(inset)) {
-        CabHeader(nowMillis, mineMark, mineRoute, candidates, delay, nextSec, big, pal, onDismiss)
+        CabHeader(nowMillis, mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
+            delay, nextSec, mineHidden, big, pal, onRefresh, onDismiss)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             val d = LocalDensity.current
             // 지도 안 글자배율 상한 — 그림은 dp, 글자만 sp라 배율을 키우면 역 이름이 넘친다.
@@ -669,55 +746,38 @@ private fun CabScreen(
                 LocalDensity provides Density(d.density, d.fontScale.coerceAtMost(1.15f))
             ) {
                 val tm = rememberTextMeasurer()
-                // ── 열차 이동 (v1.6.88) ────────────────────────────────
-                // 열번마다 [Animatable] 하나. 새 스냅샷이 오면 **1초 tween** 으로 그 자리까지
-                // 옮기고, 다음 스냅샷이 올 때까지 시간표의 **역간 소요시간** 속도로 다음 역
-                // **95% 지점까지만** 기어간다. 절대 다음 역을 넘지 않는다 — 넘으면 있지도 않은
-                // 도착을 그리게 된다. 시간표에 없는 열번이면 120초로 본다.
-                //
-                // ⚠ 장부는 **거른 목록이 아니라 전체 목록**으로 돌린다. 필터를 껐다 켤 때마다
-                // 애니메이션이 버려지면 열차가 제자리에서 다시 튄다.
-                // ⚠ `LaunchedEffect(trains)` 는 리스트가 **값으로 같으면 다시 안 돈다** — 폴링
-                // 눈금(2초)마다 스냅샷을 갈아 끼워도 내용이 같으면 기어가던 것이 안 끊긴다.
-                val anims = remember { mutableMapOf<String, Animatable<Float, AnimationVector1D>>() }
-                LaunchedEffect(trains) {
-                    // 사라진 열차(운행 종료·오류로 빈 스냅샷)는 장부에서도 지운다
-                    anims.keys.retainAll(trains.map { it.trainNo }.toSet())
-                    trains.forEach { t ->
-                        val target = t.stationIdx + t.offset
-                        val a = anims.getOrPut(t.trainNo) { Animatable(target) }
-                        // 순환선이라 42.9 → 0.2 는 **뒤로 42.7 이 아니라 앞으로 0.3** 이다.
-                        // 반 바퀴를 넘는 차이는 ±43 을 더해 "펼친" 좌표로 옮기고, 그릴 때 접는다.
-                        val diff = target - a.value
-                        val goal = when {
-                            diff > LOOP_N / 2f -> target - LOOP_N
-                            diff < -LOOP_N / 2f -> target + LOOP_N
-                            else -> target
-                        }
-                        launch {
-                            a.animateTo(goal, tween(1000, easing = LinearEasing))
-                            val seg = tt?.segmentSeconds(
+                /*
+                 * ── 열차 이동 (v1.7.5 — **시간 기반 등속 전진**) ────────
+                 *
+                 * 사용자: *"열차아이콘 움직임이 뒤로는 없어야 되잖아..보니까 정차했을때 약간
+                 * 뒤로 움직임이 있네.. 출발을 했으면 일정한 속도로 다음역까지 앞으로 가줘야지..
+                 * 자연스럽게 갑자기 슬라이딩 하면 안되지"*
+                 *
+                 * v1.6.88~v1.7.4 는 열번마다 [Animatable] 을 두고 새 목표까지 **1초 tween** 으로
+                 * 미끄러뜨렸다 — 목표가 뒤로 오면 **뒤로 미끄러지고**, 멀리 오면 1초 안에
+                 * 메우느라 **훅 밀렸다**(거리가 클수록 빨라진다 = 등속의 반대).
+                 *
+                 * 이제 규칙은 순수 함수 [stepMotion] 한 곳이고(`TrainMotionTest` 12건이 잠근다)
+                 * 여기는 **장부와 시계**만 댄다. 지선 카드가 v1.6.70 부터 쓰던 그 방식이다.
+                 *
+                 * ⚠ 장부는 **거른 목록이 아니라 전체 목록**([trains])으로 돌린다 — 필터를 껐다
+                 * 켤 때마다 기억이 버려지면 열차가 제자리에서 다시 튄다.
+                 * ⚠ 걸음은 **그리는 자리**에서 돈다. 이 캔버스는 연기 위상([phase]) 때문에 어차피
+                 * 매 프레임 다시 그려지므로 시계가 공짜로 딸려 온다(따로 프레임 시계를 두면
+                 * 컴포지션이 한 벌 더 돈다).
+                 */
+                /** 역간 소요(초) — 시간표의 **그 운행·그 구간**. 없으면 [DEFAULT_SEG_SEC]. */
+                val segSecs = remember(trains, tt, weekTag) {
+                    trains.associate { t ->
+                        t.trainNo to (
+                            tt?.segmentSeconds(
                                 weekTag, Line2Timetable.inoutOf(t.inner), t.trainNo, t.statnNm,
                                 dest = t.destName,
-                            ) ?: 120
-                            val dir = if (t.inner) 1f else -1f
-                            val nextStop = if (t.inner) floor(goal) + 1f else ceil(goal) - 1f
-                            val creepTo = nextStop - dir * 0.05f
-                            val remain = abs(creepTo - a.value)
-                            if (remain > 0.01f) a.animateTo(
-                                creepTo,
-                                tween(
-                                    (seg * 1000 * remain).toInt().coerceIn(1000, 240_000),
-                                    easing = LinearEasing,
-                                ),
+                            )?.toFloat() ?: DEFAULT_SEG_SEC
                             )
-                        }
                     }
                 }
-                val placed = drawn.map { t ->
-                    val a = anims.getOrPut(t.trainNo) { Animatable(t.stationIdx + t.offset) }
-                    t to (((a.value % LOOP_N) + LOOP_N) % LOOP_N)
-                }
+                val motions = remember { mutableMapOf<String, TrainMotion>() }
                 /*
                  * 연기·물결 위상 — **지도 한 장에 하나뿐**이다(v1.6.91). 열차마다
                  * [rememberInfiniteTransition] 을 만들면 43대분 트랜지션이 돌아 프레임이 죽는다.
@@ -738,9 +798,22 @@ private fun CabScreen(
                         }
                     }
                 ) {
+                    // 한 걸음 — **전체 목록**을 앞으로만 옮긴다([stepMotion]).
+                    val nowDraw = System.currentTimeMillis()
+                    pruneMotions(motions, trains.mapTo(HashSet()) { it.trainNo }, nowDraw)
+                    trains.forEach { t ->
+                        motions[t.trainNo] = stepMotion(
+                            motions[t.trainNo], t.stationIdx + t.offset,
+                            holding = t.trainSttus == "1", inner = t.inner,
+                            segSec = segSecs[t.trainNo] ?: DEFAULT_SEG_SEC, nowMs = nowDraw,
+                        )
+                    }
+                    val placed = drawn.map { t ->
+                        t to (motions[t.trainNo]?.folded ?: (t.stationIdx + t.offset))
+                    }
                     // 전체 보기만 **복선**이다(v1.7.4). 방향 필터를 켜면 한 방향뿐이라
                     // 선로도 한 줄 — v1.7.3 화면 그대로다.
-                    hit = drawCabLoop(tm, placed, mineNos, big, picked,
+                    hit = drawCabLoop(tm, placed, mineNos, mineBoards, big, picked,
                         labelSp, otherK, phase, mapDeg, pal, dual = !filtered)
                 }
             }
@@ -807,10 +880,18 @@ private fun shortNos(nos: List<String>, take: Int = 2): String =
  *
  * [delay]·[nextSec] 는 [Line2Timetable] 이 준 값이고 **시간표에 열번이 없으면 null** 이라
  * 그 두 토막만 조용히 빠진다(없는 값을 지어내지 않는다 — [MyTrain] KDoc 과 같은 규칙).
+ *
+ * [dest] 도 같은 규칙이다(v1.7.5) — [myDestination] 이 행로표 표지·접두로 **확실히 아는
+ * 경우에만** 온다. 지붕 위 행선판과 **같은 값**이라 서로를 확인해 주고, 열차가 계단에 올라
+ * 판이 작게 보일 때도 헤더에서 읽힌다.
+ * ⚠ **API 행선(`destName`)을 여기 쓰지 말 것** — 타절·입고 열차가 전부 `성수종착` 이다.
+ *
+ * [hidden] 은 **필터가 내 열차를 숨겼을 때**만 온다(v1.7.5 ⑥) — 사용자가 내선/외선을 직접
+ * 고르면 반대 방향인 내 열차는 **안 그린다**. 지도에 없는 이유를 헤더가 한 토막으로 말한다.
  */
 private fun mineHead(
-    mineMark: MainTrainMark?, mineRoute: String?, candidates: List<String>,
-    delay: Int?, nextSec: Int?,
+    mineMark: MainTrainMark?, mineRoute: String?, dest: String?, candidates: List<String>,
+    delay: Int?, nextSec: Int?, hidden: Boolean = false,
 ): String? = when {
     mineMark != null ->
         // 열번은 **API 번호 그대로**다(`8340`). 행로표와 다를 때만 괄호로 같이 적는다 —
@@ -818,6 +899,7 @@ private fun mineHead(
         "내 열차 " + mineMark.trainNo +
             (mineRoute?.takeIf { it != mineMark.trainNo }?.let { "(행로표 $it)" }.orEmpty()) +
             " · " + (if (mineMark.inner) "내선" else "외선") +
+            dest?.let { " · $it" }.orEmpty() +
             delay?.let {
                 when {
                     it > 0 -> " · +${it}분 지연"
@@ -827,7 +909,9 @@ private fun mineHead(
             }.orEmpty() +
             nextSec?.let {
                 if (it <= 0) " · 곧 도착" else " · 다음 역 ${(it + 59) / 60}분 후"
-            }.orEmpty()
+            }.orEmpty() +
+            // 필터에 가려 지도에 없다 — **한 토막만**(어느 화면에 있는지).
+            if (hidden) " (${if (mineMark.inner) "내선" else "외선"} 화면에 있음)" else ""
     candidates.isNotEmpty() -> "내 열차 미검출(운행 전/후)"
     else -> null
 }
@@ -899,8 +983,17 @@ private val HEAD_LADDER = listOf(
  */
 @Composable
 private fun CabHeader(
-    nowMillis: Long, mineMark: MainTrainMark?, mineRoute: String?, candidates: List<String>,
-    delay: Int?, nextSec: Int?, big: Boolean, pal: MapPalette, onDismiss: () -> Unit,
+    nowMillis: Long, mineMark: MainTrainMark?, mineRoute: String?,
+    /** 내 열차 **행선**([myDestination]) — 모르면 null 이라 낱말 자체가 안 나온다(v1.7.5). */
+    mineDest: String?,
+    candidates: List<String>,
+    delay: Int?, nextSec: Int?,
+    /** 내 열차가 **필터에 가려** 지도에 없나 — 문구 끝에 한 토막이 붙는다(v1.7.5 ⑥). */
+    mineHidden: Boolean,
+    big: Boolean, pal: MapPalette,
+    /** 즉시 갱신(캐시 건너뛰기) — 지선 카드의 그 ↻ 와 **같은 함수**다([RefreshButton]). */
+    onRefresh: () -> Unit,
+    onDismiss: () -> Unit,
 ) {
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
@@ -910,7 +1003,7 @@ private fun CabHeader(
     val clockSp = if (big) 14f else 11.5f
     // 크림 바탕에서는 노랑이 안 보인다 — 팔레트가 스타일에 맞는 강조색을 준다.
     val mineColor = if (mineMark != null) pal.mineText else pal.dim
-    val head = mineHead(mineMark, mineRoute, candidates, delay, nextSec)
+    val head = mineHead(mineMark, mineRoute, mineDest, candidates, delay, nextSec, mineHidden)
     val tm = rememberTextMeasurer()
 
     fun build(s: HeadSpec): Pair<AnnotatedString, TextStyle> {
@@ -959,6 +1052,9 @@ private fun CabHeader(
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
+        // ↻ 는 **닫기 X 왼쪽**이다(v1.7.5 ⑤ 사용자 지정). 무게 없는 자식이라 Row 가 먼저
+        // 재고, 위 [BoxWithConstraints] 는 **그 폭을 뺀 나머지**로 사다리를 고른다.
+        RefreshButton(pal, onRefresh)
         IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Close, "닫기", Modifier.size(20.dp), tint = pal.title)
         }
@@ -1476,6 +1572,11 @@ private fun DrawScope.drawCabLoop(
     trains: List<Pair<MainTrainMark, Float>>,
     /** 지금 살아 있는 **내 열번 전부**(API 번호) — 전부 노란 기관차다(v1.7.2). */
     mineNos: Set<String>,
+    /**
+     * 내 열차 **행선판 글자**(v1.7.5) — 여기 없는 열차는 **판을 안 단다**([myDestination]).
+     * 판까지 넣은 상자가 복선 틈([laneGap])을 정하므로 **둘은 한 벌이다.**
+     */
+    mineBoards: Map<String, String>,
     big: Boolean,
     picked: String?,
     /** 역 이름 크기 — 방향 필터가 켜져 있으면 커진다([CabScreen]) */
@@ -1669,8 +1770,15 @@ private fun DrawScope.drawCabLoop(
      * ⚠ **연기·물결은 내 열차만.** 전체 필터는 20대가 넘게 뜨는데 전부 연기를 내면 지도가
      * 지저분해진다(지선 카드는 열차가 적어 전부 낸다 — 거긴 다른 판이다).
      */
-    val locoScale = locoScale(big)
-    val otherScale = locoScale * otherK
+    /**
+     * **모든 열차가 같은 배율**이다(v1.7.5) — 사용자: *"본인열차 크기도 다른열차 크기랑
+     * 동일하게 해! 이미 색상을 다르게 했잖어!"* 내 열차만 [locoScale](1배)이던 것을
+     * 남의 열차와 같은 `locoScale × otherK` 로 내렸다.
+     *
+     * ⚠ **크기로 내 열차를 말하지 않는다** — 노란 몸통·빨간 열번·흰 테·연기·갈매기·행선판이
+     * 말한다. 여기를 다시 갈라 놓으면 [laneGap]·[trainPad] 계산이 통째로 어긋난다.
+     */
+    val trainScale = locoScale(big) * otherK
     // 접선은 **제 선로**에서 뽑는다 — 복선의 두 곡선은 동심이라 직선 변에서는 같지만
     // 모서리 호에서는 반지름이 달라 접는 자리가 조금씩 다르다(각자 제 곡률을 따라야 한다).
     fun headingAt(t: MainTrainMark, pos: Float): Heading {
@@ -1702,7 +1810,7 @@ private fun DrawScope.drawCabLoop(
      * (윗변 내선이 바로 위 외선 상자에 걸려 두 단씩 올라가면 다시 떠 보인다). 그래서
      * 장부를 두 벌로 나눈다 — 단선이면 [rectsIn] 을 안 쓰므로 종전과 한 글자도 안 다르다.
      */
-    val stepPx = LOCO_BOX_H * otherScale * 1.dp.toPx() + 2.dp.toPx()
+    val stepPx = LOCO_BOX_H * trainScale * 1.dp.toPx() + 2.dp.toPx()
     /** 바깥 선로(외선 · 단선이면 전부) 열차 상자. */
     val trainRects = mutableListOf<Rect>()
     /** 안쪽 선로(내선) 열차 상자 — **복선에서만** 쓴다. */
@@ -1733,8 +1841,11 @@ private fun DrawScope.drawCabLoop(
             // 겹침 회피(계단·역명 SAT)가 보는 상자 — 이제 **전부 기관차 상자**이고,
             // 내 열차는 **지붕 위 행선판까지 한 상자**다(v1.6.91 — 역 이름을 물면 실패다).
             // 바퀴가 선로를 보므로 지붕은 늘 `out` 쪽이다 — 상자도 같은 벡터로 접는다.
-            val r = locoBox(c, head, if (isMine) locoScale else otherScale,
-                wake = isMine, board = isMine, railTowards = Offset(-out.x, -out.y))
+            // ⚠ `board` 는 **판을 실제로 다는 열차만** 참이다(v1.7.5) — 행선을 모르면
+            // 판을 안 다는데(myDestination) 참으로 두면 상자가 17dp 헛되이 커져 역 이름을 민다.
+            val r = locoBox(c, head, trainScale,
+                wake = isMine, board = isMine && mineBoards[t.trainNo] != null,
+                railTowards = Offset(-out.x, -out.y))
             // 밀어낸 열차가 화면 밖으로 나가면 그 단은 없는 셈 친다(0단은 [margin] 이 챙긴다).
             if (s > 0 && (r.left < 0f || r.top < 0f ||
                     r.right > size.width || r.bottom > size.height)) continue
@@ -1768,9 +1879,8 @@ private fun DrawScope.drawCabLoop(
      * 진짜 선로가 이미 그 자리에 있다.
      */
     spots.filter { it.first.trainNo in raised }.forEach { (t, c, out) ->
-        val k = if (t.trainNo in mineNos) locoScale else otherScale
-        val half = (LOCO_LEN * k * 0.5f).dp.toPx()
-        val foot = (LOCO_BOX_H / 2f * k).dp.toPx()
+        val half = (LOCO_LEN * trainScale * 0.5f).dp.toPx()
+        val foot = (LOCO_BOX_H / 2f * trainScale).dp.toPx()
         // 바퀴 자리 = 중심에서 **선로 쪽**(-out)으로 반높이. 선분은 선로와 나란하다(out 에 수직).
         val w = Offset(c.x - out.x * foot, c.y - out.y * foot)
         val ax = -out.y
@@ -1813,7 +1923,7 @@ private fun DrawScope.drawCabLoop(
      */
     val otherShadow = if (!pal.clay) 0 else if (spots.size > CLAY_SHADOW_MAX) 1 else 2
     others.forEach { (t, c, out) ->
-        drawLoco(c, headOf(t.trainNo), otherScale, pal.otherBody, pal.wheel, t.trainNo,
+        drawLoco(c, headOf(t.trainNo), trainScale, pal.otherBody, pal.wheel, t.trainNo,
             pal.otherInk, tm,
             smoke = false, railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
             bodyRamp = if (pal.clay) pal.otherTop to pal.otherBottom else null,
@@ -1831,11 +1941,11 @@ private fun DrawScope.drawCabLoop(
          * 여덟 후보가 다 막히면 결국 역 이름을 물었다. 이제 기관차와 **한 몸**이라 자리를
          * 고를 일이 없고, 회피는 위에서 [locoBox] `board = true` 한 상자로 이미 넘어갔다.
          */
-        drawLoco(c, headOf(t.trainNo), locoScale, pal.mineBody, pal.wheel, t.trainNo,
+        drawLoco(c, headOf(t.trainNo), trainScale, pal.mineBody, pal.wheel, t.trainNo,
             pal.mineInk, tm,
             smoke = true, phase = phase, highlight = true,
             railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
-            dest = if (t.destName.isBlank()) "" else t.destName + "행",
+            dest = mineBoards[t.trainNo].orEmpty(),
             bodyRamp = if (pal.clay) pal.mineTop to pal.mineBottom else null,
             edge = if (pal.clay) pal.mineRing else null, ring = pal.mineRing,
             smokeColor = pal.smoke, shadowColor = pal.shadow,
@@ -1853,18 +1963,26 @@ private fun DrawScope.drawCabLoop(
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
     picked?.let { no -> centers[no]?.let { c ->
         trains.firstOrNull { it.first.trainNo == no }?.let { (t, _) ->
-            drawTip(tm, c, t, no in mineNos, pal)
+            drawTip(tm, c, t, no in mineNos, mineBoards[no], pal)
         }
     } }
     return hits
 }
 
-/** 탭한 열차의 툴팁 — 열번 · 다음역 · 행선 · 내/외선. */
+/**
+ * 탭한 열차의 툴팁 — 열번 · 다음역 · 행선 · 내/외선.
+ *
+ * ⚠ **내 열차 행선은 [myDestination] 값**([mineDest])이고 모르면 **아예 안 적는다**(v1.7.5) —
+ * 행선판이 안 다는 말을 툴팁이 `성수행` 이라고 하면 같은 화면이 두 말을 한다.
+ * 남의 열차는 견줄 행로표가 없으니 종전대로 API 값을 그대로 옮긴다.
+ */
 private fun DrawScope.drawTip(
-    tm: TextMeasurer, c: Offset, t: MainTrainMark, mine: Boolean, pal: MapPalette,
+    tm: TextMeasurer, c: Offset, t: MainTrainMark, mine: Boolean, mineDest: String?,
+    pal: MapPalette,
 ) {
     val line1 = t.trainNo + "  " + (if (t.inner) "내선" else "외선") + (if (mine) "  · 내 열차" else "")
-    val line2 = t.statusText + " · " + t.destName + "행"
+    val dest = if (mine) mineDest else t.destName.takeIf { it.isNotBlank() }?.plus("행")
+    val line2 = t.statusText + dest?.let { " · $it" }.orEmpty()
     val l1 = tm.measure(line1, TextStyle(fontSize = 13.sp,
         fontWeight = FontWeight.ExtraBold, color = if (mine) pal.mineText else pal.title))
     val l2 = tm.measure(line2, TextStyle(fontSize = 12.sp, color = pal.info))

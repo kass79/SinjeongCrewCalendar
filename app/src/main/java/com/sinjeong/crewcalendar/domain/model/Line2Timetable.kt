@@ -132,16 +132,20 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
             .minByOrNull { kotlin.math.abs(it - nowSec) }
     }
 
-    /** 이 역 → 다음 역 소요 **초**. 지도의 열차 전진 속도가 이 값을 쓴다. 모르면 120. */
+    /**
+     * 이 역 → 다음 역 소요 **초**. 지도의 열차 전진 속도가 이 값을 쓴다([stepMotion]).
+     * 모르면 [DEFAULT_SEG_SEC](**110초**, v1.7.5 사용자 지정 — 종전 120).
+     */
     fun segmentSeconds(
         weekTag: Int, inout: Int, trainNo: String, stationName: String,
         nowSec: Int = -1, dest: String? = null,
     ): Int {
-        val (list, i) = stopAt(weekTag, inout, trainNo, stationName, nowSec, dest) ?: return 120
-        val here = list[i]; val next = list.getOrNull(i + 1) ?: return 120
+        val fallback = DEFAULT_SEG_SEC.toInt()
+        val (list, i) = stopAt(weekTag, inout, trainNo, stationName, nowSec, dest) ?: return fallback
+        val here = list[i]; val next = list.getOrNull(i + 1) ?: return fallback
         val from = if (here.leftSec >= 0) here.leftSec else here.arriveSec
         val to = if (next.arriveSec >= 0) next.arriveSec else next.leftSec
-        return if (from >= 0 && to > from) to - from else 120
+        return if (from >= 0 && to > from) to - from else fallback
     }
 
     /** 이 정차의 대표 시각 — 도착이 있으면 도착, 없으면(시·종착역) 출발. 둘 다 없으면 −1. */

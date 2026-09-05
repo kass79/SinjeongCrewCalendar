@@ -999,9 +999,13 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, pal: MapPalette, onRefre
 /**
  * 즉시 갱신 버튼 (탭하면 한 바퀴 회전 피드백).
  * 직접 그린 새로고침 글리프 (원호 + 화살촉) — 아이콘 라이브러리 의존성 없음.
+ *
+ * ⚠ **본선 지도 헤더도 이 함수를 그대로 쓴다**(v1.7.5 — 사용자: *"지금 신정지선에 에뮬레이터
+ * 오른쪽 위에있는 리프레시 버튼 본선 전체보기에도 하나 만들어줘"*). 두 지도의 ↻ 는 같은
+ * 모양·같은 터치 영역·같은 회전 피드백이라야 한다 — **복사해서 두 벌로 만들지 말 것.**
  */
 @Composable
-private fun RefreshButton(pal: MapPalette, onRefresh: () -> Unit) {
+internal fun RefreshButton(pal: MapPalette, onRefresh: () -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     val spin by animateFloatAsState(tick * 360f, tween(700), label = "spin")
     // ⚠ 누르는 것은 **[Surface] 자체**다(v1.6.93). 종전엔 안쪽 [Canvas] 만 13dp + 여백 10dp =

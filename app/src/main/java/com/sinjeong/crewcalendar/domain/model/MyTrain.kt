@@ -172,6 +172,15 @@ fun dutyTrainNumbers(duty: DutyCode, date: LocalDate): List<String> {
     return (trainNumbers(a.firstHalf) + trainNumbers(a.secondHalf)).distinct()
 }
 
+/**
+ * 그 날 그 근무의 **행로표 한 칸** — [assignOf] 에 **비번 규칙**(v1.6.95)까지 얹은 것.
+ * 행선판([myDestination])이 주박·입고 표지를 찾을 때 본다.
+ */
+internal fun routeAssignment(duty: DutyCode, date: LocalDate): TrainAssignment? {
+    DutyCode.effectiveNight(duty, date)?.let { (night, d) -> return assignOf(night, d) }
+    return assignOf(duty, date)
+}
+
 /** 그 날 그 근무의 행로표 한 칸 — 열차를 실제로 잡는 근무(본선 주간·야간 / 지선 주간·야간)만. */
 private fun assignOf(duty: DutyCode, date: LocalDate): TrainAssignment? {
     val n = duty.number ?: return null

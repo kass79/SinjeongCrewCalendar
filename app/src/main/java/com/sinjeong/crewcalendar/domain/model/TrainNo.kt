@@ -33,7 +33,7 @@ package com.sinjeong.crewcalendar.domain.model
  */
 
 /** 네 자리 열번으로 정규화 — 앞의 `0`·`S` 를 벗긴다. 네 자리 숫자가 아니면 null. */
-private fun normNo(no: String): String? {
+internal fun normNo(no: String): String? {
     val t = no.trim().trimStart('S', 's', '0')
     return t.takeIf { it.length == 4 && it.all(Char::isDigit) }
 }

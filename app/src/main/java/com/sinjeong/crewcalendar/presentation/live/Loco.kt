@@ -73,13 +73,32 @@ internal const val LOCO_BOX_H = 31f
  */
 internal const val LOCO_WAKE = 15f
 
+/** 행선판 글자 크기(몸통 배율을 곱하기 전) — 열번(11)보다 **한 단계 작다**(v1.6.91). */
+internal const val BOARD_SP = 8.5f
+
+/**
+ * 행선판 글자 **판독 하한**(v1.7.5) — 배율을 곱한 값이 이보다 작아지면 여기서 받친다.
+ * 내 열차가 남의 열차와 같은 0.7 배가 되면서 `8.5 × 0.7 = 5.95sp` 가 됐는데, 네 자리
+ * 숫자 열번(하한 7.7sp)과 달리 **한글은 그 크기로 못 읽는다**(사용자 확정 하한).
+ */
+internal const val BOARD_MIN_SP = 7f
+
 /**
  * 지붕 위 **행선판**([drawLoco] `dest`)이 상자 위로 더 먹는 높이(v1.6.91).
- * 글자(8.5sp × scale) + 위아래 여백 + 내 열차 외곽 2겹(2.7dp)까지 잡은 **넉넉한 상한**이다.
+ * 글자([BOARD_SP] × scale, 하한 [BOARD_MIN_SP]) + 위아래 여백 + 내 열차 외곽 2겹(2.7dp)까지
+ * 잡은 **넉넉한 상한**이다. 하한이 먹는 0.7~0.82 배에서도 실측 `13.8~15.8` 로 이 값 안이다.
  * 상자는 장애물이라 조금 커도 해가 없지만 **모자라면 역 이름을 문다** — 그래서 넉넉히 잡는다.
  * 늘어나는 쪽은 **지붕 쪽 한쪽뿐**이라 상자가 위아래로도 비대칭이다([locoHalf]).
  */
 internal const val LOCO_BOARD_H = 17f
+
+/**
+ * 내 열차 **외곽 2겹**(`highlight`)까지 넣은 지붕 높이 — [drawLoco] 의 `roofY` 가 이 값이다.
+ * 회피 상자([LOCO_BOX_H] 반높이 15.5)보다 **2.4dp 크다**: 상자 밖으로 나가는 이 2.4dp 가
+ * v1.7.4 복선에서 내 열차를 반대편 선로에 닿게 했다 — 그래서 `MainLineMap.laneGap` 이
+ * 이 값으로 틈을 잰다(v1.7.5). 눈대중으로 다시 적지 말고 **여기 하나만** 볼 것.
+ */
+internal const val LOCO_RING_H = 17.9f
 
 /** 기관차 머리가 보는 쪽. 화면 좌표라 [DOWN] 이 y 가 커지는 쪽이다. */
 internal enum class Heading { RIGHT, LEFT, UP, DOWN }
@@ -405,17 +424,27 @@ internal fun DrawScope.drawLoco(
      *  · **열번은 안 가린다** — 판은 몸통 위, 열번은 몸통 안 그대로다.
      *  · 회피 상자도 [locoBox] `board = true` 한 상자로 같이 넘어간다.
      */
+    /**
+     * 행선판 글자 — 배율대로 줄이되 **[BOARD_MIN_SP] 아래로는 안 간다**(v1.7.5).
+     * 내 열차가 남의 열차와 **같은 배율**이 되면서(0.7배) `8.5 × 0.7 = 5.95sp` 가 됐다 —
+     * 네 자리 열번(하한 7.7sp)과 달리 한글이라 그 크기로는 못 읽는다.
+     */
+    val plateSp = (BOARD_SP * scale).coerceAtLeast(BOARD_MIN_SP)
     val plate = if (dest.isBlank()) null else textMeasurer.measure(
         dest,
         TextStyle(
-            fontSize = (8.5f * scale).sp, fontWeight = FontWeight.ExtraBold, color = numberColor,
+            fontSize = plateSp.sp, fontWeight = FontWeight.ExtraBold, color = numberColor,
         ),
     )
     val plateH = if (plate == null) 0f else plate.size.height / u + 2f
-    val plateW = if (plate == null) 0f else
-        (plate.size.width / u + 6f).coerceAtMost(LOCO_LEN * 1.3f)
+    /**
+     * 판 폭 상한 `몸통 × 1.3` — **하한이 먹은 만큼 같이 늘린다.** 안 늘리면 커진 글자가
+     * 판 밖으로 삐져나온다(제 배율일 때는 `plateSp / (8.5 × scale) = 1` 이라 종전 값 그대로다).
+     */
+    val plateW = if (plate == null) 0f else (plate.size.width / u + 6f)
+        .coerceAtMost(LOCO_LEN * 1.3f * plateSp / (BOARD_SP * scale))
     /** 지붕 = 굴뚝 갓 꼭대기. 내 열차는 **외곽 2겹(2.7dp)까지 지난** 자리라야 판이 안 겹친다. */
-    val roofY = if (highlight) -17.9f else -15.2f
+    val roofY = if (highlight) -LOCO_RING_H else -15.2f
     val plateTop = roofY - plateH
 
     /*

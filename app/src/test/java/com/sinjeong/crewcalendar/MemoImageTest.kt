@@ -6,6 +6,8 @@ import com.sinjeong.crewcalendar.presentation.calendar.memoFirstLine
 import com.sinjeong.crewcalendar.presentation.calendar.memoMatches
 import com.sinjeong.crewcalendar.presentation.calendar.recentMemoPhrases
 import com.sinjeong.crewcalendar.presentation.calendar.routeSampleSize
+import com.sinjeong.crewcalendar.presentation.calendar.week52Tail
+import com.sinjeong.crewcalendar.domain.usecase.WeeklyHours
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -115,5 +117,58 @@ class MemoImageTest {
         assertTrue(memoMatches("연차", " 연차 "))              // 검색어 양끝 공백은 무시
         assertFalse(memoMatches("연차\n오전만", "병원"))
         assertFalse(memoMatches("", "연차"))
+    }
+
+    /* ── 주52 줄 꼬리표 (v1.7.5) ────────────────────────────── */
+
+    private fun week(over: Boolean, partial: Boolean, excluded: List<String>) =
+        WeeklyHours.Week(
+            index = 1, from = LocalDate.parse("2026-09-07"), to = LocalDate.parse("2026-09-13"),
+            minutes = if (over) 53 * 60 else 40 * 60, excluded = excluded, partial = partial,
+        )
+
+    /**
+     * 사용자: *"주 52시간 확인 밑에 1주 ← 텍스트를 더 작게 해서 여기칸을 한줄로 해줘..
+     * 2줄까지 잡아먹지마"* — 글자를 8sp 까지 줄여도 안 들어가면 이 순서로 꼬리를 덜어 낸다.
+     */
+    @Test fun week52Tail_shedsFromTheTail() {
+        val w = week(over = true, partial = false, excluded = listOf("교육", "회행"))
+        assertEquals(" 초과 (교육·회행 미포함)", week52Tail(w, 0))
+        assertEquals(" 초과", week52Tail(w, 1))            // `(… 미포함)` 부터 뗀다
+        assertEquals(" 초과", week52Tail(w, 2))
+        assertEquals("", week52Tail(w, 3))                 // `초과` 는 색(빨강·굵게)으로만
+    }
+
+    /** 경계 주(`일부만 집계`)는 `※` 한 글자까지 줄어들되 **사라지지는 않는다.** */
+    @Test fun week52Tail_partialShrinksToMark() {
+        val w = week(over = false, partial = true, excluded = listOf("지근"))
+        assertEquals(" · 일부만 집계 (지근 미포함)", week52Tail(w, 0))
+        assertEquals(" · 일부만 집계", week52Tail(w, 1))
+        assertEquals("※", week52Tail(w, 2))
+        assertEquals("※", week52Tail(w, 3))
+    }
+
+    /** 아무 일도 없는 주는 어느 단계에서나 꼬리가 없다. */
+    @Test fun week52Tail_plainWeekHasNoTail() {
+        val w = week(over = false, partial = false, excluded = emptyList())
+        (0..4).forEach { assertEquals("", week52Tail(w, it)) }
+    }
+
+    /**
+     * **마지막 단(4)은 라벨의 날짜 범위까지 뗀다** — 배율 1.5 에서 5주 달이 8sp 로도 안 들어가
+     * `…` 로 잘렸다(v1.7.5 실측). 꼬리표는 3 단과 같다.
+     */
+    @Test fun week52_lastRungDropsDateSpan() {
+        val boundary = WeeklyHours.Week(
+            index = 1, from = LocalDate.parse("2026-09-01"), to = LocalDate.parse("2026-09-06"),
+            minutes = 1854, excluded = emptyList(), partial = false,
+        )
+        assertEquals("1주(1~6일) 30.9h", WeeklyHours.label(boundary))
+        assertEquals("1주 30.9h", WeeklyHours.label(boundary, span = false))
+        // 꽉 찬 주는 애초에 범위가 없어 두 값이 같다.
+        val full = week(over = false, partial = false, excluded = emptyList())
+        assertEquals(WeeklyHours.label(full), WeeklyHours.label(full, span = false))
+        val w = week(over = true, partial = true, excluded = listOf("교육"))
+        assertEquals(week52Tail(w, 3), week52Tail(w, 4))
     }
 }

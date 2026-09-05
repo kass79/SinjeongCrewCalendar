@@ -3,9 +3,8 @@ package com.sinjeong.crewcalendar.presentation.calendar
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -37,9 +36,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -102,7 +104,91 @@ fun memoMatches(memo: String, query: String): Boolean {
  *
  * 목록 자체는 `state.days`(그 달 전체)를 그대로 거른다 — 새 저장소도, 새 쿼리도 없다.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+/**
+ * 주52 줄의 **꼬리표** — [level] 이 클수록 덜어 낸다(v1.7.5). 순수 함수라 `MemoImageTest` 가 잠근다.
+ *
+ * 사용자: *"주 52시간 확인 밑에 1주 <- 텍스트를 더 작게 해서 여기칸을 한줄로 해줘..
+ * 2줄까지 잡아먹지마"* — [Week52Line] 이 글자를 11 → 8sp 까지 줄여 보고, 그래도 한 줄에
+ * 안 들어가면 **여기 순서대로** 꼬리를 덜어 낸다:
+ *
+ * | level | 덜어 낸 것 |
+ * |---|---|
+ * | 0 | (전부) `1주 40.5h 초과 · 일부만 집계 (교육·회행 미포함)` |
+ * | 1 | `(… 미포함)` 삭제 — 어느 근무가 빠졌는지는 상세시트가 말한다 |
+ * | 2 | `일부만 집계` → `※` |
+ * | 3 | `초과` 삭제 — **빨강·굵게가 이미 말한다**(마지막까지 색은 안 버린다) |
+ */
+internal fun week52Tail(w: WeeklyHours.Week, level: Int): String {
+    val over = if (w.over && level < 3) " 초과" else ""
+    val partial = when {
+        !w.partial -> ""
+        level == 0 || level == 1 -> " · 일부만 집계"
+        else -> "※"
+    }
+    val excluded =
+        if (level > 0 || w.excluded.isEmpty()) ""
+        else " (${w.excluded.joinToString("·")} 미포함)"
+    return over + partial + excluded
+}
+
+/** [Week52Line] 이 훑는 글자 크기 — 사용자가 *"텍스트를 더 작게"* 라 했으니 **먼저 줄인다**. */
+private val WEEK52_SP = listOf(11f, 10.5f, 10f, 9.5f, 9f, 8.5f, 8f)
+
+/**
+ * 주별 근무시간 **한 줄 고정**(v1.7.5) — `1주 40.5h · 2주 38.0h · …`.
+ *
+ * 종전에는 `FlowRow` 라 배율 1.5 에서 **두 줄로 접혔다**(사용자: *"2줄까지 잡아먹지마"*).
+ * 이제 [rememberTextMeasurer] 로 **실제로 재서** 한 줄에 들어가는 첫 조합을 고른다 —
+ * 헤더의 `HEAD_LADDER`([MainLineMap])와 같은 수법이고, `onTextLayout` 되먹임과 달리
+ * 재구성 한 번에 끝나 글자가 깜빡이지 않는다.
+ *
+ * 사다리는 **글자 축소가 먼저**(11 → 8sp), 그 다음이 꼬리표 덜어 내기([week52Tail]),
+ * 마지막이 라벨의 날짜 범위 떼기다(level 4). 다 막히면 마지막 칸을 `Ellipsis` 로 쓴다 —
+ * **어떤 경우에도 두 줄이 되지 않는다.**
+ */
+@Composable
+private fun Week52Line(weeks: List<WeeklyHours.Week>) {
+    val overColor = MaterialTheme.colorScheme.error
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    val tm = rememberTextMeasurer()
+    BoxWithConstraints(Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
+        val room = constraints.maxWidth
+        fun build(level: Int, sp: Float): Pair<AnnotatedString, TextStyle> {
+            val txt = buildAnnotatedString {
+                weeks.forEachIndexed { i, w ->
+                    if (i > 0) withStyle(
+                        SpanStyle(color = dim.copy(alpha = 0.5f), fontWeight = FontWeight.Bold)
+                    ) { append(" · ") }
+                    withStyle(
+                        SpanStyle(
+                            color = if (w.over) overColor else dim,
+                            fontWeight = if (w.over) FontWeight.ExtraBold else FontWeight.Bold,
+                        )
+                    ) {
+                        append(WeeklyHours.label(w, span = level < 4))
+                        val tail = week52Tail(w, level)
+                        if (tail.isNotEmpty()) withStyle(
+                            SpanStyle(fontSize = (sp - 1.5f).coerceAtLeast(8f).sp)
+                        ) { append(tail) }
+                    }
+                }
+            }
+            return txt to TextStyle(fontSize = sp.sp)
+        }
+        val pick = (0..4).asSequence()
+            .flatMap { lv -> WEEK52_SP.asSequence().map { lv to it } }
+            .map { (lv, sp) -> build(lv, sp) }
+            .firstOrNull { (txt, style) ->
+                tm.measure(txt, style, maxLines = 1).size.width <= room
+            } ?: build(4, WEEK52_SP.last())
+        Text(
+            pick.first, style = pick.second,
+            maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MemoListSheet(
     month: YearMonth,
@@ -169,39 +255,11 @@ fun MemoListSheet(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(bottom = 2.dp),
                 )
-                // `1주 40.5h · 2주 38.0h · …` — 가운뎃점으로 이어 **한 줄에 가지런히**.
-                // `FlowRow` 라 글자배율을 키우면 잘리지 않고 스스로 아랫줄로 접힌다.
-                // 꼬리표(`초과`·`일부만 집계`·`미포함`)는 남기되 **한 단 더 작게** 깔아
-                // 숫자 줄의 리듬을 깨지 않는다.
-                FlowRow(
-                    Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    weeks.forEachIndexed { i, w ->
-                        val tail =
-                            (if (w.over) " 초과" else "") +
-                                // 인접 달 근무를 아직 못 읽은 경계 주 — 합계가 덜 찼으니 초과라고 말하지 않는다
-                                (if (w.partial) " · 일부만 집계" else "") +
-                                if (w.excluded.isEmpty()) "" else " (${w.excluded.joinToString("·")} 미포함)"
-                        Text(
-                            buildAnnotatedString {
-                                append(WeeklyHours.label(w))
-                                if (tail.isNotEmpty()) withStyle(SpanStyle(fontSize = 9.5.sp)) {
-                                    append(tail)
-                                }
-                            },
-                            fontSize = 11.sp,
-                            fontWeight = if (w.over) FontWeight.ExtraBold else FontWeight.Bold,
-                            color = if (w.over) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (i < weeks.lastIndex) Text(
-                            "·",
-                            fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        )
-                    }
-                }
+                // `1주 40.5h · 2주 38.0h · …` — 가운뎃점으로 이어 **한 줄 고정**([Week52Line]).
+                // ⚠ v1.7.5 — 종전 `FlowRow` 는 배율 1.5 에서 **두 줄로 접혔다.** 사용자:
+                // *"주 52시간 확인 밑에 1주 <- 텍스트를 더 작게 해서 여기칸을 한줄로 해줘..
+                // 2줄까지 잡아먹지마"* — **`FlowRow` 로 되돌리지 말 것.**
+                Week52Line(weeks)
             }
             if (rows.isEmpty()) {
                 Text(

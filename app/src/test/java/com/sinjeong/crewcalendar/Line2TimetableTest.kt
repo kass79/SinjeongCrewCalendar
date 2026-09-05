@@ -81,9 +81,10 @@ class Line2TimetableTest {
     @Test fun `다음 역까지 초 — 지연 반영`() {
         assertEquals(25320 + 60 - (25230 + 30), tt.secondsToNextStop(1, 1, "2006", "홍대입구", 1, 25230 + 30))
     }
-    @Test fun `역간 소요, 없으면 120`() {
+    /** 모르는 구간의 기본값은 v1.7.5 에서 **120 → 110초**(사용자 지정, `DEFAULT_SEG_SEC`). */
+    @Test fun `역간 소요, 없으면 110`() {
         assertEquals(90, tt.segmentSeconds(1, 1, "2006", "홍대입구"))
-        assertEquals(120, tt.segmentSeconds(1, 1, "2006", "이대"))
+        assertEquals(110, tt.segmentSeconds(1, 1, "2006", "이대"))
     }
     @Test fun `25시 표기는 초로 접혀 있다`() { assertEquals(90000, tt.stops(1, 2, "2513")[0].arriveSec) }
     @Test fun `주 구분 — 토 2, 일 3, 평일 1, 공휴일 3`() {
