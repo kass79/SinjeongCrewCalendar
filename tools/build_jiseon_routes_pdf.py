@@ -4,7 +4,8 @@
 기존 tools/build_jiseon_routes.py 는 사진 원본용. 이 스크립트는 벡터 PDF 원본용이며
 페이지에서 근무표 테이블(다이아 1개)을 자동 검출해 webp 로 잘라 낸다.
 
-  python tools/build_jiseon_routes_pdf.py          # 에셋 생성
+  python tools/build_jiseon_routes_pdf.py          # 에셋 전부 생성
+  python tools/build_jiseon_routes_pdf.py bhol     # 한 벌만 (원본 PDF 가 남아 있는 것만 돌릴 때)
   python tools/build_jiseon_routes_pdf.py --check  # 평평/평휴 동일성 + 자체 검사만
 
 요구: PyMuPDF(fitz), Pillow
@@ -22,11 +23,15 @@ SRC = r'C:\Users\admin\Documents\카카오톡 받은 파일\신정지선 근무�
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                    '..', 'app', 'src', 'main', 'assets', 'routes')
 
-# 에셋 prefix -> (PDF 파일명, 기대 헤더표기, 기대 다이아 번호)
+# 에셋 prefix -> (PDF 경로(SRC 기준 파일명 또는 절대경로), 기대 헤더표기, 기대 다이아 번호)
 # bnhol(휴일 야간)은 '휴휴' 표가 존재하지 않아 사용자 확인에 따라 '휴평' 표를 사용한다.
+#
+# ⚠ bhol(휴일 주간)만 **2026-09 개정본**(카톡 배포 2026-09-06)이 원본이라 절대경로다.
+#   옛 파일(`신정지선 휴일 주간.pdf`)로 되돌리면 지8 계가 8:10 → 8:09 로 되돌아간다(v1.7.8).
 MAP = [
     ('bwd',   '신정지선 평일 주간.pdf', '평일', range(1, 9)),
-    ('bhol',  '신정지선 휴일 주간.pdf', '휴일', range(1, 9)),
+    ('bhol',  os.path.join(r'C:\Users\admin\Documents\카카오톡 받은 파일',
+                           '지선행로표 휴일(26.9개정)_20260906001049.pdf'), '휴일', range(1, 9)),
     ('bnwd',  '신정지선 평평 야간.pdf', '평평', range(10, 15)),
     ('bnhol', '신정지선 휴평 야간.pdf', '휴평', range(10, 15)),
 ]
@@ -132,7 +137,10 @@ def main():
         return
 
     outdir = os.path.normpath(OUT)
+    only = [a for a in sys.argv[1:] if not a.startswith('--')]  # 예: `... bhol` — 한 벌만 다시 뽑기
     for prefix, pdf, hdr_exp, nums in MAP:
+        if only and prefix not in only:
+            continue
         doc, found = scan(pdf)
         by_no = {}
         for page, box, hdr, no in found:
