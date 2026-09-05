@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
+import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -117,8 +118,8 @@ import kotlin.math.floor
  *
  * | | 선로 | 굵기·색 | 기관차 |
  * |---|---|---|---|
- * | 위 | 까치산행 | [UP_LINE_H] · [LoopGreenSoft] (연하고 가늘게) | [UP_LOCO_K] 배 · [BadgeSkySoft] |
- * | 아래 | **신도림행(주)** | [LINE_H] · [LoopGreen] (종전 그대로) | 1배 · **[MineYellow]**(v1.6.96) |
+ * | 위 | 까치산행 | [UP_LINE_H] · `railSoft` (연하고 가늘게) | [UP_LOCO_K] 배 · `softBody` |
+ * | 아래 | **신도림행(주)** | [LINE_H] · `rail` (종전 그대로) | 1배 · **`mineBody`**(v1.6.96) |
  *
  * 역 점은 두 선로에 각각 찍힌다(위 선로 점은 작게). 정차(빨간 점)는 그 열차가 달리는
  * **제 선로의 점**에만 든다. 두 차선 모두 기관차가 선로 위로 쌓이므로 계단식 회피(`r = 1`)는
@@ -131,47 +132,29 @@ import kotlin.math.floor
  *
  *  · 세로 배치가 `까치산행 차선 → 위 선로 → 신도림행 차선 → **아래 선로 → 역 이름**` 이 됐다
  *    (v1.6.95 는 이름이 두 선로 **사이**였다). 카드 높이는 그대로 — 순서만 바뀌었다.
- *  · **신도림행 열차는 전부 [MineYellow] 몸통 + [BadgeInk] 남색 열번.** 색이 곧 방향이다.
+ *  · **신도림행 열차는 전부 `mineBody` 몸통 + `otherInk` 남색 열번.** 색이 곧 방향이다.
  *  · **내 열차 구분은 몸통색이 아니다** — 흰 테두리(`highlight`) + 지붕 위 행선판 +
- *    **[MineInk] 빨간 열번**, 그리고 맨 나중에 그린다. 몸통색으로 갈랐다가는 사용자가 원한
+ *    **`mineInk` 빨간 열번**, 그리고 맨 나중에 그린다. 몸통색으로 갈랐다가는 사용자가 원한
  *    *"신도림행은 노랑"* 이 깨진다.
- *  · 까치산행([BadgeSkySoft])·기지 회송([DepotGray])은 종전 그대로 — 위계가 살아 있다.
+ *  · 까치산행(`softBody`)·기지 회송(`depot`)은 종전 그대로 — 위계가 살아 있다.
  */
 
-/* ── 색: [MainLineMap] 과 **같은 값** — 같이 고칠 것 ────────────────────────── */
-/** 운전실 화면 바탕 — 테마와 무관하게 늘 이 남색이다. */
-private val CabNavy = Color(0xFF0E2A47)
-private val LoopGreen = Color(0xFF2FC24A)
-/**
- * **위 선로(까치산행)** — 아래 주 선로보다 한 톤 연한 초록(v1.6.95 사용자 확정).
- * 남색 위에 0.55 로 얹어 흐리게 물러난다. 굵기도 한 단계 가늘다([UP_LINE_H]).
+/*
+ * ── 색: [MainLineMap] 과 **한 벌**(v1.7.0 [MapPalette]) ────────────────────────
+ *
+ * 색 상수는 `MapStyle.kt` 한 곳으로 옮겼다 — 설정에서 고른 스타일(운전실 남색 / 클레이)에
+ * 따라 통째로 갈아 끼운다. 본선 지도와 **같은 팔레트**를 받으므로 한쪽만 클레이가 되는 일이
+ * 없다. `CAB_PALETTE` 값은 v1.6.99 의 상수와 같다(`MapStyleTest` 가 잠근다).
+ *
+ * 종전 이름 → 팔레트 자리:
+ *   `CabNavy`→`bg`(바퀴색도 이것) · `LoopGreen`→`rail` · `LoopGreenSoft`→`railSoft` ·
+ *   `StationWhite`→`station` · `StationRed`→`stationRed` · `BadgeSky`→`otherBody` ·
+ *   `BadgeSkySoft`→`softBody` · `BadgeInk`→`otherInk` · `MineYellow`→`mineBody` ·
+ *   `MineInk`→`mineInk` · `DepotGray`→`depot` · `KeyOrange`→`keyA` · `Dim`→`dim`.
+ *
+ * ⚠ **남색 바탕에서 "연하게"는 배경 쪽으로 섞는 것**이다(v1.6.95 `BadgeSkySoft` 의 교훈) —
+ * 흰 쪽으로 가면 도리어 튀어 주 차선을 이긴다. 클레이는 반대다(바탕이 크림이라 흰 쪽이 물러난다).
  */
-private val LoopGreenSoft = LoopGreen.copy(alpha = 0.55f)
-private val StationWhite = Color(0xFFFFFFFF)
-/** 열차가 서 있는 역 */
-private val StationRed = Color(0xFFF0392B)
-/** 일반 영업 열차 — 옅은 하늘색 몸통 + 진한 남색 열번 */
-private val BadgeSky = Color(0xFFA9DCF5)
-/**
- * **위 차선(까치산행) 일반 열차** — 하늘색을 남색 쪽으로 30% 섞어 한 톤 물러나게(v1.6.95).
- * ⚠ 남색 바탕에서 "연하게"를 **흰 쪽**으로 잡으면 도리어 더 튀어 주 차선(신도림행)을 이긴다 —
- * [DepotGray] 가 반대 방향으로 물린 그 자리다. 물러나게 하려면 **배경 쪽**으로 섞는다.
- * 열번 글씨는 [BadgeInk] 그대로 (대비 6.7:1).
- */
-private val BadgeSkySoft = Color(0xFF7BA7C1)
-private val BadgeInk = Color(0xFF0A2036)
-private val MineYellow = Color(0xFFFFE14D)
-private val MineInk = Color(0xFFB3261E)
-/**
- * **기지 입고 회송** 몸통 — 손님을 못 태우는 열차라 하늘색(영업)에서 **채도를 뺀 회색**이다
- * (v1.6.91 색 = 신분 규칙). ⚠ 진짜 회색(`#9E9E9E`)은 남색 바탕에서 죽는다 — 명도를 올린
- * 이 값이라야 실화면에서 살아 있으면서도 하늘색과 안 헷갈린다.
- */
-private val DepotGray = Color(0xFFC3CAD1)
-/** 신도림 강조 — 본선에서 신도림·성수에 쓰는 그 주황 */
-private val KeyOrange = Color(0xFFFFB74D)
-private val Dim = Color(0xFF8FA9C4)
-/* ─────────────────────────────────────────────────────────────────────────── */
 
 /**
  * 지선에서 강조하는 역 — 본선 쪽 `KEY_STATIONS` 와 같은 규칙(주황 이름 +2sp · 큰 흰 테 점).
@@ -251,6 +234,8 @@ internal fun BranchLiveMap(
      */
     duty: DutyCode? = null,
     date: LocalDate = LocalDate.now(),
+    /** 설정 > 화면 > **지도 스타일**(v1.7.0). 색만 정한다 — 배치는 스타일과 무관하다. */
+    style: MapStyle = MapStyle.CAB,
     modifier: Modifier = Modifier,
 ) {
     var snap by remember { mutableStateOf(Snapshot()) }
@@ -305,7 +290,7 @@ internal fun BranchLiveMap(
     // v1.6.84 — 지선 지도 카드의 `본선 전체 보기` 칩으로 여는 본선 순환선 지도.
     // 닫으면 그쪽 LaunchedEffect 가 취소돼 폴링이 멎는다(스냅샷 캐시는 공유).
     var showFull by remember { mutableStateOf(false) }
-    if (showFull) MainLineMapDialog(duty, date) { showFull = false }
+    if (showFull) MainLineMapDialog(duty, date, style) { showFull = false }
 
     /*
      * 오늘 근무가 잡는 열번 후보 — **지선 열차를 실제로 잡는 근무일 때만** 이 카드가 말한다
@@ -335,6 +320,7 @@ internal fun BranchLiveMap(
         nowMillis = now,
         error = snap.error,
         onRefresh = { scope.launch { snap = BranchLive.loadSnapshot(force = true) } },
+        pal = paletteOf(style),
         modifier = modifier.bleedH(bleed),
     )
 }
@@ -358,6 +344,7 @@ private fun LineMapCard(
     fetchedAtMillis: Long,
     nowMillis: Long,
     error: String?,
+    pal: MapPalette,
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -385,7 +372,7 @@ private fun LineMapCard(
     Card(
         shape = RoundedCornerShape(16.dp),
         modifier = modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = CabNavy),
+        colors = CardDefaults.cardColors(containerColor = pal.bg),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
     ) {
         run {
@@ -449,7 +436,7 @@ private fun LineMapCard(
                 val canvasH = laneH + UP_LINE_H + laneH + LINE_H + nameH + 7.dp * CARD_K
 
                 Column(Modifier.padding(vertical = 4.dp)) {
-                    BranchHeader(nowMillis, big, onRefresh)
+                    BranchHeader(nowMillis, big, pal, onRefresh)
                     /*
                      * 내 열차 한 줄 — `내 열차 5581 · 신도림행 · 양천구청 진입`.
                      * ⚠ **도착 예정 시각은 만들지 않는다**(본선 헤더와 같은 규칙) — 그 데이터가
@@ -460,7 +447,7 @@ private fun LineMapCard(
                             "내 열차 ${it.trainNo} · ${destOf(it.toSindorim)} · ${it.statusText}"
                         } ?: ("내 열차 미검출 · 오늘 열번 " + shortNos(candidates)),
                         fontSize = (if (big) 12.5f else 11f).sp,
-                        color = Dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        color = pal.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 1.dp),
                     )
 
@@ -594,10 +581,25 @@ private fun LineMapCard(
 
                         // ── 선로 둘 ───────────────────────────────────────────
                         // 아래 = 신도림행(주 선로, 종전 굵기·색 그대로) / 위 = 까치산행(연하고 가늘게)
-                        drawRect(LoopGreen, topLeft = Offset(0f, lineTop),
+                        // ⚠ 클레이는 두 선로 밑에 **그림자 띠**를 한 겹 깐다(본선 튜브와 같은
+                        //   처방 — 크림 바탕에서 연한 민트가 묻히지 않게 윤곽을 잡는다).
+                        //   지선 카드는 늘 가로라 지도 회전이 없다 = 그림자는 그냥 아래로.
+                        pal.railShadow?.let {
+                            val d = 3.dp.toPx()
+                            drawRect(it, topLeft = Offset(0f, lineTop + d),
+                                size = Size(size.width, lineP))
+                            drawRect(it, topLeft = Offset(0f, upLineTop + d),
+                                size = Size(size.width, upLineP))
+                        }
+                        drawRect(pal.rail, topLeft = Offset(0f, lineTop),
                             size = Size(size.width, lineP))
-                        drawRect(LoopGreenSoft, topLeft = Offset(0f, upLineTop),
+                        drawRect(pal.railSoft, topLeft = Offset(0f, upLineTop),
                             size = Size(size.width, upLineP))
+                        // 아래(주) 선로 윗면 하이라이트 — 튜브처럼 보이게 하는 가는 밝은 줄.
+                        pal.railHighlight?.let {
+                            drawRect(it, topLeft = Offset(0f, lineTop),
+                                size = Size(size.width, lineP * 0.34f))
+                        }
 
                         /*
                          * 정차 중인 열차가 서 있는 역(v1.6.49 사용자: *"빨간점은 역에 하얀점에
@@ -629,7 +631,10 @@ private fun LineMapCard(
                             tm.measure(name, TextStyle(
                                 fontSize = (sp + if (key) 2f else 0f).sp,
                                 fontWeight = if (key) FontWeight.ExtraBold else FontWeight.Bold,
-                                color = if (key) KeyOrange else StationWhite))
+                                // ⚠ **역 이름은 `label`, 역 점은 `station`** — 남색에서는 둘 다
+                                // 흰색이라 한 값이어도 됐지만, 크림 바탕에서 이름까지 흰색이면
+                                // 까치산·신정네거리·도림천이 통째로 안 보인다(실측).
+                                color = if (key) pal.keyA else pal.label))
                         }
                         /*
                          * 역명 크기는 **재서 정한다.**
@@ -660,12 +665,19 @@ private fun LineMapCard(
                             val key = name in KEY_STATIONS
                             val rad = 3.5.dp.toPx() * (if (key) 1.5f else 1f)
                             fun dot(y: Float, r: Float, red: Boolean, ring: Float) {
+                                // 클레이 점토 단추 — 밑에 그림자 한 겹(크림 위에서 흰 점이 뜬다)
+                                if (pal.clay) drawCircle(
+                                    pal.shadow, r, Offset(x, y + 1.6.dp.toPx()))
                                 drawCircle(
-                                    if (red) StationRed else if (key) KeyOrange else StationWhite,
+                                    if (red) pal.stationRed else if (key) pal.keyA else pal.station,
                                     r, Offset(x, y))
-                                if (key || red) drawCircle(
-                                    if (key) Color.White else Color.White.copy(alpha = 0.55f), r,
-                                    Offset(x, y), style = Stroke(width = ring))
+                                if (key || red || pal.clay) drawCircle(
+                                    when {
+                                        key -> Color.White
+                                        red -> Color.White.copy(alpha = 0.55f)
+                                        else -> pal.stationEdge
+                                    },
+                                    r, Offset(x, y), style = Stroke(width = ring))
                             }
                             dot(lineY, rad, i in holdDn, 1.5.dp.toPx())
                             dot(upLineY, rad * 0.7f, i in holdUp, 1.1.dp.toPx())
@@ -678,7 +690,7 @@ private fun LineMapCard(
                         fun hint(text: String, y: Float) {
                             val l = tm.measure(text, TextStyle(
                                 fontSize = (if (big) 10f else 8.5f).sp,
-                                fontWeight = FontWeight.Bold, color = Dim))
+                                fontWeight = FontWeight.Bold, color = pal.dim))
                             drawText(l, topLeft = Offset(2.dp.toPx(), y - l.size.height / 2f))
                         }
                         // 위가 까치산행, 아래가 신도림행(주 선로) — 화살표도 새 배치를 따른다(v1.6.95).
@@ -692,14 +704,14 @@ private fun LineMapCard(
                         /*
                          * `기지` 꼬리표 — 몸통 **오른쪽**(진행 반대쪽)이 원칙이다. 신도림 끝에서는
                          * 오른쪽에 자리가 없어 종전엔 `coerceAtMost` 로 끌려와 **제 회색 몸통 위에
-                         * 겹쳐 찍혔다**(글자색도 몸통색과 같은 [DepotGray] 라 통째로 못 읽었다).
+                         * 겹쳐 찍혔다**(글자색도 몸통색과 같은 `depot` 라 통째로 못 읽었다).
                          * 자리가 없으면 반대쪽(왼쪽)에 붙인다 — 그리는 곳과 자리를 잡는 곳이
                          * **같은 함수**를 봐야 어긋나지 않는다(v1.6.93).
                          */
                         val tagGap = 2.dp.toPx()
                         val depotTag = tm.measure("기지", TextStyle(
                             fontSize = (if (big) 9f else 8f).sp,
-                            fontWeight = FontWeight.Bold, color = DepotGray))
+                            fontWeight = FontWeight.Bold, color = pal.depot))
                         // ⚠ 기지 회송은 **위 차선(까치산행)** 이라 몸통 폭도 [locoUpW] 다(v1.6.95).
                         fun tagLeft(cx: Float): Float {
                             val right = cx + locoUpW / 2f + tagGap
@@ -743,7 +755,7 @@ private fun LineMapCard(
                                      */
                                     if (r > 0) {
                                         val fy = cy + h / 2f + gapP
-                                        drawLine(if (up) LoopGreenSoft else LoopGreen,
+                                        drawLine(if (up) pal.railSoft else pal.rail,
                                             Offset(cx - w / 2f, fy), Offset(cx + w / 2f, fy),
                                             strokeWidth = if (up) upLineP else lineP,
                                             cap = StrokeCap.Round)
@@ -770,8 +782,10 @@ private fun LineMapCard(
                          * 자리를 못 잡은 열차 — 그래도 **어디 있는지는** 제 선로 위 점으로 남긴다.
                          * 색도 제 차선 몸통색이다(v1.6.96 — 신도림행은 노랑).
                          */
+                        // ⚠ 클레이는 **열번색**으로 찍는다 — 흰 몸통 점은 크림 바탕에서 안 보인다
+                        // (v1.7.0. 본선 지도의 접힌 열차 점과 같은 처방).
                         fun dotOnly(x: Float, up: Boolean) = drawCircle(
-                            if (up) BadgeSkySoft else MineYellow,
+                            if (pal.clay) pal.wheel else if (up) pal.softBody else pal.mineBody,
                             2.5.dp.toPx(), Offset(x, if (up) upLineY else lineY))
                         /**
                          * 기관차 한 대. **머리 = 진행 방향** — 신도림이 오른쪽 끝이라 신도림행은
@@ -792,9 +806,19 @@ private fun LineMapCard(
                                  mine: Boolean = false, dest: String = "") = drawLoco(
                             c, headingFor(1f, 0f, toSindorim),
                             if (toSindorim) locoScale else locoScale * UP_LOCO_K,
-                            body, CabNavy,
+                            body, pal.wheel,
                             no, ink, tm, smoke = true, phase = phase, highlight = mine,
                             dest = dest, smokeK = if (toSindorim) 1f else 0.8f,
+                            // 클레이 색 손잡이 — 남색 스타일은 전부 기본값이라 그림이 안 바뀐다.
+                            // 몸통 그라데이션은 **몸통색이 노랑일 때만** 노랑 램프를 쓴다(신도림행).
+                            bodyRamp = if (!pal.clay) null
+                                else if (body == pal.mineBody) pal.mineTop to pal.mineBottom
+                                else pal.otherTop to pal.otherBottom,
+                            edge = if (!pal.clay) null
+                                else if (body == pal.mineBody) pal.mineRing else pal.otherEdge,
+                            ring = pal.mineRing, smokeColor = pal.smoke, shadowColor = pal.shadow,
+                            // 지선은 늘 대여섯 대뿐이라 밀도 가드가 걸릴 일이 없다(두 겹 고정).
+                            clayShadow = if (pal.clay) 2 else 0,
                         )
 
                         /*
@@ -806,7 +830,7 @@ private fun LineMapCard(
                          */
                         runnerSpots.forEach { (no, pos, c) ->
                             if (c == null) dotOnly(xOf(pos), up = true) else {
-                                loco(c, no, toSindorim = false, body = DepotGray, ink = BadgeInk)
+                                loco(c, no, toSindorim = false, body = pal.depot, ink = pal.otherInk)
                                 drawText(depotTag, topLeft = Offset(
                                     tagLeft(c.x), c.y - depotTag.size.height / 2f))
                             }
@@ -819,12 +843,12 @@ private fun LineMapCard(
                          *
                          * ⚠ 내 열차도 노란 몸통이라 **구분은 몸통색이 아니다**(아래) — 흰 테두리 +
                          * 지붕 위 행선판 + **빨간** 열번 셋이 맡는다. 남의 신도림행 열번은
-                         * [BadgeInk] 남색이라 한눈에 갈린다(노랑 위 남색 대비 12:1).
+                         * `otherInk` 남색이라 한눈에 갈린다(노랑 위 남색 대비 12:1).
                          */
                         spots.filter { it.first.trainNo != mineNo }.forEach { (t, pos, c) ->
                             if (c == null) dotOnly(xOf(pos), !t.toSindorim)
                             else loco(c, t.trainNo, t.toSindorim,
-                                if (t.toSindorim) MineYellow else BadgeSkySoft, BadgeInk)
+                                if (t.toSindorim) pal.mineBody else pal.softBody, pal.otherInk)
                         }
                         // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 표시에 가리면 "표시가 안 된다"는 말이 된다.
                         spots.firstOrNull { it.first.trainNo == mineNo }?.let { (t, pos, c) ->
@@ -832,7 +856,7 @@ private fun LineMapCard(
                             // 행선은 **지붕 위 행선판**이다(v1.6.91 사용자 확정). 종전엔 기관차
                             // 옆에 노란 조각을 따로 붙였는데, 열차와 따로 놀아 *"왜 따로 노냐?"*
                             // 는 말을 들었다. 이제 [drawLoco] 가 한 몸으로 그린다.
-                            else loco(c, t.trainNo, t.toSindorim, MineYellow, MineInk,
+                            else loco(c, t.trainNo, t.toSindorim, pal.mineBody, pal.mineInk,
                                 mine = true, dest = destOf(t.toSindorim))
                         }
 
@@ -862,9 +886,9 @@ private fun LineMapCard(
                             val empty = tm.measure(msg, TextStyle(
                                 fontSize = (if (big) 12f else 11f).sp,
                                 fontWeight = if (failed) FontWeight.Bold else FontWeight.Normal,
-                                color = if (failed) Color.White else Dim))
+                                color = if (failed) pal.title else pal.dim))
                             val hintL = if (!failed) null else tm.measure("오른쪽 위 ↻ 를 눌러 다시 시도",
-                                TextStyle(fontSize = (if (big) 11f else 10f).sp, color = Dim))
+                                TextStyle(fontSize = (if (big) 11f else 10f).sp, color = pal.dim))
                             // 두 줄일 때도 **묶음 전체**를 위 차선 가운데에 둔다(선·역명과 안 겹친다).
                             val gap = 3.dp.toPx()
                             val blockH = empty.size.height + (hintL?.let { gap + it.size.height } ?: 0f)
@@ -896,7 +920,7 @@ private fun LineMapCard(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            BranchChip("지선", big, LoopGreen)
+                            BranchChip("지선", big, pal.rail, pal)
                             // 입고 접근(**15분** 전~도착 전) — 판정·값은 v1.6.43 그대로, 자리만 칩으로 옮겼다.
                             // ⚠ v1.6.91 에서 10분(600초) → 15분(900초). 사용자 요청 *"15분 이내로 .."* —
                             // 10분이면 칩이 떠 있는 시간이 짧아 준비할 틈이 없다. 창을 여기서 넓혀도
@@ -908,11 +932,11 @@ private fun LineMapCard(
                                     BranchChip(
                                         "입고 ${t.trainNo} · " +
                                             if (eta >= 60) "${eta / 60}분 후" else "${eta}초 후",
-                                        big, BadgeSky, modifier = Modifier.weight(1f, fill = false),
+                                        big, pal.otherBody, pal, modifier = Modifier.weight(1f, fill = false),
                                     )
                                 }
                         }
-                        BranchChip("본선 전체 보기", big, LoopGreen, fill = true, onClick = onFullMap)
+                        BranchChip("본선 전체 보기", big, pal.rail, pal, fill = true, onClick = onFullMap)
                     }
                 }
             }
@@ -928,7 +952,7 @@ private fun shortNos(nos: List<String>): String =
 
 /** 헤더 한 줄 — 왼쪽 `신정지선 실시간`, 오른쪽 노란 시계와 새로고침. */
 @Composable
-private fun BranchHeader(nowMillis: Long, big: Boolean, onRefresh: () -> Unit) {
+private fun BranchHeader(nowMillis: Long, big: Boolean, pal: MapPalette, onRefresh: () -> Unit) {
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
     }
@@ -938,12 +962,12 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, onRefresh: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("신정지선 실시간", fontSize = sp, fontWeight = FontWeight.Bold,
-            color = Color.White, maxLines = 1)
+            color = pal.title, maxLines = 1)
         Spacer(Modifier.weight(1f))
         // 시계는 노란색(사용자 확정 — 본선 헤더와 같다).
         Text("%02d:%02d:%02d".format(t.hour, t.minute, t.second),
-            fontSize = sp, fontWeight = FontWeight.Bold, color = MineYellow, maxLines = 1)
-        RefreshButton(onRefresh)
+            fontSize = sp, fontWeight = FontWeight.Bold, color = pal.clock, maxLines = 1)
+        RefreshButton(pal, onRefresh)
     }
 }
 
@@ -952,7 +976,7 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, onRefresh: () -> Unit) {
  * 직접 그린 새로고침 글리프 (원호 + 화살촉) — 아이콘 라이브러리 의존성 없음.
  */
 @Composable
-private fun RefreshButton(onRefresh: () -> Unit) {
+private fun RefreshButton(pal: MapPalette, onRefresh: () -> Unit) {
     var tick by remember { mutableIntStateOf(0) }
     val spin by animateFloatAsState(tick * 360f, tween(700), label = "spin")
     // ⚠ 누르는 것은 **[Surface] 자체**다(v1.6.93). 종전엔 안쪽 [Canvas] 만 13dp + 여백 10dp =
@@ -960,13 +984,13 @@ private fun RefreshButton(onRefresh: () -> Unit) {
     // `Surface(onClick = …)` 이 `minimumInteractiveComponentSize()` 로 터치만 48dp 로 넓힌다.
     Surface(
         onClick = { tick++; onRefresh() },
-        color = Color.White.copy(alpha = 0.10f),
+        color = if (pal.clay) pal.chip else Color.White.copy(alpha = 0.10f),
         shape = CircleShape,
-        border = BorderStroke(1.2.dp, LoopGreen.copy(alpha = 0.75f)),
+        border = BorderStroke(1.2.dp, pal.rail.copy(alpha = 0.75f)),
         modifier = Modifier.padding(start = 8.dp),
     ) {
         Canvas(Modifier.padding(5.dp).size(13.dp).rotate(spin)) {
-            val c = Color(0xFFB9F5C0)
+            val c = if (pal.clay) pal.chipInk else Color(0xFFB9F5C0)
             drawArc(c, startAngle = -50f, sweepAngle = 290f, useCenter = false,
                 style = Stroke(width = 2.2.dp.toPx(), cap = StrokeCap.Round))
             val r = size.minDimension / 2f
@@ -994,21 +1018,27 @@ private fun RefreshButton(onRefresh: () -> Unit) {
  */
 @Composable
 private fun BranchChip(
-    text: String, big: Boolean, tint: Color, fill: Boolean = false,
+    text: String, big: Boolean, tint: Color, pal: MapPalette, fill: Boolean = false,
     modifier: Modifier = Modifier, onClick: (() -> Unit)? = null,
 ) {
+    // 클레이는 칩 색이 한 가지(민트)이고 **누른 칩만 흰 알약**이다 — 본선 상태바 칩과 같다.
     val label: @Composable () -> Unit = {
         Text(
             text,
             fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
-            color = if (fill) MineInk else tint,
+            color = if (pal.clay) pal.chipInk else if (fill) pal.mineInk else tint,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
         )
     }
-    val bg = if (fill) tint else tint.copy(alpha = 0.12f)
+    val bg = when {
+        pal.clay -> if (fill) pal.chipSel else pal.chip
+        fill -> tint
+        else -> tint.copy(alpha = 0.12f)
+    }
     val shape = RoundedCornerShape(50)
-    val line = BorderStroke(1.dp, tint.copy(alpha = 0.85f))
+    val line = BorderStroke(1.dp, if (pal.clay) pal.chipInk.copy(alpha = 0.30f)
+                                  else tint.copy(alpha = 0.85f))
     if (onClick == null) Surface(modifier, shape, bg, border = line) { label() }
     else Surface(onClick, modifier, shape = shape, color = bg, border = line) { label() }
 }

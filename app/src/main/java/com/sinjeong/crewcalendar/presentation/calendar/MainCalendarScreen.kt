@@ -66,6 +66,7 @@ import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import com.sinjeong.crewcalendar.presentation.admin.AdminGate
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
+import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import com.sinjeong.crewcalendar.presentation.menu.MenuDialog
 import com.sinjeong.crewcalendar.presentation.notice.NoticeBanner
 import com.sinjeong.crewcalendar.presentation.roster.changedCorner
@@ -107,6 +108,8 @@ fun MainCalendarScreen(
     val menus by viewModel.menus.collectAsStateWithLifecycle()
     val notices by viewModel.notices.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeController.mode.collectAsStateWithLifecycle()
+    // v1.7.0 — 실시간 지도 색 한 벌. 설정에서 바꾸면 다이얼로그를 다시 안 열어도 따라온다.
+    val mapStyle by viewModel.themeController.mapStyle.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
         ThemeMode.DARK -> true
@@ -337,6 +340,7 @@ fun MainCalendarScreen(
                         onRevert = { viewModel.changeDuty(day.date, null) },
                         onClose = { panelEpochDay = null },
                         recentMemos = viewModel.recentMemos.collectAsStateWithLifecycle().value,
+                        mapStyle = mapStyle,
                         compact = false,
                         // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
                         // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다.
@@ -392,6 +396,7 @@ fun MainCalendarScreen(
                     onRevert = { viewModel.changeDuty(date, null) },
                     onClose = { viewModel.selectDate(null) },
                     recentMemos = viewModel.recentMemos.collectAsStateWithLifecycle().value,
+                    mapStyle = mapStyle,
                     modifier = Modifier.verticalScroll(scroll),
                 )
             }
@@ -1058,6 +1063,8 @@ private fun DayDetailContent(
     onClose: () -> Unit,
     /** 메모칸 위 **빠른 입력 칩** 문구 — 비면 칩 줄 자체를 안 그린다(v1.6.99) */
     recentMemos: List<String> = emptyList(),
+    /** 실시간 지도 스타일(v1.7.0) — 설정 > 화면 > 지도 스타일. 색만 정한다. */
+    mapStyle: MapStyle = MapStyle.CAB,
     compact: Boolean = true,   // true=접힘 바텀시트(기존 그대로), false=펼침 오른쪽 패널
     modifier: Modifier = Modifier,
 ) {
@@ -1325,6 +1332,8 @@ private fun DayDetailContent(
                 bleed = if (compact) 10.dp else 5.dp,
                 // v1.6.84 — 전체 보기(본선 순환선)에서 **내 열번**을 집는 데만 쓴다
                 duty = day.duty, date = day.date,
+                // v1.7.0 — 설정에서 고른 지도 스타일(운전실 남색 / 클레이). **색만** 바뀐다.
+                style = mapStyle,
             )
             // 출근 알람 — 시각이 있는 근무(본선·지선·대기)에만 띄운다. 계산은 BundledTimetable.advise.
             // 후반 칩은 후반사업이 실제로 있는 근무(본선 다이아 / 지선 사업시각)에만 붙인다 —

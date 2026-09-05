@@ -30,6 +30,7 @@ import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WX_LOC_FIXED_KEY
@@ -110,6 +111,9 @@ class SettingsViewModel @Inject constructor(
     }
 
     fun setTheme(mode: ThemeMode) = themeController.set(mode)
+
+    /** 지도 스타일(v1.7.0) — 저장은 테마와 같은 저장소·같은 방식이다. */
+    fun setMapStyle(style: MapStyle) = themeController.setMapStyle(style)
 
     /** 예약된 교번 변경 취소 — 아직 시작 안 한 구간만 버린다(지난 달력은 그대로) */
     fun cancelScheduledPattern() {
@@ -232,6 +236,38 @@ fun SettingsScreen(
                                 fontSize = 11.sp,
                             )
                         }
+                    }
+                }
+            }
+
+            /*
+             * 지도 스타일(v1.7.0) — 사용자 원문 *"설정에 이런 클레이 디자인도 선택할수있게 가능?"*
+             *
+             * 실시간 지도(본선 전체 보기·신정지선 카드)의 **색만** 고른다 — 배치·글자 크기·
+             * 겹침 회피는 스타일과 무관하게 그대로다. 바로 위 테마 줄과 **같은 세그먼트**라
+             * 한 벌로 읽히고, 저장도 테마와 같은 저장소(`theme`)다.
+             *
+             * 한 줄 통째로 깐 이유는 날씨 줄과 같다 — 제목 옆에 붙이면 글자배율 1.5 에서
+             * `운전실 남색` 라벨이 눌린다.
+             */
+            val mapStyle by viewModel.themeController.mapStyle.collectAsStateWithLifecycle()
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("지도 스타일", fontWeight = FontWeight.Bold)
+                Text(
+                    if (mapStyle == MapStyle.CLAY)
+                        "실시간 지도를 크림 바탕·민트 선로의 클레이 그림으로 (다크 모드에서도 밝게)"
+                    else "실시간 지도를 운전실 보조설비 화면처럼 남색으로",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    MapStyle.entries.forEachIndexed { i, s ->
+                        SegmentedButton(
+                            selected = mapStyle == s,
+                            onClick = { viewModel.setMapStyle(s) },
+                            shape = SegmentedButtonDefaults.itemShape(i, MapStyle.entries.size),
+                        ) { Text(s.label, fontSize = 11.sp) }
                     }
                 }
             }

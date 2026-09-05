@@ -12,6 +12,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
@@ -275,6 +276,23 @@ private fun Color.mix(o: Color, t: Float) = Color(
  * @param mapDeg 지도 **전체 회전**(세로 화면 90f — [MainLineMapDialog] 의 `rotationZ`).
  *   **글자를 화면 기준으로 바로 세우는 데만** 쓴다([locoTextDeg]). 몸통 뒤집기는 v1.6.96
  *   부터 [railTowards] 가 정한다.
+ *
+ * ## 아래 여섯은 [MapPalette] 이 주는 **색 손잡이**(v1.7.0)
+ *
+ * 전부 기본값이 **v1.6.99 의 그 값**이라, 아무것도 안 넘기면 운전실 남색 그림이 픽셀 단위로
+ * 같다. 클레이 스타일만 값을 채워 넘긴다.
+ *
+ * @param bodyRamp 몸통 세로 그라데이션의 (지붕 쪽, 배 쪽). `null` = 종전대로 [body] 를
+ *   흰·검으로 섞어 만든다(0.26 / 0.24 — 실화면 크롭으로 맞춘 폭이다).
+ * @param edge 몸통 바깥 1dp 테. `null` = 종전대로 [body] 를 검정 쪽 0.38 로 섞어 만든다.
+ * @param ring 내 열차 외곽 2겹 중 **안쪽 테**. 크림 바탕에서는 흰 테가 안 보여 클레이는
+ *   노란 테(`#D9B32A`)를 쓴다.
+ * @param smokeColor 굴뚝 연기. 남색 위에서는 흰색이라야 보이고, 크림 위에서는 흙색이라야 보인다.
+ * @param shadowColor 바닥 그림자 · 클레이 오프셋 복제 그림자의 색.
+ * @param clayShadow **클레이 오프셋 그림자 겹수**(0 = 안 그림 = CAB). 1 이상이면 같은 실루엣을
+ *   [shadowColor] 로 화면 아래쪽에 겹수만큼 겹쳐 찍고 **바닥 타원은 생략한다** — 블러 없이
+ *   도형 복제만 쓰는 이유는 프레임이다(`BlurMaskFilter` 는 열차마다 새 레이어를 만든다).
+ *   ⚠ 겹수는 부르는 쪽이 **밀도 가드**로 정한다(그리는 열차가 15대를 넘으면 남의 열차는 한 겹).
  */
 internal fun DrawScope.drawLoco(
     center: Offset,
@@ -293,6 +311,12 @@ internal fun DrawScope.drawLoco(
     smokeK: Float = 1f,
     railTowards: Offset = Offset(0f, 1f),
     mapDeg: Float = 0f,
+    bodyRamp: Pair<Color, Color>? = null,
+    edge: Color? = null,
+    ring: Color = Color.White,
+    smokeColor: Color = Color.White,
+    shadowColor: Color = Color.Black.copy(alpha = 0.35f),
+    clayShadow: Int = 0,
 ) {
     val u = scale * 1.dp.toPx()
     /** 배가 선로 반대쪽을 보면 긴 축으로 뒤집는다 — 머리는 지킨 채 바퀴가 선로로 내려간다. */
@@ -337,10 +361,14 @@ internal fun DrawScope.drawLoco(
      * 몸통 아랫배가 갈색으로 죽고, 좁히면 도로 평면 스티커가 된다.
      */
     val bodyBrush = Brush.linearGradient(
-        listOf(body.mix(Color.White, 0.26f), body, body.mix(Color.Black, 0.24f)),
+        listOf(
+            bodyRamp?.first ?: body.mix(Color.White, 0.26f),
+            body,
+            bodyRamp?.second ?: body.mix(Color.Black, 0.24f),
+        ),
         start = p(0f, -15.2f), end = p(0f, 9.8f),
     )
-    val edgeBrush = SolidColor(body.mix(Color.Black, 0.38f))
+    val edgeBrush = SolidColor(edge ?: body.mix(Color.Black, 0.38f))
     val solid = SolidColor(body)
 
     /*
@@ -385,7 +413,7 @@ internal fun DrawScope.drawLoco(
         // 행선판을 달면 **판 위에서** 태어난다 — 판 뒤에서 나오면 굴뚝 연기로 안 읽힌다.
         val y0 = if (plate == null) -20f else plateTop - 2f
         drawCircle(
-            Color.White.copy(alpha = a), (1.6f + 2.0f * v * smokeK) * u,
+            smokeColor.copy(alpha = a), (1.6f + 2.0f * v * smokeK) * u,
             p(8.5f - 3f * v, y0 - 12f * smokeK * v),
         )
     }
@@ -394,11 +422,13 @@ internal fun DrawScope.drawLoco(
      * ③ 바닥 그림자 — 바퀴 **밑**에 깔리므로 몸통보다 먼저 그린다. 진행축(제 몸 x)으로 길고
      * 납작해서 열차가 바닥에 닿아 보인다. 상자([LOCO_BOX_H] 반높이 15.5) 안에 들어간다.
      */
-    run {
+    // ⚠ 클레이는 이 타원 대신 **오프셋 복제 그림자**를 쓴다(아래) — 둘을 같이 그리면
+    // 크림 바탕에서 열차 밑이 두 겹으로 탁해진다.
+    if (clayShadow == 0) {
         val a = p(-25.5f, 10.2f)
         val b = p(18.5f, 15f)
         drawOval(
-            Color.Black.copy(alpha = 0.35f),
+            shadowColor,
             topLeft = Offset(min(a.x, b.x), min(a.y, b.y)),
             size = Size(abs(b.x - a.x), abs(b.y - a.y)),
         )
@@ -429,7 +459,18 @@ internal fun DrawScope.drawLoco(
      * ⚠ 테가 [LOCO_BOX_H] 반높이(15.5dp)를 2.4dp 넘어선다 — 회피 상자보다 살짝 크지만
      *   불투명 테라 글자를 지우지는 않는다(상자를 키우면 배지가 줄줄이 접힌다).
      */
-    if (highlight) { shell(2.7f, solid); shell(1.5f, SolidColor(Color.White)) }
+    /*
+     * ── 클레이 오프셋 그림자 (v1.7.0) ────────────────────────────
+     * **블러를 안 쓴다.** 같은 실루엣을 그림자색으로 화면 아래쪽에 한두 겹 겹쳐 찍는 것뿐이라
+     * 열차가 20대 넘게 떠도 드로우콜이 그림 한 장 값만 는다(`BlurMaskFilter` 는 열차마다
+     * 새 레이어를 만든다). 아래쪽은 [screenDown] 이 지도 회전을 되돌려 정한다 — 세로 화면
+     * 에서도 그림자는 **화면 아래로** 떨어진다.
+     */
+    for (i in clayShadow downTo 1) {
+        val d = screenDown(mapDeg, (0.9f + 1.4f * i) * u)
+        translate(d.x, d.y) { shell(0.6f, SolidColor(shadowColor)) }
+    }
+    if (highlight) { shell(2.7f, solid); shell(1.5f, SolidColor(ring)) }
     // ④ 어두운 1dp 테 — 내 열차는 **안 두른다**. 노랑·흰 두 겹이 이미 윤곽이라, 사이에 끼우면
     // 흰 테가 0.5dp 로 눌려 두 겹이 한 줄로 보인다(실측).
     if (!highlight) shell(1f, edgeBrush)

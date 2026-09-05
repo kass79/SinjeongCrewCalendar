@@ -46,6 +46,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -85,6 +86,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
@@ -92,6 +95,7 @@ import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.MyTrain
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
+import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -218,25 +222,19 @@ private fun decorInsets(ctx: Context, dens: Density): Triple<Dp, Dp, Dp> {
     return Triple(54.dp, 44.dp, 0.dp)
 }
 
-/** 운전실 화면 바탕 — 테마와 무관하게 늘 이 남색이다. */
-private val CabNavy = Color(0xFF0E2A47)
-private val LoopGreen = Color(0xFF2FC24A)
-private val StationWhite = Color(0xFFFFFFFF)
-/** 열차가 서 있는 역 */
-private val StationRed = Color(0xFFF0392B)
-/** 일반 열차 몸통 — 옅은 하늘색 + 진한 남색 열번 */
-private val BadgeSky = Color(0xFFA9DCF5)
-private val BadgeInk = Color(0xFF0A2036)
-private val MineYellow = Color(0xFFFFE14D)
-private val MineInk = Color(0xFFB3261E)
+/*
+ * ⚠ 색 상수는 v1.7.0 에서 **[MapPalette] 한 곳**으로 옮겼다(`MapStyle.kt`) — 설정에서 고른
+ * 스타일(운전실 남색 / 클레이)에 따라 한 벌씩 통째로 갈아 끼운다. `CAB_PALETTE` 값은
+ * v1.6.99 의 상수와 **같다**(`MapStyleTest` 가 잠근다).
+ */
 
 /**
  * **신도림·성수** — 사용자(기관사) 확정: *"신도림역, 성수역이 중요하니까 조금 더 크게 다른
  * 색상으로"*. 둘 다 지선이 갈라지는 역이라 승무원에게 기준점이다.
  *
- * 주황이다 — 내 열차 노랑([MineYellow])·열차 서 있는 역 빨강([StationRed])과 안 헷갈린다.
+ * 색은 팔레트가 정한다: 남색 스타일은 **둘 다 주황**(내 열차 노랑·정차 빨강과 안 헷갈린다),
+ * 클레이는 **신도림 초록·성수 빨강**이다([MapPalette.keyInk]).
  */
-private val KeyOrange = Color(0xFFFFB74D)
 private val KEY_STATIONS = setOf("신도림", "성수")
 
 /**
@@ -244,10 +242,9 @@ private val KEY_STATIONS = setOf("신도림", "성수")
  * *"신도림, 성수빼고 역텍스트 색깔은 동일하게 해! 그리고 서울대입구,교대,삼성,종합운동장,
  * 을지로입구,홍대입구역은 운전취급역이니까 약간 다른 색깔로 해줘!"*
  *
- * 크기는 **보통 역과 같다** — 색만 다르다. 연한 하늘색이라 흰색과는 갈리되
- * 신도림·성수의 주황([KeyOrange])과는 안 헷갈린다.
+ * 크기는 **보통 역과 같다** — 색만 다르다([MapPalette.op]). 연한 하늘색(클레이는 파랑)이라
+ * 보통 역과는 갈리되 신도림·성수와는 안 헷갈린다.
  */
-private val OpStationBlue = Color(0xFF8FD0FF)
 private val OP_STATIONS =
     setOf("서울대입구", "교대", "삼성", "종합운동장", "을지로입구", "홍대입구")
 
@@ -281,8 +278,16 @@ private const val LABEL_DROP_LONG = 3
  * 안 걸리지만, 규칙 순서상 `key` 를 먼저 본다).
  */
 private const val LONG_NAME_LEN = 5
-private val Dim = Color(0xFF8FA9C4)
 private const val TAG = "BranchLive"
+
+/**
+ * **클레이 그림자 밀도 가드**(v1.7.0) — 그리는 열차가 이 수를 넘으면 남의 열차 그림자는
+ * **한 겹**만 찍는다(내 열차는 늘 두 겹이라 그래도 도드라진다).
+ *
+ * 전체 보기는 20~30대가 뜨는데 두 겹이면 그림자만 60장이다 — 겹쳐서 뭉개지기도 하고
+ * 프레임도 먹는다(시안 "구려질 자리" 첫째). 방향 필터를 켜면 대개 이 아래로 떨어진다.
+ */
+private const val CLAY_SHADOW_MAX = 15
 
 /** 폴드 펼침 기관차 배수 — [margin] 과 [drawCabLoop] 이 **같은 값**을 봐야 한다. */
 private fun locoScale(big: Boolean) = if (big) 54f / LOCO_LEN else 1f
@@ -381,9 +386,13 @@ internal enum class DirFilter(val label: String) { INNER("내선"), OUTER("외�
  *
  * @param duty 오늘 근무 — 내 열번 판정에 쓴다. **본선·지선을 가리지 않는다**(사용자 확정).
  * @param date 오늘 날짜(야간 후반 익일 판정에 필요)
+ * @param style 설정 > 화면 > 지도 스타일(v1.7.0). 색만 정한다 — **배치는 스타일과 무관**하다.
  */
 @Composable
-internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -> Unit) {
+internal fun MainLineMapDialog(
+    duty: DutyCode?, date: LocalDate, style: MapStyle = MapStyle.CAB, onDismiss: () -> Unit,
+) {
+    val pal = paletteOf(style)
     var snap by remember { mutableStateOf(Snapshot()) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     var picked by remember { mutableStateOf<String?>(null) }
@@ -444,7 +453,23 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
         properties = DialogProperties(
             usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
-        Surface(Modifier.fillMaxSize(), color = CabNavy) {
+        /*
+         * ── 상태바 아이콘 명암 (v1.7.0) ──────────────────────────────
+         * 클레이는 **크림 바탕**이라 시계·배터리가 흰색이면 안 보인다. 다이얼로그는 제 창이
+         * 따로 있으므로 **그 창의** 컨트롤러만 건드린다 — 액티비티 설정(`MainActivity`)은
+         * 그대로고, 다이얼로그가 닫히면 창째로 사라져 되돌릴 것도 없다.
+         * ⚠ **남색일 때는 한 줄도 안 건드린다** — v1.6.99 화면을 픽셀 단위로 지키기 위해서다.
+         */
+        if (pal.clay) {
+            val dlgView = LocalView.current
+            SideEffect {
+                (dlgView.parent as? DialogWindowProvider)?.window?.let { w ->
+                    WindowCompat.getInsetsController(w, dlgView)
+                        .isAppearanceLightStatusBars = true
+                }
+            }
+        }
+        Surface(Modifier.fillMaxSize(), color = pal.bg) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
                 val portrait = maxHeight > maxWidth
                 // 돌린 뒤의 **내용 크기**. 세로 창이면 가로세로를 맞바꿔 잡는다.
@@ -473,12 +498,12 @@ internal fun MainLineMapDialog(duty: DutyCode?, date: LocalDate, onDismiss: () -
                         // 그리는 쪽이 이 값을 알아야 한다([locoTextDeg]).
                         CabScreen(ch, inset, now, shown, mine, mineMark, candidates,
                             snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss,
-                            mapDeg = 90f)
+                            mapDeg = 90f, pal = pal)
                     }
                 } else {
                     CabScreen(ch, inset, now, shown, mine, mineMark, candidates,
                         snap.error, picked, { picked = it }, eff, { filter = it }, onDismiss,
-                        mapDeg = 0f)
+                        mapDeg = 0f, pal = pal)
                 }
             }
         }
@@ -494,6 +519,8 @@ private fun CabScreen(
     eff: DirFilter, onFilter: (DirFilter) -> Unit, onDismiss: () -> Unit,
     /** 지도 전체 회전 — 세로 창 90f. 글자를 바로 세우는 데 쓴다([drawLoco] `mapDeg`). */
     mapDeg: Float,
+    /** 색 한 벌 — 스타일이 정한다([MapPalette]). 배치 값은 여기서 하나도 안 온다. */
+    pal: MapPalette,
 ) {
     // 폴드 펼침처럼 세로가 넉넉하면 글자를 키운다(사진처럼 시원하게).
     val big = ch >= 480.dp
@@ -554,7 +581,7 @@ private fun CabScreen(
     val emptyMsg = mainEmptyReason(trains.isEmpty(), drawn.isEmpty(), error)
 
     Column(Modifier.fillMaxSize().padding(inset)) {
-        CabHeader(nowMillis, mineMark, candidates, delay, nextSec, big, onDismiss)
+        CabHeader(nowMillis, mineMark, candidates, delay, nextSec, big, pal, onDismiss)
         Box(Modifier.fillMaxWidth().weight(1f)) {
             val d = LocalDensity.current
             // 지도 안 글자배율 상한 — 그림은 dp, 글자만 sp라 배율을 키우면 역 이름이 넘친다.
@@ -632,12 +659,12 @@ private fun CabScreen(
                     }
                 ) {
                     hit = drawCabLoop(tm, placed, mineMark?.trainNo, big, picked,
-                        labelSp, otherK, phase, mapDeg)
+                        labelSp, otherK, phase, mapDeg, pal)
                 }
             }
         }
         CabStatusBar(mine, mineMark, candidates, emptyMsg, error != null && trains.isEmpty(),
-            big, eff, onFilter)
+            big, pal, eff, onFilter)
     }
 }
 
@@ -786,7 +813,7 @@ private val HEAD_LADDER = listOf(
 @Composable
 private fun CabHeader(
     nowMillis: Long, mineMark: MainTrainMark?, candidates: List<String>,
-    delay: Int?, nextSec: Int?, big: Boolean, onDismiss: () -> Unit,
+    delay: Int?, nextSec: Int?, big: Boolean, pal: MapPalette, onDismiss: () -> Unit,
 ) {
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
@@ -794,24 +821,25 @@ private fun CabHeader(
     val baseSp = if (big) 12f else 9.5f
     // 시계는 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
     val clockSp = if (big) 14f else 11.5f
-    val mineColor = if (mineMark != null) MineYellow else Dim
+    // 크림 바탕에서는 노랑이 안 보인다 — 팔레트가 스타일에 맞는 강조색을 준다.
+    val mineColor = if (mineMark != null) pal.mineText else pal.dim
     val head = mineHead(mineMark, candidates, delay, nextSec)
     val tm = rememberTextMeasurer()
 
     fun build(s: HeadSpec): Pair<AnnotatedString, TextStyle> {
         val txt = buildAnnotatedString {
             if (s.title) withStyle(
-                SpanStyle(color = Color.White, fontWeight = FontWeight.Bold)
+                SpanStyle(color = pal.title, fontWeight = FontWeight.Bold)
             ) { append("2호선 실시간") }
             if (s.title) append(" · ")
-            if (s.date) withStyle(SpanStyle(color = Dim)) {
+            if (s.date) withStyle(SpanStyle(color = pal.dim)) {
                 append("%02d/%02d".format(t.monthValue, t.dayOfMonth))
                 if (s.weekday) append("(${WEEKDAYS[t.dayOfWeek.value - 1]})")
                 append(" ")
             }
             withStyle(
                 SpanStyle(
-                    color = MineYellow, fontSize = (clockSp * s.k).sp,
+                    color = pal.clock, fontSize = (clockSp * s.k).sp,
                     fontWeight = FontWeight.Bold,
                 )
             ) {
@@ -845,7 +873,7 @@ private fun CabHeader(
             )
         }
         IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
-            Icon(Icons.Default.Close, "닫기", Modifier.size(20.dp), tint = Color.White)
+            Icon(Icons.Default.Close, "닫기", Modifier.size(20.dp), tint = pal.title)
         }
     }
 }
@@ -870,7 +898,7 @@ private fun CabHeader(
 @Composable
 private fun CabStatusBar(
     mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
-    empty: String?, failed: Boolean, big: Boolean,
+    empty: String?, failed: Boolean, big: Boolean, pal: MapPalette,
     filter: DirFilter, onFilter: (DirFilter) -> Unit,
 ) {
     Row(
@@ -891,7 +919,7 @@ private fun CabStatusBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Chip("2호선", big, LoopGreen)
+            Chip("2호선", big, pal.rail, pal)
             // 정보 칩은 안쪽 Row 가 준 나머지 안에서만 늘어난다 — 넘치면 여기만 `Ellipsis` 다.
             // 잘린 정보는 헤더 줄에 그대로 다시 나오지만, 못 누르는 단추는 없는 단추다.
             val shrink = Modifier.weight(1f, fill = false)
@@ -902,24 +930,25 @@ private fun CabStatusBar(
                 // 그 판정은 이제 [mainEmptyReason] 한 곳이 한다 — 영업 종료·조회 중·한도 소진도
                 // 같이 구분해서 말한다(v1.6.94).
                 empty != null ->
-                    Chip(empty, big, if (failed) Color(0xFFE9A23B) else Dim, modifier = shrink)
+                    Chip(empty, big, if (failed) pal.fail else pal.dim, pal, modifier = shrink)
                 mineMark != null ->
-                    Chip("내 열번 " + mineMark.trainNo, big, MineYellow, fill = true, modifier = shrink)
+                    Chip("내 열번 " + mineMark.trainNo, big, pal.mineBody, pal,
+                        fill = true, modifier = shrink)
                 // 사업 시각을 아는 본선 근무면 언제 나가는지까지 말해 준다.
                 mine != null && !mine.riding && mine.startAt != null && candidates.isNotEmpty() ->
                     Chip(
                         "다음 " + mine.nos.first() + " " + fmt(mine.startAt) +
                             (if (mine.nextDay) " (익일)" else ""),
-                        big, Color(0xFFCFE3F5), modifier = shrink,
+                        big, pal.info, pal, modifier = shrink,
                     )
                 candidates.isNotEmpty() ->
-                    Chip("오늘 열번 " + shortNos(candidates), big, Color(0xFFCFE3F5), modifier = shrink)
-                else -> Chip("오늘 근무 열번: 없음", big, Dim, modifier = shrink)
+                    Chip("오늘 열번 " + shortNos(candidates), big, pal.info, pal, modifier = shrink)
+                else -> Chip("오늘 근무 열번: 없음", big, pal.dim, pal, modifier = shrink)
             }
         }
         // 오른쪽 끝에 방향 필터. 기본은 내 열차 방향이라 처음 열면 이미 한쪽이 켜져 있다.
         DirFilter.entries.forEach { f ->
-            Chip(f.label, big, BadgeSky, fill = f == filter) { onFilter(f) }
+            Chip(f.label, big, pal.otherBody, pal, fill = f == filter) { onFilter(f) }
         }
     }
 }
@@ -935,22 +964,34 @@ private fun fmt(t: LocalTime) = "%02d:%02d".format(t.hour, t.minute)
  */
 @Composable
 private fun Chip(
-    text: String, big: Boolean, tint: Color, fill: Boolean = false,
+    text: String, big: Boolean, tint: Color, pal: MapPalette, fill: Boolean = false,
     modifier: Modifier = Modifier, onClick: (() -> Unit)? = null,
 ) {
+    /*
+     * ⚠ 클레이는 **칩 색이 한 가지**다(v1.7.0 — 민트 알약, 고른 칩만 흰 알약).
+     * 남색 화면은 칩마다 색이 달라 정보를 색으로도 말했지만, 크림 바탕에서 색을 여섯 개
+     * 흩뿌리면 지도보다 칩 줄이 시끄러워진다(시안 확정). 대신 **고른 칩은 흰 알약**이라
+     * 어느 방향을 보고 있는지가 더 또렷하다. 남색 스타일은 한 줄도 안 바뀐다.
+     */
+    val ink = if (pal.clay) pal.chipInk else if (fill) pal.chipInk else tint
     val label: @Composable () -> Unit = {
         Text(
             text,
             // v1.6.88 한 단계 축소(14→12.5 / 11.5→10) — 상태바 한 줄에 필터까지 다 들어가야 한다.
             fontSize = if (big) 12.5.sp else 10.sp, fontWeight = FontWeight.Bold,
-            color = if (fill) MineInk else tint,
+            color = ink,
             maxLines = 1, overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(horizontal = 11.dp, vertical = 4.dp),
         )
     }
-    val bg = if (fill) tint else tint.copy(alpha = 0.12f)
+    val bg = when {
+        pal.clay -> if (fill) pal.chipSel else pal.chip
+        fill -> tint
+        else -> tint.copy(alpha = 0.12f)
+    }
     val shape = RoundedCornerShape(50)
-    val line = BorderStroke(1.dp, tint.copy(alpha = 0.85f))
+    val line = BorderStroke(1.dp, if (pal.clay) pal.chipInk.copy(alpha = 0.30f)
+                                  else tint.copy(alpha = 0.85f))
     if (onClick == null) Surface(modifier, shape, bg, border = line) { label() }
     else Surface(onClick, modifier, shape = shape, color = bg, border = line) { label() }
 }
@@ -1132,6 +1173,7 @@ private fun overlaps(a: List<Offset>, b: List<Offset>): Boolean {
  */
 private fun DrawScope.layoutLabels(
     tm: TextMeasurer, loop: Loop, start: Int, sizeSp: Float, obstacles: List<Rect>,
+    pal: MapPalette,
 ): List<Lab> {
     // 깊이를 아껴야 한다 — 폰에서 루프 안쪽 높이가 ≈163dp 뿐인데 윗변·아랫변 라벨이
     // 양쪽에서 파고들기 때문이다(34dp 로 뒀을 때 가운데에서 서로 만났다).
@@ -1196,10 +1238,12 @@ private fun DrawScope.layoutLabels(
                     (if (name.length >= LONG_NAME_LEN) LABEL_DROP_LONG else LABEL_DROP)
                 ).sp,
             fontWeight = if (key) FontWeight.ExtraBold else FontWeight.Medium,
+            // ⚠ v1.7.0 — 색만 팔레트가 준다. 남색은 신도림·성수가 **둘 다 주황**이고
+            // 클레이는 **신도림 초록·성수 빨강**이다([MapPalette.keyInk]). 크기는 안 바뀐다.
             color = when {
-                key -> KeyOrange
-                name in OP_STATIONS -> OpStationBlue
-                else -> Color.White
+                key -> pal.keyInk(name)
+                name in OP_STATIONS -> pal.op
+                else -> pal.label
             }))
         val (p, _) = loop.at(loop.sOf(k))
         val onTop = k < TOP_N
@@ -1339,6 +1383,8 @@ private fun DrawScope.drawCabLoop(
     phase: Float,
     /** 지도 전체 회전(세로 90f). 열번·행선판 **글자를 화면 기준으로 세우는 데만** 쓴다. */
     mapDeg: Float,
+    /** 색 한 벌([MapPalette]) — **배치 값은 하나도 여기서 안 온다.** */
+    pal: MapPalette,
 ): List<Pair<Offset, String>> {
     /*
      * ── 루프 크기·자리 (v1.6.98) ────────────────────────────────
@@ -1352,14 +1398,43 @@ private fun DrawScope.drawCabLoop(
     val loop = Loop(tp, tp, size.width - tp, size.height - np, radius)
     val start = Line2Stations.MAIN.indexOf(LOOP_START)
 
-    // ── 초록 굵은 둥근 사각형 ────────────────────────────────
-    drawRoundRect(
-        LoopGreen,
-        topLeft = Offset(tp, tp),
-        size = Size(size.width - 2 * tp, size.height - tp - np),
+    /*
+     * ── 굵은 둥근 사각형 = 선로 ──────────────────────────────
+     * 남색은 종전대로 **초록 한 줄**. 클레이는 **세 줄**(그림자 → 튜브 → 하이라이트)이라
+     * 점토를 눌러 만든 관처럼 보인다:
+     *  · 그림자는 같은 경로를 화면 아래로 6dp 옮겨 한 번 더 — **블러 없음**(오프셋 복제).
+     *  · 튜브는 세로 그라데이션(위 밝고 아래 어둡게).
+     *  · 하이라이트는 **같은 경로**를 위로 4dp 옮겨 가늘게 — 시안이 지목한 "모서리에서
+     *    하이라이트가 어긋난다"는 자리를 이렇게 막는다(같은 둥근 사각형이라 곡률이 같다).
+     * 셋 다 [screenDown] 을 쓰므로 세로 화면에서도 그림자가 화면 아래로 떨어진다.
+     */
+    val railW = (if (big) 9f else 7.5f).dp.toPx()
+    val railTL = Offset(tp, tp)
+    val railSz = Size(size.width - 2 * tp, size.height - tp - np)
+    fun rail(brush: Color, w: Float, d: Offset) = drawRoundRect(
+        brush,
+        topLeft = Offset(railTL.x + d.x, railTL.y + d.y),
+        size = railSz,
         cornerRadius = CornerRadius(radius),
-        style = Stroke(width = (if (big) 9f else 7.5f).dp.toPx()),
+        style = Stroke(width = w),
     )
+    pal.railShadow?.let { rail(it, railW, screenDown(mapDeg, 6.dp.toPx())) }
+    if (pal.clay) drawRoundRect(
+        androidx.compose.ui.graphics.Brush.verticalGradient(
+            listOf(pal.railTop, pal.rail, pal.railBottom),
+            startY = railTL.y, endY = railTL.y + railSz.height,
+        ),
+        topLeft = railTL, size = railSz, cornerRadius = CornerRadius(radius),
+        style = Stroke(width = railW),
+    ) else rail(pal.rail, railW, Offset.Zero)
+    /*
+     * ⚠ 하이라이트 굵기는 **선로의 30%**, 띄우는 거리는 그 절반이다(시안의 `6dp · −4dp` 에서
+     * 실화면 보고 고쳤다). 시안 값은 선로가 26px 이던 그림 기준이라, 7.5dp 선로에 6dp 를
+     * 얹으면 **세로 변에서 선로를 거의 덮는다** — 세로 변은 "화면 아래"로 띄운 오프셋이 선로를
+     * 따라 미끄러져 그대로 겹치기 때문이다(실측: 왼쪽 세로변이 연한 띠 하나로 납작해졌다).
+     * 지금 값이면 가로 변은 윗면 하이라이트, 세로 변은 가운데 밝은 줄로 읽혀 둘 다 튜브가 된다.
+     */
+    pal.railHighlight?.let { rail(it, railW * 0.30f, screenDown(mapDeg, -railW * 0.26f)) }
 
     // ── 방향 화살표 — 모서리 호 한가운데(역이 없는 자리)에 안/밖 하나씩 ──
     val arrowOff = (if (big) 15 else 12).dp.toPx()
@@ -1367,9 +1442,9 @@ private fun DrawScope.drawCabLoop(
         val (p, t) = loop.at(loop.cornerMid(corner))
         val nIn = Offset(-t.y, t.x)
         drawChevron(Offset(p.x + nIn.x * arrowOff, p.y + nIn.y * arrowOff), t,
-            LoopGreen, 5.dp.toPx())                                   // 내선 = 시계
+            if (pal.clay) pal.railBottom else pal.rail, 5.dp.toPx())  // 내선 = 시계
         drawChevron(Offset(p.x - nIn.x * arrowOff, p.y - nIn.y * arrowOff),
-            Offset(-t.x, -t.y), BadgeSky, 5.dp.toPx())                // 외선 = 반시계
+            Offset(-t.x, -t.y), if (pal.clay) pal.op else pal.otherBody, 5.dp.toPx())  // 외선
     }
 
     // ── 역 43개 ──────────────────────────────────────────────
@@ -1384,12 +1459,23 @@ private fun DrawScope.drawCabLoop(
         val (p, _) = loop.at(loop.sOf(k))
         val red = k in occupied
         // 신도림·성수는 지름 1.5배 + 흰 테두리 — 이름과 같은 주황이라 멀리서도 짚인다.
-        val key = Line2Stations.MAIN[(k + start) % LOOP_N] in KEY_STATIONS
+        val name = Line2Stations.MAIN[(k + start) % LOOP_N]
+        val key = name in KEY_STATIONS
         val rad = (if (big) 5f else 4f).dp.toPx() * (if (key) 1.5f else 1f)
-        drawCircle(if (red) StationRed else if (key) KeyOrange else StationWhite, rad, p)
-        if (key || red) drawCircle(
-            if (key) Color.White else Color.White.copy(alpha = 0.55f), rad, p,
-            style = Stroke(width = 1.5.dp.toPx()))
+        // 클레이 역 점은 **흰 점토 단추**다 — 밑에 그림자를 한 겹 깔아야 크림 바탕에서 뜬다.
+        if (pal.clay) drawCircle(
+            pal.shadow, rad, p + screenDown(mapDeg, 2.dp.toPx()))
+        drawCircle(if (red) pal.stationRed else if (key) pal.keyInk(name) else pal.station, rad, p)
+        // 클레이는 **모든 역**에 테가 있다(흰 점이 크림에 묻히기 때문). 남색은 종전대로
+        // 신도림·성수와 정차 역에만 — 흰 점 자체가 이미 또렷하다.
+        if (key || red || pal.clay) drawCircle(
+            when {
+                key -> Color.White
+                red -> Color.White.copy(alpha = 0.55f)
+                else -> pal.stationEdge
+            },
+            rad, p,
+            style = Stroke(width = (if (key && pal.clay) 4f else 1.5f).dp.toPx()))
     }
     // ── 열차 자리를 **라벨보다 먼저** 잡는다 ────────────────
     val off = badgeOff(big).toPx()
@@ -1493,7 +1579,7 @@ private fun DrawScope.drawCabLoop(
     }
     // 역 이름은 선로 **반대편**이라 열차 밑에 깔릴 일이 없다 — 한 번에 다 그린다(v1.6.98).
     // (모서리에서만 겹칠 수 있어 [trainRects] 는 여전히 장애물로 넘긴다 — `layoutLabels` KDoc.)
-    layoutLabels(tm, loop, start, labelSp, trainRects).forEach { draw(it) }
+    layoutLabels(tm, loop, start, labelSp, trainRects, pal).forEach { draw(it) }
 
     /*
      * ── 계단으로 올라간 열차의 **받침선** (v1.6.98) ────────────
@@ -1510,7 +1596,7 @@ private fun DrawScope.drawCabLoop(
         val w = Offset(c.x - out.x * foot, c.y - out.y * foot)
         val ax = -out.y
         val ay = out.x
-        drawLine(LoopGreen, Offset(w.x - ax * half, w.y - ay * half),
+        drawLine(if (pal.clay) pal.railBottom else pal.rail, Offset(w.x - ax * half, w.y - ay * half),
             Offset(w.x + ax * half, w.y + ay * half),
             strokeWidth = (if (big) 3f else 2.5f).dp.toPx(), cap = StrokeCap.Round)
     }
@@ -1526,17 +1612,34 @@ private fun DrawScope.drawCabLoop(
      */
     val drawnNos = spots.mapTo(HashSet()) { it.first.trainNo }
     trains.forEach { (t, _) ->
+        // ⚠ 클레이는 **몸통색이 아니라 열번색**으로 찍는다 — 흰 몸통 점은 크림 바탕에서
+        // 아예 안 보인다(v1.7.0 실측: 남색에서는 하늘색 점이 잘 보이던 자리다).
         if (t.trainNo !in drawnNos) drawCircle(
-            if (t.trainNo == mineNo) MineYellow else BadgeSky,
+            when {
+                t.trainNo == mineNo -> if (pal.clay) pal.mineInk else pal.mineBody
+                // 열번색(빨강)은 정차 빨간 점과 헷갈린다 — 바퀴색이 "너무 작아 못 그린 열차"로 읽힌다.
+                pal.clay -> pal.wheel
+                else -> pal.otherBody
+            },
             2.5.dp.toPx(), centers.getValue(t.trainNo))
     }
     // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 열차에 가리면 "표시가 안 된다"는 말이 된다.
     val (mineRows, others) = spots.partition { it.first.trainNo == mineNo }
     // 다른 열차 — 같은 기관차, **몸통만 짧고**(otherK) 연기·물결은 없다.
     // `railTowards = -out` — 바퀴는 늘 선로 쪽이다(v1.6.96 규칙 4).
+    /*
+     * ⚠ **클레이 그림자 밀도 가드**(v1.7.0). 그리는 열차가 [CLAY_SHADOW_MAX] 를 넘으면 남의
+     * 열차는 그림자 **한 겹**이다 — 전체 보기에 20~30대가 뜨면 두 겹은 서로 겹쳐 뭉개지고
+     * 프레임도 먹는다(시안이 지목한 "구려질 자리" 첫째). 내 열차는 늘 두 겹이라 그래도 뜬다.
+     */
+    val otherShadow = if (!pal.clay) 0 else if (spots.size > CLAY_SHADOW_MAX) 1 else 2
     others.forEach { (t, c, out) ->
-        drawLoco(c, headOf(t.trainNo), otherScale, BadgeSky, CabNavy, t.trainNo, BadgeInk, tm,
-            smoke = false, railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg)
+        drawLoco(c, headOf(t.trainNo), otherScale, pal.otherBody, pal.wheel, t.trainNo,
+            pal.otherInk, tm,
+            smoke = false, railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
+            bodyRamp = if (pal.clay) pal.otherTop to pal.otherBottom else null,
+            edge = pal.otherEdge, smokeColor = pal.smoke, shadowColor = pal.shadow,
+            clayShadow = otherShadow)
     }
     mineRows.forEach { (t, c, out) ->
         /*
@@ -1549,10 +1652,15 @@ private fun DrawScope.drawCabLoop(
          * 여덟 후보가 다 막히면 결국 역 이름을 물었다. 이제 기관차와 **한 몸**이라 자리를
          * 고를 일이 없고, 회피는 위에서 [locoBox] `board = true` 한 상자로 이미 넘어갔다.
          */
-        drawLoco(c, headOf(t.trainNo), locoScale, MineYellow, CabNavy, t.trainNo, MineInk, tm,
+        drawLoco(c, headOf(t.trainNo), locoScale, pal.mineBody, pal.wheel, t.trainNo,
+            pal.mineInk, tm,
             smoke = true, phase = phase, highlight = true,
             railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
-            dest = if (t.destName.isBlank()) "" else t.destName + "행")
+            dest = if (t.destName.isBlank()) "" else t.destName + "행",
+            bodyRamp = if (pal.clay) pal.mineTop to pal.mineBottom else null,
+            edge = if (pal.clay) pal.mineRing else null, ring = pal.mineRing,
+            smokeColor = pal.smoke, shadowColor = pal.shadow,
+            clayShadow = if (pal.clay) 2 else 0)
     }
 
     /*
@@ -1566,26 +1674,30 @@ private fun DrawScope.drawCabLoop(
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
     picked?.let { no -> centers[no]?.let { c ->
         trains.firstOrNull { it.first.trainNo == no }?.let { (t, _) ->
-            drawTip(tm, c, t, no == mineNo)
+            drawTip(tm, c, t, no == mineNo, pal)
         }
     } }
     return hits
 }
 
 /** 탭한 열차의 툴팁 — 열번 · 다음역 · 행선 · 내/외선. */
-private fun DrawScope.drawTip(tm: TextMeasurer, c: Offset, t: MainTrainMark, mine: Boolean) {
+private fun DrawScope.drawTip(
+    tm: TextMeasurer, c: Offset, t: MainTrainMark, mine: Boolean, pal: MapPalette,
+) {
     val line1 = t.trainNo + "  " + (if (t.inner) "내선" else "외선") + (if (mine) "  · 내 열차" else "")
     val line2 = t.statusText + " · " + t.destName + "행"
     val l1 = tm.measure(line1, TextStyle(fontSize = 13.sp,
-        fontWeight = FontWeight.ExtraBold, color = if (mine) MineYellow else Color.White))
-    val l2 = tm.measure(line2, TextStyle(fontSize = 12.sp, color = Color(0xFFCFE3F5)))
+        fontWeight = FontWeight.ExtraBold, color = if (mine) pal.mineText else pal.title))
+    val l2 = tm.measure(line2, TextStyle(fontSize = 12.sp, color = pal.info))
     val w = maxOf(l1.size.width, l2.size.width) + 22.dp.toPx()
     val h = l1.size.height + l2.size.height + 15.dp.toPx()
     val x = (c.x - w / 2f).coerceIn(0f, (size.width - w).coerceAtLeast(0f))
     val y = (c.y - h - 16.dp.toPx()).coerceAtLeast(0f)
-    drawRoundRect(Color(0xFF0A1E33), topLeft = Offset(x, y), size = Size(w, h),
+    drawRoundRect(pal.tipBg, topLeft = Offset(x, y), size = Size(w, h),
         cornerRadius = CornerRadius(10.dp.toPx()))
-    drawRoundRect(BadgeSky.copy(alpha = 0.55f), topLeft = Offset(x, y), size = Size(w, h),
+    drawRoundRect(
+        if (pal.clay) pal.stationEdge else pal.otherBody.copy(alpha = 0.55f),
+        topLeft = Offset(x, y), size = Size(w, h),
         cornerRadius = CornerRadius(10.dp.toPx()), style = Stroke(width = 1.2.dp.toPx()))
     drawText(l1, topLeft = Offset(x + 11.dp.toPx(), y + 6.dp.toPx()))
     drawText(l2, topLeft = Offset(x + 11.dp.toPx(), y + 6.dp.toPx() + l1.size.height))
