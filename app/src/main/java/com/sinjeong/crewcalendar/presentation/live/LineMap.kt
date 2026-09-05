@@ -89,7 +89,8 @@ import kotlin.math.floor
  *
  *  1. 남색 바탕(#0E2A47) 고정 — 앱 테마(라이트/다크)와 **무관**하다.
  *  2. 굵은 초록 가로선 하나에 5역을 붙인다. 역 = 흰 점, **열차가 서 있는 역 = 빨간 점**.
- *  3. **신도림**은 이름 주황 +2sp 굵게 · 점 1.5배 + 흰 테두리 — 본선의 신도림·성수와 같은 규칙.
+ *  3. **신도림·양천구청**은 이름 주황 +2sp 굵게 · 점 1.5배 + 흰 테두리 — 본선의 신도림·성수와
+ *     같은 규칙이다([KEY_STATIONS]. 양천구청은 v1.6.97 — 지선 편승역이라 사용자가 지목했다).
  *  4. **아래가 신도림행(주 선로) · 위가 까치산행**(v1.6.95 복선. 아래 절을 보라) — 본선이
  *     내선을 선 안쪽, 외선을 바깥쪽에 두는 것과 같은 발상으로 **방향을 자리로 말한다**.
  *  5. **내 열차**는 흰 테두리 + 빨간 열번 + 지붕 위 행선판, 그리고 **맨 나중에** 그린다
@@ -172,8 +173,14 @@ private val KeyOrange = Color(0xFFFFB74D)
 private val Dim = Color(0xFF8FA9C4)
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-/** 지선에서 강조하는 역 — 본선이 갈라지는 자리. 본선 쪽 `KEY_STATIONS` 와 같은 규칙이다. */
-private const val KEY_STATION = "신도림"
+/**
+ * 지선에서 강조하는 역 — 본선 쪽 `KEY_STATIONS` 와 같은 규칙(주황 이름 +2sp · 큰 흰 테 점).
+ *
+ * **신도림**은 본선이 갈라지는 자리고, **양천구청**은 v1.6.97 에서 더했다 — 사용자 확정
+ * *"신정지선에 양천구청역이 중요하니까 트렌디한 색으로"*. 지선 근무의 **편승역**이라
+ * 승무원이 이 카드에서 가장 먼저 찾는 역이다. 나머지 세 역은 흰색 그대로다.
+ */
+private val KEY_STATIONS = setOf("신도림", "양천구청")
 
 /** 지선 열차를 **실제로 잡는** 근무 — 운휴(`지휴`)·대기(`지대`)는 여기 없다. */
 private val DRIVING_BRANCH = setOf(DutyType.BRANCH, DutyType.BRANCH_NIGHT)
@@ -547,7 +554,22 @@ private fun LineMapCard(
                             return railTop - gapP - h / 2f - r * (h + gapP)
                         }
 
-                        val pad = 16.dp.toPx()
+                        // 상자는 열번 길이와 무관하게 **기관차 한 대 크기**로 늘 같다(v1.6.91) —
+                        // 종전처럼 열번마다 재면 상자가 들쭉날쭉해져 겹침 판정과 그린 결과가 어긋난다.
+                        val locoW = LOCO_BOX_W * locoScale * 1.dp.toPx()
+                        val locoUpW = locoW * UP_LOCO_K
+                        /**
+                         * 양 끝 안쪽 여백 — **기관차 반 폭 + 6dp 이상**을 늘 남긴다(v1.6.97).
+                         *
+                         * 종전엔 16dp 고정이라 종착역(까치산·신도림)에 선 기관차가 [place] 의
+                         * 가장자리 물림(반 폭 + 2dp)까지 끌려와 **카드 둥근 테두리(16dp)에 닿았다** —
+                         * 사용자: *"까치산에 선 5517 의 운전실이 카드 왼쪽 테두리에 닿아 잘려 보인다"*.
+                         * 이제 `xOf(0)`·`xOf(4)` 자체가 반 폭 밖이라 물림이 아예 안 걸리고 양 끝
+                         * 기관차가 온전히 선다. 선로는 종전대로 카드 폭 전체를 가로지르고(밖으로
+                         * 이어지는 그림이다) **역 간격만** 그만큼 촘촘해진다 — 역명이 붙으면
+                         * 아래 `fits()` 가 0.5sp 씩 알아서 줄인다.
+                         */
+                        val pad = maxOf(16.dp.toPx(), locoW / 2f + 6.dp.toPx())
                         // 역 화면 위치 = 구간 실측시간 비율(상·하행 평균). 표시만 변환(위치 계산은 0~4 유지)
                         val stFrac = floatArrayOf(0f, 0.211f, 0.485f, 0.745f, 1f)
                         fun xOf(pos: Float): Float {
@@ -589,7 +611,7 @@ private fun LineMapCard(
                         fun nameX(l: TextLayoutResult, i: Int) = (xOf(i.toFloat()) - l.size.width / 2f)
                             .coerceIn(inset, (size.width - inset - l.size.width).coerceAtLeast(inset))
                         fun nameLabels(sp: Float) = BranchLine.stations.map { name ->
-                            val key = name == KEY_STATION
+                            val key = name in KEY_STATIONS
                             tm.measure(name, TextStyle(
                                 fontSize = (sp + if (key) 2f else 0f).sp,
                                 fontWeight = if (key) FontWeight.ExtraBold else FontWeight.Bold,
@@ -621,7 +643,7 @@ private fun LineMapCard(
                         // 역 점은 **두 선로에 각각**. 위 선로 점은 한 단계 작다(위계 — v1.6.95).
                         BranchLine.stations.forEachIndexed { i, name ->
                             val x = xOf(i.toFloat())
-                            val key = name == KEY_STATION
+                            val key = name in KEY_STATIONS
                             val rad = 3.5.dp.toPx() * (if (key) 1.5f else 1f)
                             fun dot(y: Float, r: Float, red: Boolean, ring: Float) {
                                 drawCircle(
@@ -650,10 +672,8 @@ private fun LineMapCard(
                         hint("▼ 신도림행", rowY(false, 1))
 
                         // ── 기관차 자리잡기 ────────────────────────────────────
-                        // 상자는 열번 길이와 무관하게 **기관차 한 대 크기**로 늘 같다(v1.6.91) —
-                        // 종전처럼 열번마다 재면 상자가 들쭉날쭉해져 겹침 판정과 그린 결과가 어긋난다.
-                        val locoW = LOCO_BOX_W * locoScale * 1.dp.toPx()
-                        val locoUpW = locoW * UP_LOCO_K
+                        // 상자 폭(`locoW`·`locoUpW`)은 위 `pad` 옆에서 잡았다 — 여백과 그림이
+                        // **같은 숫자**를 봐야 양 끝 기관차가 안 잘린다(v1.6.97).
                         val boxes = ArrayList<Rect>()
                         /*
                          * `기지` 꼬리표 — 몸통 **오른쪽**(진행 반대쪽)이 원칙이다. 신도림 끝에서는

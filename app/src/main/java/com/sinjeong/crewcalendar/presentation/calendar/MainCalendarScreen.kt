@@ -1045,21 +1045,27 @@ private fun DayDetailContent(
     // 펼침(본창)이 각자 자기 창의 포커스를 놓는다 — 시트는 별도 윈도우라 바깥 것으로는 안 풀린다.
     val focus = LocalFocusManager.current
     val row = Bundled.timeRowFor(day.duty, day.date)
-    val combo = if (day.duty.isNight) Bundled.comboOf(day.date) else null
     /*
      * **비번(`38~`)은 쉬는 날이 아니라 전날 야간의 이어짐이다**(v1.6.95). 야간 후반 사업이
      * 이 날 아침에 걸려 있으므로 행로표·사업시각·열번을 **전날 야간 기준**으로 계산한다
      * (사용자: *"38 비번도 아침에 근무를 하는데? 행로표와 지선표가 그대로 나와야…"*).
      * 규칙은 [DutyCode.effectiveNight] 한 곳 — 지도 헤더·내 열차도 같은 함수를 본다.
      *
-     * ⚠ 알람 칩·침실 칩은 그대로 **오늘 기준 [row]·[combo]** 만 본다. 후반 편승 알람은
-     *   야간 당일에 이미 익일로 예약되므로([BundledTimetable.Advice.nextDay]) 비번 날 또
-     *   띄우면 같은 알람이 두 번 잡힌다.
+     * **v1.6.97 — 비번 시트는 야간 당일과 *같은 구성*이다**(사용자 정정: *"야간 근무면 다음날
+     * 비번날도 근무를 하니 그 전날과 동일하게 행로표가 있고, 신정지선 편승 에뮬레이터가 있고 …
+     * 편승을 가서 신도림에서 근무를 하니까"*). 그래서 아래가 전부 [effDuty]·[effDate] 기준이다 —
+     * 행로표 · 지선 실시간 카드 · **편승 알람 칩** · 침실 칩. v1.6.95 가 넣었던
+     * `전반사업 …/└열번/후반사업 …/└열번/총근무시간` **글줄은 뺐다** — 행로표 그림에 다 있다.
+     *
+     * ⚠ **알람은 새로 걸지 않는다.** 칩이 [effDate]·[effDuty] 를 그대로 넘기므로 예약 키
+     *   (`fireDate` + leg)가 **야간 당일 시트가 쓰는 것과 같은 값**이 된다 — 같은 알람 한 벌을
+     *   비번 날에서도 켜고 끌 뿐이다. 오늘 날짜로 새로 걸면 같은 알람이 두 벌 잡힌다.
      */
     val post = DutyCode.effectiveNight(day.duty, day.date)
     val effDuty = post?.first ?: day.duty
     val effDate = post?.second ?: day.date
     val effRow = if (post == null) row else Bundled.timeRowFor(effDuty, effDate)
+    val combo = if (effDuty.isNight) Bundled.comboOf(effDate) else null
 
     Column(
         modifier.padding(horizontal = if (compact) 20.dp else 10.dp).padding(bottom = 28.dp),
@@ -1207,11 +1213,14 @@ private fun DayDetailContent(
             }
             /*
              * 사업시각·열번 줄 — 행로표 그림이 있으면 생략한다(그림에 다 들어 있다).
-             * **비번만 예외**다(v1.6.95): 그림은 야간 것 그대로라 *어느 반이 언제인지*를
-             * 말해 주지 못하는데, 비번 날엔 그게 가장 중요한 정보다(전반 = 전날 저녁 /
-             * 후반 = 오늘 아침).
+             *
+             * ⚠ **v1.6.95 의 비번 예외를 v1.6.97 에서 되돌렸다.** 그땐 "그림은 야간 것 그대로라
+             * 어느 반이 언제인지를 말해 주지 못한다"고 봤는데, 사용자가 실화면을 보고 정정했다:
+             * *"행로표 밑에 전반사업, 후반사업 열차 번호까지 정보가 필요가 없어"*. 어느 반이
+             * 언제인지는 위 **한 줄 안내**가 이미 말하고, 시각·열번은 그림 안에 다 있다.
+             * 그림이 없을 때만(범위 밖 다이아 등) 이 줄이 대신 선다 — 그때는 비번도 같다.
              */
-            if (routeAsset == null || post != null) {
+            if (routeAsset == null) {
                 if (effRow != null) {
                     // 비번이면 반마다 **언제인지**를 붙인다. 야간 근무일의 `(익일)`은 그대로.
                     val firstWhen = if (post != null) " (전날 저녁)" else ""
@@ -1232,11 +1241,10 @@ private fun DayDetailContent(
                                 // 지선 야간(지10~14)의 후반도 **익일 아침**이다(v1.6.73). 본선 줄(위)은
                                 // 처음부터 `(익일)`을 달고 있었는데 여기만 빠져 있어 맞췄다.
                                 //
-                                // ⚠ **야간 근무일엔 이 줄이 안 그려진다**(v1.6.77 실측) — 행로표
-                                // 그림이 있으면 위에서 걸러지고, 야간(본선 33~51 · 지선 지10~14)은
-                                // 표가 전건 있다. 야간의 `(익일)`을 실제로 보여 주는 곳은 **알람 칩
-                                // 다이얼로그**다. 반대로 **비번은 그림이 있어도 이 줄을 그린다**
-                                // (v1.6.95) — 그때 [secondWhen]은 `(오늘 아침)`이다.
+                                // ⚠ **야간 근무일·비번엔 이 줄이 안 그려진다**(v1.6.77 실측 /
+                                // v1.6.97) — 행로표 그림이 있으면 위에서 걸러지고, 야간(본선
+                                // 33~51 · 지선 지10~14)은 표가 전건 있다. 야간의 `(익일)`을 실제로
+                                // 보여 주는 곳은 **알람 칩 다이얼로그**다.
                                 KvRow("후반사업", fmtLeg(branchLegs.second) + secondWhen)
                                 KvRow("└ 열번", trains?.secondHalf ?: "—", sub = true)
                                 trains?.let { KvRow("총근무시간", it.totalWorkTime) }
@@ -1299,7 +1307,11 @@ private fun DayDetailContent(
             // 출근 알람 — 시각이 있는 근무(본선·지선·대기)에만 띄운다. 계산은 BundledTimetable.advise.
             // 후반 칩은 후반사업이 실제로 있는 근무(본선 다이아 / 지선 사업시각)에만 붙인다 —
             // 대기 근무에 "알람 없음" 칩이 두 개 겹쳐 뜨는 걸 막는다.
-            if (row != null) {
+            //
+            // ⚠ **비번도 야간 당일과 똑같이 칩을 단다**(v1.6.97) — 넘기는 것이 [effDate]·[effDuty]
+            // 라 예약 키(`fireDate` + leg)가 **야간 당일 시트와 같은 값**이다. 새 예약이 아니라
+            // 같은 알람 한 벌을 비번 날에서도 켜고 끄는 것뿐이다(두 벌이 되면 그게 버그다).
+            if (effRow != null) {
                 val hasSecond = mainLegs != null || branchLegs != null
                 // v1.6.42 ③ — 오른쪽 정렬(Alignment.End)에서 왼쪽으로. 사용자: *"전반알람 아이콘을
                 // 왼쪽으로 위치를 변경해"*. 칩 안에서 아이콘은 이미 글자 왼쪽이었고, 오른쪽에 붙어
@@ -1309,12 +1321,13 @@ private fun DayDetailContent(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
-                    DeadheadAlarmChip(day.date, day.duty, second = false)
-                    if (hasSecond) DeadheadAlarmChip(day.date, day.duty, second = true)
+                    DeadheadAlarmChip(effDate, effDuty, second = false)
+                    if (hasSecond) DeadheadAlarmChip(effDate, effDuty, second = true)
                     // 침실 (v1.6.76) — `combo`가 야간 근무일에만 값이라 주간·휴무엔 아예 안 붙고,
                     // 표에 없는 야간 다이아면 [BundledRooms.of]가 null을 줘서 역시 안 붙는다.
                     // 조합은 v1.6.74 이미지 카드와 같은 [Bundled.comboOf] 값(이 화면 위쪽 `combo`).
-                    combo?.let { BundledRooms.of(it, day.duty.diaRaw) }
+                    // 비번이면 **전날 야간**의 호실이다 — 기상 시각이 곧 이 날 아침이라 그게 맞다.
+                    combo?.let { BundledRooms.of(it, effDuty.diaRaw) }
                         ?.let { RoomChip(it, Modifier.align(Alignment.CenterVertically)) }
                 }
             }

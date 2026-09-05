@@ -235,13 +235,35 @@ private val KeyOrange = Color(0xFFFFB74D)
 private val KEY_STATIONS = setOf("신도림", "성수")
 
 /**
- * **보통 역 이름**이 기준 크기에서 내려가는 폭(v1.6.96 사용자 요청 — *"역 텍스트 너무 큰거
+ * **보통 역 이름**이 기준 크기에서 내려가는 한 단계(v1.6.96 사용자 요청 — *"역 텍스트 너무 큰거
  * 아니가? … 쫌 쭐여도 되는데?"*). 이 앱이 쓰는 "한 단계" = 1.5sp 다.
  *
  * ⚠ **[KEY_STATIONS] 에는 안 먹인다** — 신도림·성수는 종전 크기·주황 그대로가 사용자 확정이다.
  * 폴드 펼침의 큰 글자(`big`)에도 같은 폭으로 붙어 비율이 유지된다.
+ *
+ * ## 몇 단을 내리는지 — v1.6.97 에서 한 단 더
+ *
+ * 사용자: *"역 이름 한단계 더 축소해도 될듯? 그리고 긴 5자 넘어가는 긴 역사는 더 축소해도 되고
+ * 신도림, 성수 빼고."* 그래서 **보통 역 2단([LABEL_DROP]) · 긴 역 3단([LABEL_DROP_LONG])** 이다.
  */
 private const val LABEL_STEP = 1.5f
+
+/** 보통 역 이름이 내려가는 단수(v1.6.97 — v1.6.96 의 1단에서 한 단 더). */
+private const val LABEL_DROP = 2
+
+/** [LONG_NAME_LEN] 이상 긴 역 이름이 내려가는 단수 — 보통 역보다 한 단 더(v1.6.97). */
+private const val LABEL_DROP_LONG = 3
+
+/**
+ * **긴 역 이름** 잣대 — 글자 수로만 판정한다(사용자 원문 *"긴 5자 넘어가는 긴 역사"*).
+ *
+ * 본선 43역 중 여기 걸리는 건 8개다: `을지로입구`·`을지로3가`·`을지로4가`·
+ * `동대문역사문화공원`·`종합운동장`·`서울대입구`·`구로디지털단지`·`영등포구청`.
+ * 이들이 루프 안쪽으로 가장 깊이 파고들어 서로 포개던 이름들이라 여기만 한 단 더 내려도
+ * 겹침이 눈에 띄게 준다. **[KEY_STATIONS] 은 글자 수와 무관하게 예외**다(둘 다 2자라 애초에
+ * 안 걸리지만, 규칙 순서상 `key` 를 먼저 본다).
+ */
+private const val LONG_NAME_LEN = 5
 private val Dim = Color(0xFF8FA9C4)
 private const val TAG = "BranchLive"
 
@@ -445,11 +467,22 @@ private fun CabScreen(
      * 다른 열차 기관차 크기 배수(v1.6.91). 종전 `badgeSp` 와 **같은 이유로** 필터를 켜면 커진다 —
      * 한 차선만 그리니 자리가 남는다.
      *
-     * ⚠ 전체(0.8)는 눈대중이 아니다. 0.8 배 기관차 상자는 48×31 → **38×25dp** 로, v1.6.90 의
+     * ⚠ 전체(0.8)는 눈대중이 아니었다. 0.8 배 기관차 상자는 48×31 → **38×25dp** 로, v1.6.90 의
      * 하늘색 배지(≈39×23dp)와 거의 같다 — 그래서 20대가 넘게 떠도 혼잡도가 안 늘어난다.
      * 1.0 그대로 두면 상자가 폭 23%·높이 35% 커져 역 이름이 밀린다.
+     *
+     * ## v1.6.97 — 한 단(0.1) 더 작게
+     *
+     * 사용자: *"열차 아이콘도 본인 열차빼고 한단계 더 축소해야 최적화 될꺼같은데?"* 그래서
+     * 전체 **0.8 → 0.7**, 방향 필터 **0.92 → 0.82** 이다(같은 폭으로 내려 두 화면의 비율을 지킨다).
+     *
+     * ⚠ **하한은 열번 판독**이다. 열번은 `11sp × scale`([drawLoco]) 이라 0.7 배에서 **7.7sp** —
+     * 4자리 ExtraBold 가 몸통 열번 띠(폭 −23…16dp × 0.7 ≈ 27dp) 안에 그대로 든다(실측 확인).
+     * 더 내리면 글자가 몸통을 넘거나 안 읽힌다 — **0.7 밑으로는 가지 말 것.**
+     * ⚠ **내 열차는 [locoScale] 그대로**다. 여기 값은 남의 열차 전용이다.
+     * ⚠ 지선 카드(`LineMap.kt`)의 `UP_LOCO_K` 는 별개다 — 사용자가 본선만 지목했다.
      */
-    val otherK = if (filtered) 0.92f else 0.8f
+    val otherK = if (filtered) 0.82f else 0.7f
 
     val ctx = LocalContext.current
     // ⚠ 자산이 1.4MB 다 — 읽기·파싱을 **본 스레드에서 하면 안 된다**(다이얼로그가 뜨는 순간
@@ -1078,7 +1111,15 @@ private fun DrawScope.layoutLabels(
             // *"본선 전체보기 역 텍스트 너무 큰거 아니가? 신도림, 성수 빼고 쫌 쭐여도 되는데?"*
             // 신도림·성수는 `sizeSp + 2` 그대로라 **크기도 주황도 안 변한다**(사용자 확정).
             // 상자가 작아진 만큼 아래 회피(SAT)는 저절로 헐거워진다.
-            fontSize = (if (key) sizeSp + 2f else sizeSp - LABEL_STEP).sp,
+            //
+            // ⚠ v1.6.97 — 보통 역이 **2단**([LABEL_DROP]), 긴 역([LONG_NAME_LEN] 자 이상)이
+            // **3단**([LABEL_DROP_LONG]) 이다. 폰 전체보기 기준 11.5 → 8.5 / 7.0sp,
+            // 기본(방향 필터) 화면은 13.5 → 10.5 / 9.0sp 다.
+            fontSize = (
+                if (key) sizeSp + 2f
+                else sizeSp - LABEL_STEP *
+                    (if (name.length >= LONG_NAME_LEN) LABEL_DROP_LONG else LABEL_DROP)
+                ).sp,
             fontWeight = if (key || red) FontWeight.ExtraBold else FontWeight.Medium,
             color = when {
                 key -> KeyOrange

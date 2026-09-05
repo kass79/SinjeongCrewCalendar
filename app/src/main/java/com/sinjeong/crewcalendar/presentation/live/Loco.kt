@@ -457,8 +457,11 @@ internal fun DrawScope.drawLoco(
         number,
         TextStyle(
             // v1.6.96 **한 단계 크게**(9.5 → 11). 4자리 ExtraBold 가 ≈27dp — 열번 띠(y −8…+8,
-            // 폭 −23…16)에 그대로 들어가므로 몸통은 안 늘렸다. 전체 필터의 0.8배 기관차에서도
-            // 8.8sp 라 실화면에서 읽힌다(종전 7.6sp). 행선판은 8.5 그대로 = 열번보다 작다.
+            // 폭 −23…16)에 그대로 들어가므로 몸통은 안 늘렸다. 행선판은 8.5 그대로 = 열번보다 작다.
+            //
+            // ⚠ 이 11 이 **남의 열차 배수의 하한을 정한다.** v1.6.97 에서 본선 타 열차가 0.7 배가
+            // 되어 열번이 7.7sp 다(전체 보기 기준) — 실화면에서 읽히는 마지막 크기다. 배수를
+            // 더 내리려면 여기 11 을 같이 올려야 한다(`MainLineMap.otherK` KDoc).
             fontSize = (11f * scale).sp, fontWeight = FontWeight.ExtraBold, color = numberColor,
         ),
     )

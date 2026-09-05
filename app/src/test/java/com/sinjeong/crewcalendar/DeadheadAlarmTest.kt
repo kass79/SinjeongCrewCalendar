@@ -1,5 +1,7 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.BundledTimetable
+import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.widget.DeadheadAlarm
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -62,5 +64,35 @@ class DeadheadAlarmTest {
     @Test fun brokenEntries_areDroppedNotThrown() {
         listOf("", "쓰레기", "2026-09-04", "2026-09-04|2", "날짜아님|2|19:05|문구", "2026-09-04|2|25:99|문구")
             .forEach { assertNull(it, DeadheadAlarm.decode(it)) }
+    }
+
+    /**
+     * **비번(`50~`) 상세시트의 알람 칩은 야간 당일과 예약 한 벌을 함께 쓴다**(v1.6.97).
+     *
+     * v1.6.97부터 비번 시트가 야간 당일과 **같은 구성**(행로표·지선 실시간 카드·알람 칩)이 됐다.
+     * 칩에 넘기는 값이 [DutyCode.effectiveNight]가 준 `(야간 근무, 야간 날짜)`라, 예약 키
+     * (`fireDate` + leg)가 야간 당일 시트가 만드는 것과 **같은 값**이 된다 — 비번 날에서
+     * 켜고 끄면 그 한 벌이 바뀔 뿐이다.
+     *
+     * ⚠ 여기를 `day.date`(= 비번 날짜)로 되돌리면 후반 알람이 **두 벌** 잡힌다(야간 당일이
+     * 이미 익일로 걸어 둔 것 + 비번 날이 새로 거는 것). 그게 이 테스트가 막는 사고다.
+     */
+    @Test fun `비번 시트의 알람 키는 야간 당일과 한 벌이다`() {
+        val night = LocalDate.of(2026, 9, 4)      // 50 야간
+        val off = night.plusDays(1)               // 50~ 비번
+        val nightDuty = DutyCode.parse("50")
+
+        val (effDuty, effDate) = DutyCode.effectiveNight(DutyCode.parse("50비"), off)!!
+        assertEquals(nightDuty.raw, effDuty.raw)
+        assertEquals(night, effDate)
+
+        // 예약 키의 날짜 부분 — 두 시트가 같은 값을 만든다(= prefs 한 칸을 함께 쓴다).
+        fun fireDate(d: DutyCode, at: LocalDate, second: Boolean) =
+            if (BundledTimetable.advise(d, at, second).nextDay) at.plusDays(1) else at
+        assertEquals(fireDate(nightDuty, night, true), fireDate(effDuty, effDate, true))
+        assertEquals(fireDate(nightDuty, night, false), fireDate(effDuty, effDate, false))
+        // 후반은 **비번 날 아침**에 울린다 — 비번 날짜로 다시 걸면 그게 두 벌째다.
+        assertEquals(off, fireDate(effDuty, effDate, true))
+        assertEquals(night, fireDate(effDuty, effDate, false))
     }
 }
