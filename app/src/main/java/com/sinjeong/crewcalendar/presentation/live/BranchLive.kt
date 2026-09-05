@@ -3,8 +3,10 @@ package com.sinjeong.crewcalendar.presentation.live
 import android.util.Log
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import com.sinjeong.crewcalendar.domain.model.Line2Timetable
+import com.sinjeong.crewcalendar.domain.model.LiveRef
 import com.sinjeong.crewcalendar.domain.model.depotBoundInner
 import com.sinjeong.crewcalendar.domain.model.isDepotBoundSinjeong
+import com.sinjeong.crewcalendar.domain.model.pickRun
 import com.sinjeong.crewcalendar.domain.model.sameRun
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -783,11 +785,16 @@ internal object BranchLive {
      *
      * 지도 폴링과 같은 키 로테이션을 타고 호출은 딱 한 번이다(하루 한도에 실질적 영향 없음).
      */
-    suspend fun locate(trainNos: List<String>): PositionRow? =
-        fetchPositions().getOrNull()?.firstOrNull { row ->
-            // ⚠ 글자 그대로 견주지 않는다 — 같은 운행이 `2340`·`8340` 처럼 다른 접두로 뜬다(v1.7.2).
-            trainNos.any { sameRun(it, row.trainNo, row.statnTnm) }
+    suspend fun locate(trainNos: List<String>): PositionRow? {
+        // ⚠ 글자 그대로 견주지 않는다 — 같은 운행이 `2340`·`8340` 처럼 다른 접두로 뜬다(v1.7.2).
+        // 같은 몸통이 둘 뜨면 [pickRun] 이 하나만 고른다(v1.7.3). 시간표는 안 넘긴다 —
+        // 알람 발화 시 1회 조회라 자산(1.4MB)을 여기서 읽을 자리가 아니다: 정확일치 → 작은 접두.
+        val rows = fetchPositions().getOrNull() ?: return null
+        val lives = rows.map { LiveRef(it.trainNo, it.statnTnm) }
+        return trainNos.firstNotNullOfOrNull { no ->
+            pickRun(no, lives)?.let { l -> rows.first { it.trainNo == l.trainNo } }
         }
+    }
 
     private suspend fun fetchArrivals(station: String) =
         fetch("realtimeStationArrival/0/12/${URLEncoder.encode(station, "UTF-8")}").map(::parseArrivals)

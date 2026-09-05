@@ -92,9 +92,11 @@ import com.sinjeong.crewcalendar.R
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import com.sinjeong.crewcalendar.domain.model.Line2Timetable
+import com.sinjeong.crewcalendar.domain.model.LiveRef
 import com.sinjeong.crewcalendar.domain.model.MyTrain
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.myTrainAt
+import com.sinjeong.crewcalendar.domain.model.pickRun
 import com.sinjeong.crewcalendar.domain.model.sameRun
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
@@ -426,26 +428,39 @@ internal fun MainLineMapDialog(
         duty?.let { myTrainAt(it, date, LocalDateTime.now()) }
     }
     val shown = snap.mainTrains
+    // 자산 1.4MB — 본 스레드에서 읽으면 다이얼로그가 멎는다. 로더는 캐시라 [CabScreen] 것과 한 벌이다.
+    val ctxTt = LocalContext.current
+    val ttPick by produceState<Line2Timetable?>(null) {
+        value = withContext(Dispatchers.IO) { Line2TimetableLoader.get(ctxTt) }
+    }
     /*
-     * 후보 중 **실제로 API 에 살아 있는** 첫 번째가 내 열차다(추정하지 않는다 — MyTrain KDoc).
+     * **후보(몸통) 하나에 라이브 하나** — [pickRun] 이 고른다(v1.7.3).
      *
      * ⚠ 견주는 잣대는 [sameRun] 이다(v1.7.2) — 행로표의 `2340` 이 API 에는 **`8340`** 으로
      * 뜬다. 글자 그대로 견주던 종전 코드는 사용자 실측에서 `44` 다이아를 통째로 놓쳤다.
+     * 다만 뒤 세 자리만 보므로 `2372`·`8372` 가 동시에 살아 있으면 **둘 다** 맞다고 한다 —
+     * v1.7.2 는 그래서 한 몸통에 노란 열차를 둘 세웠다. [pickRun] 이 정확일치 → 시간표 근접
+     * (지연 ±15분) → 작은 접두 순으로 **하나만** 고른다.
+     * **서로 다른 몸통**(전반 `340` · 후반 `042`)은 각각 골라 여전히 둘 다 노랑이다.
      * [mineRoute] 는 그때 맞은 **행로표 번호**(헤더가 괄호로 같이 보여 준다).
      */
-    val minePair = remember(candidates, shown) {
-        candidates.firstNotNullOfOrNull { no ->
-            shown.firstOrNull { sameRun(no, it.trainNo, it.destName) }?.let { no to it }
+    val minePairs = remember(candidates, shown, ttPick, now / 60_000) {
+        val lives = shown.map { LiveRef(it.trainNo, it.destName, it.statnNm, it.inner) }
+        val (day, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
+        val w = Line2Timetable.weekTagOf(day)
+        val lookup = { cand: String, ref: LiveRef ->
+            ttPick?.schedSecAt(w, Line2Timetable.inoutOf(ref.inner), cand, ref.station, sec, ref.dest)
+        }
+        candidates.mapNotNull { no ->
+            pickRun(no, lives, sec, lookup)?.let { l -> no to shown.first { it.trainNo == l.trainNo } }
         }
     }
+    val minePair = minePairs.firstOrNull()
     val mineMark = minePair?.second
     val mineRoute = minePair?.first
     // 내 열번이 **여럿 살아 있으면 전부 노랑**(헤더·칩은 첫 번째만). 야간처럼 전·후반 열번이
     // 같이 굴러가는 시간대엔 두 대가 동시에 뜬다 — 하나만 칠하면 나머지가 남의 열차로 보인다.
-    val mineNos = remember(candidates, shown) {
-        shown.filter { m -> candidates.any { sameRun(it, m.trainNo, m.destName) } }
-            .mapTo(HashSet()) { it.trainNo }
-    }
+    val mineNos = remember(minePairs) { minePairs.mapTo(HashSet()) { it.second.trainNo } }
     val eff = filter
         ?: mineMark?.let { if (it.inner) DirFilter.INNER else DirFilter.OUTER }
         ?: DirFilter.ALL

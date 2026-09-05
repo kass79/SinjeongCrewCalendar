@@ -69,7 +69,9 @@ import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.Line2Timetable
+import com.sinjeong.crewcalendar.domain.model.LiveRef
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
+import com.sinjeong.crewcalendar.domain.model.pickRun
 import com.sinjeong.crewcalendar.domain.model.sameRun
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.Dispatchers
@@ -382,10 +384,14 @@ private fun LineMapCard(
         else no to (4f - minOf(4f - DEPOT_RUN_END, e * ((4f - DEPOT_RUN_END) / DEPOT_RUN_SEC)))
     }
     // 후보 중 **실제로 API 에 살아 있는** 첫 번째가 내 열차다. 없으면 없는 것이다.
-    // ⚠ 잣대는 [sameRun] — 같은 운행이 다른 접두로 뜬다(v1.7.2, 본선 지도와 같은 함수).
-    // 지선 후보(`5xxx`)는 그 함수가 **정확히 같은 번호만** 받으므로 종전 동작 그대로다.
-    val mine = candidates.firstNotNullOfOrNull { no ->
-        trains.firstOrNull { sameRun(no, it.trainNo) }
+    // ⚠ 잣대는 [pickRun] — 같은 운행이 다른 접두로 뜨고(v1.7.2), 같은 몸통이 둘 뜨면
+    // 하나만 고른다(v1.7.3, 본선 지도와 같은 함수). 지선 후보(`5xxx`)는 [sameRun] 이
+    // **정확히 같은 번호만** 받으므로 종전 동작 그대로다.
+    val mine = run {
+        val lives = trains.map { LiveRef(it.trainNo) }
+        candidates.firstNotNullOfOrNull { no ->
+            pickRun(no, lives)?.let { l -> trains.first { it.trainNo == l.trainNo } }
+        }
     }
 
     Card(

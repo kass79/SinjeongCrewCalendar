@@ -115,6 +115,23 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
             .minOrNull()
     }
 
+    /**
+     * 이 운행이 [stationName] 을 지나는 예정 시각 중 [nowSec] 에 **가장 가까운** 것(자정 기준 초).
+     *
+     * [arriveSecAt] 과 달리 **지나간 정차도 본다** — 늦은 열차가 아직 그 역에 서 있는지를
+     * 보려는 것이라 미래만 보면 늘 빈손이다. [pickRun] 이 같은 몸통 라이브 둘을 가를 때 쓴다(v1.7.3).
+     */
+    fun schedSecAt(
+        weekTag: Int, inout: Int, trainNo: String, stationName: String, nowSec: Int,
+        dest: String? = null,
+    ): Int? {
+        val idx = stationIdx(stationName).takeIf { it >= 0 } ?: return null
+        return runStops(weekTag, inout, trainNo, dest, nowSec)
+            .filter { it.stationIdx == idx }
+            .map(::eventSec).filter { it >= 0 }
+            .minByOrNull { kotlin.math.abs(it - nowSec) }
+    }
+
     /** 이 역 → 다음 역 소요 **초**. 지도의 열차 전진 속도가 이 값을 쓴다. 모르면 120. */
     fun segmentSeconds(
         weekTag: Int, inout: Int, trainNo: String, stationName: String,

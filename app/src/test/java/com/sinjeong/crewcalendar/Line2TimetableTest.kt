@@ -50,6 +50,16 @@ class Line2TimetableTest {
         assertEquals(0, tt.delayMinutes(1, 2, "5513", "홍대입구", "1", 90000, "성수종착"))
     }
 
+    /**
+     * [pickRun] 이 같은 몸통 둘을 가를 때 쓰는 시각 — [arriveSecAt] 과 달리 **지나간 정차도 준다**
+     * (늦은 열차가 아직 그 역에 서 있는지를 보려는 것이라 미래만 보면 늘 빈손이다, v1.7.3).
+     */
+    @Test fun `schedSecAt 은 지나간 정차도 지금에 가장 가까운 것으로 준다`() {
+        assertEquals(25200, tt.schedSecAt(1, 1, "2006", "홍대입구", 25400))   // 이미 지난 도착
+        assertEquals(25320, tt.schedSecAt(1, 1, "8006", "신촌", 25400))       // 접두가 달라도 찾는다
+        assertNull(tt.schedSecAt(1, 1, "8006", "신도림", 25200))              // 안 지나는 역
+    }
+
     /** 입고 안내가 쓰는 신도림 도착 시각 — 지나간 정차는 안 준다. */
     @Test fun `역 도착 시각은 지금 이후 첫 번째`() {
         assertEquals(25320, tt.arriveSecAt(1, 1, "8006", "신촌", 25200))

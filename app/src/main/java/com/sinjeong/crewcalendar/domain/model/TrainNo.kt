@@ -78,3 +78,62 @@ fun sameRun(candidate: String, live: String, liveDest: String? = null): Boolean 
         else -> false
     }
 }
+
+/**
+ * [pickRun] 이 견주는 **라이브 한 대** — 부르는 쪽의 행 타입(`MainTrainMark`·`PositionRow`·
+ * `TrainMark`)에서 필요한 네 값만 옮겨 담는다. 고른 뒤 원래 행은 `trainNo` 로 되찾는다
+ * (한 스냅샷에 같은 열번이 두 줄로 오지는 않는다).
+ */
+data class LiveRef(
+    val trainNo: String,
+    /** API 행선(`statnTnm`·`destName`) — 접두 `5` 충돌을 가릴 때 [sameRun] 이 본다. */
+    val dest: String? = null,
+    /** API 가 준 지금 역명 — 시간표 근접 판정용. 모르면 빈 문자열(그 단계를 건너뛴다). */
+    val station: String = "",
+    /** true = 내선. 시간표의 어느 판(`inout`)을 볼지 고른다. */
+    val inner: Boolean = true,
+)
+
+/** [pickRun] 이 시간표 근접으로 가를 때 봐 주는 지연 — **±15분**. 넘으면 다른 운행으로 본다. */
+const val PICK_SLACK_SEC = 15 * 60
+
+/**
+ * **한 후보(몸통)에 라이브가 여럿 맞으면 하나만 고른다** (v1.7.3).
+ *
+ * [sameRun] 은 *뒤 세 자리*만 보므로 `2372` 와 `8372` 가 동시에 살아 있으면 **둘 다** 맞다고
+ * 한다 — v1.7.2 의 본선 지도는 그래서 둘 다 노랗게 칠했다. 한 몸통은 물리 열차 하나다.
+ * **서로 다른 몸통**(전반 `340` · 후반 `042`)은 각각 제 열차를 고르므로 여전히 둘 다 강조된다.
+ *
+ * 우선순위 — 위에서 갈리면 아래는 안 본다:
+ *  1. **번호가 정확히 같은 것** (`2372` 후보에 라이브 `2372` 가 있으면 그것)
+ *  2. **시간표에서 그 운행의 지금 자리에 가장 가까운 것** — [timetableLookup] 이 준
+ *     *그 운행이 이 라이브가 선 역을 지나는 예정 시각*이 [nowSec] 에 가장 붙은 것.
+ *     지연 **±[PICK_SLACK_SEC]** 밖이면 후보에서 뺀다.
+ *     (시간표는 역→시각으로 짜여 있어 *시각 거리*로 재지만, 운행은 한 방향으로만 가므로
+ *     역 인덱스 거리와 순서가 같다. 실측 2026-09-05 20:22:57 — 토요일 내선 `2372` 는
+ *     선릉 20:19:30·역삼 20:22:00 예정이고 라이브 `8372` 가 **선릉**에 있었다: +3.5분.)
+ *  3. 그래도 못 가르면 **접두가 작은 것**(행로표의 `2xxx` 에 가장 가깝다).
+ *
+ * @param lives 지금 API 에 살아 있는 열차 전부. 후보와 안 맞는 것은 여기서 걸러진다.
+ * @param nowSec 자정 기준 초(`Line2Timetable.serviceClock`). 음수면 2단계를 건너뛴다.
+ * @param timetableLookup `(후보 열번, 라이브) → 예정 시각(초)`. null 이면 2단계를 건너뛴다.
+ */
+fun pickRun(
+    candidate: String,
+    lives: List<LiveRef>,
+    nowSec: Int = -1,
+    timetableLookup: ((String, LiveRef) -> Int?)? = null,
+): LiveRef? {
+    val fits = lives.filter { sameRun(candidate, it.trainNo, it.dest) }
+    if (fits.size <= 1) return fits.firstOrNull()
+    val c = normNo(candidate)
+    fits.firstOrNull { normNo(it.trainNo) == c }?.let { return it }
+    if (nowSec >= 0 && timetableLookup != null) {
+        fits.mapNotNull { l -> timetableLookup(candidate, l)?.let { l to kotlin.math.abs(it - nowSec) } }
+            .filter { it.second <= PICK_SLACK_SEC }
+            .minByOrNull { it.second }
+            ?.let { return it.first }
+    }
+    // 뒤 세 자리는 이미 다 같으니 네 자리 문자열 최소 = 접두 최소다.
+    return fits.minByOrNull { normNo(it.trainNo) ?: it.trainNo }
+}

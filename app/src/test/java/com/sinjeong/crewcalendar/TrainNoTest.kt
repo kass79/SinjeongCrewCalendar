@@ -1,7 +1,9 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.LiveRef
 import com.sinjeong.crewcalendar.domain.model.depotBoundInner
 import com.sinjeong.crewcalendar.domain.model.isDepotBoundSinjeong
+import com.sinjeong.crewcalendar.domain.model.pickRun
 import com.sinjeong.crewcalendar.domain.model.runKey
 import com.sinjeong.crewcalendar.domain.model.sameRun
 import org.junit.Assert.assertEquals
@@ -85,5 +87,71 @@ class TrainNoTest {
         assertEquals(true, depotBoundInner("4340"))
         assertEquals(false, depotBoundInner("6341"))
         assertNull(depotBoundInner("2340"))
+    }
+
+    // ── pickRun (v1.7.3) — 한 몸통에 라이브가 여럿이면 하나만 ──────────────
+
+    /**
+     * v1.7.2 화면에 노란 열차가 **한 몸통에 둘** 섰다(`2372` 와 `8372`). 한 몸통 = 물리 열차 하나다.
+     * 번호가 정확히 같은 것이 1순위 — 행로표 번호 그대로 뜬 열차가 그 운행이다.
+     */
+    @Test
+    fun `같은 몸통이 둘이면 정확일치가 이긴다`() {
+        val lives = listOf(
+            LiveRef("8372", "성수종착", "선릉"),
+            LiveRef("2372", "성수종착", "신림"),
+        )
+        assertEquals("2372", pickRun("2372", lives)?.trainNo)
+    }
+
+    /** 하나뿐이면 접두가 달라도 그것이다 — v1.7.2 가 고친 본래 문제(`2340` 후보에 `8340` 만). */
+    @Test
+    fun `하나뿐이면 접두가 달라도 그것`() {
+        val lives = listOf(LiveRef("8340", "성수종착", "한양대"), LiveRef("2341", "성수종착", "사당"))
+        assertEquals("8340", pickRun("2340", lives)?.trainNo)
+        assertNull("맞는 라이브가 없으면 없는 것이다", pickRun("2350", lives))
+        assertNull(pickRun("2340", emptyList()))
+    }
+
+    /**
+     * 정확일치가 없고 둘이 남으면 **시간표에서 지금 자리에 가까운 쪽**.
+     * 2026-09-05 20:22:57 실측이 이 모양이었다 — 토요일 내선 `2372` 는 선릉 20:19:30 예정이고
+     * 라이브 `8372` 가 선릉에 있었다(+3.5분). 신림은 20:41 예정이라 18분 넘게 어긋난다.
+     */
+    @Test
+    fun `정확일치가 없으면 시간표에 가까운 쪽`() {
+        val lives = listOf(LiveRef("8340", "성수종착", "한양대"), LiveRef("4340", "성수종착", "사당"))
+        val now = 20 * 3600
+        val nearHanyang = mapOf("한양대" to now + 180, "사당" to now + 3600)
+        val nearSadang = mapOf("한양대" to now - 3600, "사당" to now - 120)
+        assertEquals("8340", pickRun("2340", lives, now) { _, l -> nearHanyang[l.station] }?.trainNo)
+        assertEquals("4340", pickRun("2340", lives, now) { _, l -> nearSadang[l.station] }?.trainNo)
+    }
+
+    /** 시간표를 못 보거나 둘 다 ±15분 밖이면 **접두가 작은 것**(행로표 `2xxx` 에 가장 가깝다). */
+    @Test
+    fun `시간표가 못 가르면 접두가 작은 것`() {
+        val lives = listOf(LiveRef("8340", "성수종착", "한양대"), LiveRef("4340", "성수종착", "사당"))
+        val now = 20 * 3600
+        assertEquals("4340", pickRun("2340", lives)?.trainNo)
+        assertEquals("4340", pickRun("2340", lives, now) { _, _ -> null }?.trainNo)
+        // 둘 다 30분 어긋나면 시간표를 근거로 못 쓴다(±15분 밖)
+        assertEquals("4340", pickRun("2340", lives, now) { _, _ -> now + 1800 }?.trainNo)
+    }
+
+    /** **몸통이 다르면 각각 제 열차를 고른다** — v1.7.2 의 "내 열번 전부 노랑"은 이쪽 이야기다. */
+    @Test
+    fun `다른 몸통은 각각 잡힌다`() {
+        val lives = listOf(LiveRef("8340", "성수종착", "한양대"), LiveRef("2042", "성수종착", "신촌"))
+        assertEquals("8340", pickRun("2340", lives)?.trainNo)
+        assertEquals("2042", pickRun("2042", lives)?.trainNo)
+    }
+
+    /** 지선 후보는 [sameRun] 이 정확일치만 받으므로 [pickRun] 도 종전 그대로다. */
+    @Test
+    fun `지선 후보는 정확일치 그대로`() {
+        val lives = listOf(LiveRef("5695", "까치산"), LiveRef("8695", "성수종착"), LiveRef("5697", "신도림지선"))
+        assertEquals("5695", pickRun("5695", lives)?.trainNo)
+        assertNull(pickRun("5693", lives))
     }
 }
