@@ -1,8 +1,11 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
+import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.Mate
+import com.sinjeong.crewcalendar.domain.model.ReviewerAccount
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.presentation.mates.MatesHeader
 import com.sinjeong.crewcalendar.presentation.roster.mergeRoster
@@ -224,5 +227,146 @@ class MatesTest {
             emptyList(),
         )
         assertEquals(rows.size, rows.map { it.name + "|" + it.group.name }.toSet().size)
+    }
+
+    // ── v1.7.10 ③ 로그인 기본값 줄 무시 ─────────────────────────────────
+    //
+    // 2026-09-07 카스: *"한상무 근무가 오늘 휴17인거 같은데? 동료 근무엔 오류?"* ·
+    // *"정재헌은 통상근무일껄?"*. 내장 명단은 맞았다(9/7 승무 3종 전원 오차 0). 진범은
+    // `LoginScreen.AuthViewModel.submitCredential` 이 **근무선택 전에** 만들던 `users` 문서다 —
+    // `patternOffset = 0` · 기관사면 지선 · 차장이면 본선차장이 박혀 나가고, `mergeRoster` 는
+    // live 를 내장보다 앞세우므로(v1.6.87) 한상무가 **지선 0 인 김학진의 근무**를 뒤집어썼다.
+    // 실측으로 이 서명에 걸린 사람은 다섯(한상무·정재헌·박소영·송민지·조한빈)이고
+    // `users` 54개 전부 `addedBy` 가 없었다(관리자 대리등록 0건).
+
+    /** ㉮ 서명 + 내장에 있는 이름 → **내장값이 나온다**. `uid` 는 살아남는다 */
+    @Test fun login_default_row_gives_way_to_the_bundled_row() {
+        // 한상무·정재헌은 기관사 기본값(지선 0), 차장 셋은 차장 기본값(본선차장 0)으로 박혀 있었다
+        val fake = listOf(
+            live("한상무", CrewGroup.BRANCH, 0), live("정재헌", CrewGroup.BRANCH, 0),
+            live("박소영", CrewGroup.MAIN_CONDUCTOR, 0), live("송민지", CrewGroup.MAIN_CONDUCTOR, 0),
+            live("조한빈", CrewGroup.MAIN_CONDUCTOR, 0),
+        )
+        val rows = mergeRoster(null, fake, emptyList())
+        val expected = mapOf(
+            "한상무" to (CrewGroup.MAIN_DRIVER to 88),   // 본선기관사 88 = 9/7 `휴17`
+            "정재헌" to (CrewGroup.OFFICE_DAY to 0),      // 통상근무
+            "박소영" to (CrewGroup.MAIN_CONDUCTOR to 36),
+            "송민지" to (CrewGroup.MAIN_CONDUCTOR to 67),
+            "조한빈" to (CrewGroup.MAIN_CONDUCTOR to 105),
+        )
+        expected.forEach { (name, go) ->
+            val row = rows.single { it.name == name }
+            assertEquals(name, go.first, row.group)
+            assertEquals(name, go.second, row.offset)
+            // 줄을 버리지 않고 고쳐 쓴다 — `uid` 가 빠지면 근무변경이 조용히 사라진다
+            assertEquals(name, "uid_$name", row.uid)
+        }
+        assertEquals("가짜 줄이 내장 줄로 대체될 뿐 총원은 안 변한다", bundledOnly.size, rows.size)
+    }
+
+    /** ㉯ 같은 서명이라도 **내장에 없는 이름은 살아남는다** (조건 ③ — 빠뜨리면 통째로 사라진다) */
+    @Test fun login_default_signature_keeps_a_name_that_is_not_in_the_bundled_roster() {
+        val newcomer = live("가나다라", CrewGroup.BRANCH, 0)
+        val rows = mergeRoster(null, listOf(newcomer), emptyList())
+        val row = rows.single { it.name == "가나다라" }
+        assertEquals(CrewGroup.BRANCH, row.group)
+        assertEquals(0, row.offset)
+        assertEquals("uid_가나다라", row.uid)
+        assertEquals(bundledOnly.size + 1, rows.size)
+        // 내장 명단에 없다 = 조건 ③ 미충족
+        assertEquals(emptyList<Any>(), BundledRoster.realEntriesFor("가나다라"))
+    }
+
+    /** ㉰ 서명이 아닌 live 줄(차장 70 · 지선 5 · 본선 0)은 **종전대로 이긴다** */
+    @Test fun a_row_that_was_actually_chosen_still_wins() {
+        // offset 이 0 이 아니면 서명이 아니다
+        val conductor70 = mergeRoster(null, listOf(live("한상무", CrewGroup.MAIN_CONDUCTOR, 70)), emptyList())
+        assertEquals(CrewGroup.MAIN_CONDUCTOR, conductor70.single { it.name == "한상무" }.group)
+        assertEquals(70, conductor70.single { it.name == "한상무" }.offset)
+
+        val branch5 = mergeRoster(null, listOf(live("한상무", CrewGroup.BRANCH, 5)), emptyList())
+        assertEquals(CrewGroup.BRANCH, branch5.single { it.name == "한상무" }.group)
+        assertEquals(5, branch5.single { it.name == "한상무" }.offset)
+
+        // offset 이 0 이어도 소속이 기본값 둘(지선·본선차장)이 아니면 서명이 아니다
+        listOf(CrewGroup.MAIN_DRIVER, CrewGroup.SHIFT_4_2, CrewGroup.OFFICE_DAY).forEach { g ->
+            val rows = mergeRoster(null, listOf(live("한상무", g, 0)), emptyList())
+            val row = rows.single { it.name == "한상무" }
+            assertEquals(g.name, g, row.group)
+            assertEquals(g.name, 0, row.offset)
+        }
+    }
+
+    /** ㉱ 견습 3명의 live 줄은 **계속 이긴다** — 그들의 내장 offset 은 감시값이라 서명이 안 걸린다 */
+    @Test fun trainee_rows_are_never_treated_as_a_login_default() {
+        val trainees = listOf("김성민", "김충현", "원두환")
+        // 실측: 그들이 고른 값은 offset 0 이 아니었다. 그래도 **0 이어도 안전해야** 한다 —
+        // 내장 줄이 `미배정`(감시값)이라 `realEntriesFor` 가 비고, 그러면 조건 ③ 이 안 선다.
+        trainees.forEach { n -> assertEquals(n, emptyList<Any>(), BundledRoster.realEntriesFor(n)) }
+        // 견습이 정말로 지선 0 을 골라도 그 선택이 `미배정`으로 되덮이지 않는다
+        val rows = mergeRoster(null, trainees.map { live(it, CrewGroup.BRANCH, 0) }, emptyList())
+        trainees.forEach { n ->
+            val row = rows.single { it.name == n }
+            assertEquals(n, CrewGroup.BRANCH, row.group)
+            assertEquals(n, 0, row.offset)
+            assertNull("$n 감시값이 남았다", BundledRoster.noDutyLabel(row.offset))
+        }
+        assertEquals(bundledOnly.size, rows.size)
+    }
+
+    /**
+     * ⚠ 진짜 **김학진(지선 0)·홍대종(차장 0)** 은 서명에 걸리지만 **내장값이 같은 값**이라
+     * 화면이 한 칸도 안 바뀐다. `uid` 도 그대로 남는다(줄을 버리지 않고 고쳐 쓰기 때문).
+     */
+    @Test fun real_branch_zero_row_is_unchanged() {
+        listOf("김학진" to CrewGroup.BRANCH, "홍대종" to CrewGroup.MAIN_CONDUCTOR).forEach { (n, g) ->
+            val rows = mergeRoster(null, listOf(live(n, g, 0)), emptyList())
+            val row = rows.single { it.name == n }
+            assertEquals(n, g, row.group)
+            assertEquals(n, 0, row.offset)
+            assertEquals(n, "uid_$n", row.uid)
+            assertEquals(n, listOf(g to 0), BundledRoster.realEntriesFor(n))
+        }
+    }
+
+    /** 동명이인은 어느 내장 줄인지 못 고른다 → 가짜 줄만 빠지고 내장 두 줄이 둘 다 산다 */
+    @Test fun login_default_row_of_a_namesake_is_dropped_not_guessed() {
+        val rows = mergeRoster(null, listOf(live("김지환", CrewGroup.BRANCH, 0)), emptyList())
+        assertEquals(2, BundledRoster.realEntriesFor("김지환").size)
+        assertEquals(2, rows.count { it.name == "김지환" })
+        assertEquals(
+            listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR),
+            rows.filter { it.name == "김지환" }.map { it.group },
+        )
+        assertEquals(bundledOnly.size, rows.size)
+    }
+
+    /**
+     * ① 로그인 경로 잠금 — `FirestoreUserRepository.publish` 가 보는 것과 **같은 순수 함수**다.
+     * `AuthViewModel.submitCredential` 이 만드는 모양(`role`·`patternId`·`offset 0`) 그대로 넣는다.
+     */
+    @Test fun login_default_user_is_not_published() {
+        val branch = Bundled.BRANCH_PATTERN.id
+        val main = Bundled.MAIN_PATTERN.id
+        // 기관사 기본값 · 차장 기본값 — 둘 다 막힌다
+        assertEquals(true, BundledRoster.isLoginDefaultUser("한상무", CrewRole.DRIVER_BRANCH, branch, 0))
+        assertEquals(true, BundledRoster.isLoginDefaultUser("정재헌", CrewRole.DRIVER_BRANCH, branch, 0))
+        assertEquals(true, BundledRoster.isLoginDefaultUser("박소영", CrewRole.CONDUCTOR, main, 0))
+        // 근무선택을 마친 뒤(offset ≠ 0)는 종전대로 올라간다
+        assertEquals(false, BundledRoster.isLoginDefaultUser("한상무", CrewRole.DRIVER_BRANCH, branch, 88))
+        assertEquals(false, BundledRoster.isLoginDefaultUser("한상무", CrewRole.DRIVER_MAIN, main, 88))
+        // 본선기관사로 골라 offset 이 0 인 경우도 서명이 아니다(소속이 기본값 둘이 아니다)
+        assertEquals(false, BundledRoster.isLoginDefaultUser("김철수", CrewRole.DRIVER_MAIN, main, 0))
+        // 내장 명단에 없는 사람은 막지 않는다 — 심사 계정도 여기 걸리면 안 된다
+        assertEquals(false, BundledRoster.isLoginDefaultUser("가나다라", CrewRole.DRIVER_BRANCH, branch, 0))
+        assertEquals(
+            false,
+            BundledRoster.isLoginDefaultUser(
+                ReviewerAccount.NAME, CrewRole.DRIVER_BRANCH, branch, 0,
+            ),
+        )
+        // 견습(감시값)도 막지 않는다 — 막으면 본인이 고른 값이 서버에 안 남는다
+        assertEquals(false, BundledRoster.isLoginDefaultUser("김성민", CrewRole.DRIVER_BRANCH, branch, 0))
     }
 }

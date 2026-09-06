@@ -10,6 +10,7 @@ import com.sinjeong.crewcalendar.BuildConfig
 import com.sinjeong.crewcalendar.data.local.LocalScheduleRepository
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.Notice
@@ -95,12 +96,34 @@ class FirestoreUserRepository @Inject constructor(
      * `patternId`/`patternOffset`은 **오늘 시점의 교번**이라(`User.withSegments`) 옛 버전 앱과
      * 동료근무 화면이 종전대로 읽는다 — 예약된 다음 교번이 있어도 오늘 근무는 어긋나지 않는다.
      * `patternSegments`는 기록용 미러일 뿐 되읽지 않는다(내 달력의 진실은 로컬).
+     *
+     * ## ⚠ v1.7.10 ③ — **근무선택 전 로그인 기본값은 안 올린다**
+     * `AuthViewModel.submitCredential` 은 로그인만으로 `patternOffset = 0` · `지선/차장` 기본값이
+     * 담긴 `User` 를 만든다. 그 값이 여기서 서버로 나가면 **본인이 고른 적도 없는 근무**가
+     * 공용 명단에 박히고, `mergeRoster` 는 live 를 내장보다 앞세우므로(v1.6.87) 동료 탭이
+     * **틀린 근무**를 사실처럼 그린다(한상무가 김학진 근무를 뒤집어쓴 자리).
+     *
+     * **막는 자리는 여기 한 곳이다.** `register()`(로그인) · `upsert()`(근무선택·설정) ·
+     * `init` 의 앱시작 자동 미러가 전부 이 함수로 모인다 — 부르는 쪽마다 가드를 달면
+     * `init` 처럼 하나를 빠뜨려 다음 앱 시작에 그대로 되살아난다.
+     *
+     * 판정은 읽는 쪽([BundledRoster.isLoginDefaultRow])과 **같은 함수**다.
+     * `visibleToOthers` 검사 **뒤**에 둔다 — 심사 계정([ReviewerAccount])의 문서 삭제는 그대로 돌아야 한다.
+     *
+     * ponytail: 진짜로 지선 0·차장 0 을 고른 사람(김학진·홍대종)의 새 문서도 같이 안 올라간다.
+     *   내장 명단에 같은 값이 있어 화면은 똑같지만 그 사람 행의 `uid` 는 못 붙는다(근무변경 미표시).
+     *   `User` 에 "골랐다" 표시를 붙이면 정확해지지만 그 필드를 서버로 보내려면
+     *   `firestore.rules` 의 `hasOnly` 를 같이 고쳐 배포해야 한다 — 필요해지면 그때.
      */
     private suspend fun publish(user: User) {
         runCatching {
             if (!ensureAuth()) return
             val doc = db.collection("users").document(user.uid)
             if (!user.visibleToOthers) { doc.delete(); return }
+            if (BundledRoster.isLoginDefaultUser(
+                    user.name, user.role, user.patternId, user.patternOffset,
+                )
+            ) return
             doc.set(
                 mapOf(
                     "name" to user.name,

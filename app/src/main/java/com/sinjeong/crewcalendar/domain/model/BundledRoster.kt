@@ -318,4 +318,74 @@ object BundledRoster {
                     .mapIndexed { i, (name, group, _) -> (name to group) to ('A' + i).toString() }
             }
             .toMap()
+
+    /**
+     * 이름 하나로 다섯 소속을 훑어 **(소속, offset)** 을 전부 돌려준다 — 동명이인이면 둘 이상이다.
+     *
+     * 감시값 줄([UNASSIGNED]·[ON_LEAVE])은 **뺀다.** 그 줄은 *"근무를 아직 모른다"* 는 표시일 뿐이라
+     * 본인이 고른 값을 대신할 자격이 없다 — 견습이 정말로 지선 offset 0 을 고르면
+     * [isLoginDefaultRow] 가 참이 되는데, 여기서 감시값을 빼 두지 않으면 그 선택이
+     * **`미배정`으로 되덮인다**(v1.7.10 ③).
+     */
+    fun realEntriesFor(name: String): List<Pair<CrewGroup, Int>> =
+        REAL_BY_NAME[name.trim()].orEmpty()
+
+    private val REAL_BY_NAME: Map<String, List<Pair<CrewGroup, Int>>> =
+        CrewGroup.entries
+            .flatMap { g ->
+                forGroup(g).mapNotNull { (n, off) ->
+                    if (noDutyLabel(off) != null) null else n.trim() to (g to off)
+                }
+            }
+            .groupBy({ it.first }, { it.second })
+
+    /**
+     * **로그인 기본값 서명** (v1.7.10 ③) — 근무선택을 하기 전에 *로그인만으로* 만들어지던
+     * 가짜 `users` 줄인가.
+     *
+     * ## 무엇이 잘못돼 있었나
+     * `LoginScreen.AuthViewModel.submitCredential` 이 명단 대조를 통과하는 즉시
+     * `role = 차장이면 CONDUCTOR 아니면 DRIVER_BRANCH` · `patternId = 차장이면 본선 아니면 지선` ·
+     * **`patternOffset = 0`** 으로 `users` 문서를 만들었다. 근무를 **고른 적이 없는데도** 값이 박혀
+     * 나가고, `mergeRoster` 는 live 줄이 있으면 내장 줄을 버리므로(v1.6.87) 그 가짜 값이 화면을
+     * 이겼다 — 한상무(본선기관사 88)가 **지선 0 인 김학진의 근무를 두 줄 글자까지 그대로**
+     * 뒤집어쓴 채 보였다. 2026-09-07 실측으로 이 서명에 걸린 사람은 다섯이었다
+     * (한상무·정재헌·박소영·송민지·조한빈).
+     *
+     * ## 셋을 **모두** 만족할 때만 참 (카스 확정 2026-09-07)
+     *  1. `offset == 0` — 로그인이 박던 값
+     *  2. 소속이 [CrewGroup.BRANCH](기관사 기본값) 또는 [CrewGroup.MAIN_CONDUCTOR](차장 기본값)
+     *  3. **그 이름이 내장 명단에 실근무로 있다**([realEntriesFor]) ← 빠뜨리면 내장에 없는 새 사람이
+     *     진짜로 지선 0 을 골랐을 때 화면에서 통째로 사라진다
+     *
+     * ## ⚠ 진짜 지선 0·차장 0 은 어떻게 되나
+     * 실제 명단에 **김학진(지선 0)** 과 **홍대종(차장 0)** 이 있다. 두 사람이 그 값을 직접 골라도
+     * 이 서명은 참이 된다 — 코드로는 *"고른 적 없는 기본값"* 과 구분할 방법이 없다. 다만
+     * **내장값이 정확히 같은 값**(지선 0 · 차장 0)이라 화면에 그려지는 글자가 한 칸도 안 바뀐다.
+     * 그래서 이 서명은 **두 사람에게 무해**하다(`MatesTest.real_branch_zero_row_is_unchanged`).
+     *
+     * ## ⚠ 2026-09-04 확정("본인이 앱에서 고른 소속과 근무가 정답")은 그대로다
+     * 여기서 걸러 내는 것은 **고른 적이 없는 줄**뿐이다. 본인이 고른 줄(offset ≠ 0, 또는 소속이
+     * 본선기관사·4조2교대·통상근무)은 종전대로 내장 명단을 이긴다.
+     */
+    fun isLoginDefaultRow(name: String, group: CrewGroup, offset: Int): Boolean =
+        offset == 0 &&
+            (group == CrewGroup.BRANCH || group == CrewGroup.MAIN_CONDUCTOR) &&
+            realEntriesFor(name).isNotEmpty()
+
+    /**
+     * 쓰는 쪽(=`FirestoreUserRepository.publish`) 판정. 저장 모양은 소속이 아니라
+     * `role` + `patternId` 라 [isLoginDefaultRow] 가 쓰는 소속으로 먼저 옮긴다 —
+     * 옮기는 규칙은 `FirestoreRosterRepository.observeUsers` 가 문서를 되읽을 때 쓰는 것과 같다
+     * (차장이면 본선 차장, 아니면 `patternId` 가 말하는 소속, 모르면 지선).
+     *
+     * **읽는 쪽과 쓰는 쪽이 같은 함수 하나를 본다** — 두 벌로 적으면 다음에 어긋난다.
+     */
+    fun isLoginDefaultUser(name: String, role: CrewRole, patternId: String?, offset: Int): Boolean =
+        isLoginDefaultRow(
+            name,
+            if (role == CrewRole.CONDUCTOR) CrewGroup.MAIN_CONDUCTOR
+            else Bundled.groupFor(patternId) ?: CrewGroup.BRANCH,
+            offset,
+        )
 }

@@ -57,15 +57,26 @@ val MatrixPerson.key: String get() = mateKey(cleanName, group)
  *
  * 관리자 대리등록(`RosterEntry.addedBy == "admin"`) 줄도 같은 `users` 문서라 live로 똑같이 다룬다.
  * 반면 **수동등록 동료([Mate])는 live가 아니다** — 내장 줄을 지울 권한이 없고 종전 규칙 그대로다.
+ *
+ * ## ⚠ v1.7.10 ③ — *"고른 적 없는 줄"* 은 live 가 아니다 (2026-09-04 확정과 **다른 이야기**)
+ * 위 *"본인이 고른 것이 정답"* 은 **그대로다.** 이번에 걸러 내는 것은 본인이 **고른 적이 없는데도**
+ * 로그인만으로 만들어져 있던 줄뿐이다([BundledRoster.isLoginDefaultRow] 가 그 서명을 판정한다).
+ * 고른 줄은 한 줄도 안 건드린다 — 소속이 달라도, 내장값과 어긋나도 종전대로 이긴다.
+ *
+ * 걸린 줄은 **버리지 않고 내장값으로 고쳐 쓴다**([withoutLoginDefault]). 버리면 `uid` 가 같이
+ * 사라져 그 사람 행에서 **근무변경(rosterOverrides)이 안 붙고 ★즐겨찾기 uid 조회도 빈다**
+ * (`MatesScreen.uidByKey` → `MatrixRow.overrides`). 이름이 동명이인이라 어느 내장 줄인지
+ * 못 고를 때만 줄을 버린다 — 그때는 내장 두 줄이 `dupSuffix` 예외로 그대로 살아남는다.
  */
 fun mergeRoster(
     me: MatrixPerson?,
     liveUsers: List<RosterEntry>,
     mates: List<Mate>,
 ): List<MatrixPerson> {
+    val chosen = liveUsers.mapNotNull(::withoutLoginDefault)
     val taken = mutableSetOf<String>()
     me?.let { taken += it.key }
-    val live = liveUsers.filter { mateKey(it.name, it.group) !in taken && it.uid != me?.uid }
+    val live = chosen.filter { mateKey(it.name, it.group) !in taken && it.uid != me?.uid }
         .map {
             taken += mateKey(it.name, it.group)
             MatrixPerson(it.name, it.group, it.patternOffset, isMe = false, uid = it.uid)
@@ -76,7 +87,8 @@ fun mergeRoster(
             MatrixPerson(it.name, it.group, it.patternOffset, isMe = false)
         }
     // 내 줄도 live다 — 로그인 직후 `users` 문서가 아직 안 돌아왔어도 내 내장 줄이 남으면 안 된다.
-    val liveNames = liveUsers.mapTo(mutableSetOf()) { it.name.trim() }
+    // ⚠ [chosen] 이다(원본 `liveUsers` 가 아니다) — 동명이인이라 버린 줄은 이름을 가리면 안 된다.
+    val liveNames = chosen.mapTo(mutableSetOf()) { it.name.trim() }
     me?.let { liveNames += it.cleanName }
     val bundled = CrewGroup.entries.flatMap { g ->
         BundledRoster.forGroup(g)
@@ -93,4 +105,25 @@ fun mergeRoster(
     // `LazyColumn(key = rows[it].key)`가 **`Key ... was already used`로 앱을 죽인다.**
     // v1.6.60에 에뮬레이터 검증 중 실제로 재현했다. 화면이 죽는 것보다 한 줄만 보이는 게 낫다.
     return (listOfNotNull(me) + live + manual + bundled).distinctBy { it.key }
+}
+
+/**
+ * 로그인 기본값 서명([BundledRoster.isLoginDefaultRow])에 걸린 live 줄을 **내장 명단 줄로 고쳐 쓴다.**
+ * 서명이 아니면 원본 그대로 돌려주고, 고쳐 쓸 내장 줄을 하나로 못 고르면 `null`(=그 줄을 버린다).
+ *
+ * `uid` 와 `name` 은 **그대로 실어 나른다** — `uid` 가 빠지면 그 사람 행에서 근무변경이 조용히
+ * 사라진다(v1.6.86 ★즐겨찾기 사고와 같은 자리).
+ *
+ * 동명이인(김지환·박두원·이용석)은 이름만으로 어느 내장 줄인지 못 고른다 — 찍으면 절반은 틀린
+ * 소속·교번을 사실처럼 그린다. 그래서 **줄을 버린다**: `liveNames` 대조가 `dupSuffix != null` 인
+ * 이름을 이미 예외로 두므로 내장 두 줄이 둘 다 제 값으로 살아남는다(한 줄 잃는 것이 아니라
+ * 가짜 한 줄이 빠지는 것이다).
+ *
+ * ⚠ 실제 지선 0(김학진)·차장 0(홍대종)은 **자기 내장 줄로 되돌아온다** — 값이 같아 무변화이고
+ * `uid` 도 남는다. 서명이 그 두 사람에게 무해하다는 근거가 이것이다.
+ */
+private fun withoutLoginDefault(e: RosterEntry): RosterEntry? {
+    if (!BundledRoster.isLoginDefaultRow(e.name, e.group, e.patternOffset)) return e
+    val (group, offset) = BundledRoster.realEntriesFor(e.name).singleOrNull() ?: return null
+    return e.copy(group = group, patternOffset = offset)
 }
