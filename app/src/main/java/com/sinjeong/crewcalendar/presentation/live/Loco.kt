@@ -317,6 +317,12 @@ private fun Color.mix(o: Color, t: Float) = Color(
  * @param mapDeg 지도 **전체 회전**(세로 화면 90f — [MainLineMapDialog] 의 `rotationZ`).
  *   **글자를 화면 기준으로 바로 세우는 데만** 쓴다([locoTextDeg]). 몸통 뒤집기는 v1.6.96
  *   부터 [railTowards] 가 정한다.
+ * @param numberMinSp **열번 글자에만** 걸리는 하한(sp). 기본값 **0 = 지금까지의 동작 그대로**
+ *   (`11 × scale`). 몸통은 [scale] 대로 더 줄이면서 **열번만 안 줄게** 붙들 때 쓴다 —
+ *   v1.7.10 에서 지선 카드(`LineMap.CARD_K`)를 한 단계 더 내리려고 냈다. 본선 지도
+ *   ([MainLineMap])는 **이 인자를 안 넘긴다** — 0 이라 픽셀 하나도 안 바뀐다.
+ *   ⚠ 무한정 못 올린다: 열번 띠는 `폭 39 × 높이 16` units × [scale] 이라 하한이 너무 높으면
+ *   4자리가 몸통 밖으로 넘친다. 지선 실측값은 `LineMap.CARD_K`·`LineMap.NUMBER_MIN_SP` KDoc 참고.
  *
  * ## 아래 여섯은 [MapPalette] 이 주는 **색 손잡이**(v1.7.0)
  *
@@ -352,6 +358,7 @@ internal fun DrawScope.drawLoco(
     smokeK: Float = 1f,
     railTowards: Offset = Offset(0f, 1f),
     mapDeg: Float = 0f,
+    numberMinSp: Float = 0f,
     bodyRamp: Pair<Color, Color>? = null,
     edge: Color? = null,
     ring: Color = Color.White,
@@ -586,8 +593,9 @@ internal fun DrawScope.drawLoco(
             //
             // ⚠ 이 11 이 **남의 열차 배수의 하한을 정한다.** v1.6.97 에서 본선 타 열차가 0.7 배가
             // 되어 열번이 7.7sp 다(전체 보기 기준) — 실화면에서 읽히는 마지막 크기다. 배수를
-            // 더 내리려면 여기 11 을 같이 올려야 한다(`MainLineMap.otherK` KDoc).
-            fontSize = (11f * scale).sp, fontWeight = FontWeight.ExtraBold, color = numberColor,
+            // 더 내리려면 [numberMinSp] 를 넘겨 **열번만** 붙들어라(11 을 올리면 본선이 회귀한다).
+            fontSize = (11f * scale).coerceAtLeast(numberMinSp).sp,
+            fontWeight = FontWeight.ExtraBold, color = numberColor,
         ),
     )
     val nc = p(-3.5f, 0f)   // 보일러 + 운전실 가운데

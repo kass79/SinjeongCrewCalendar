@@ -54,15 +54,21 @@ data class DaySchedule(
  * | 휴무 그대로 | **센다** |
  * | 휴무 → `충당`·`대기충당`·`교체` | **센다** (휴무에 나갔을 뿐) |
  * | 휴무 → 연차·교육 등 그 밖의 변경 | **센다** |
- * | 휴무 → **`지근`** | **뺀다** ← 여기 하나뿐이다 |
+ * | 휴무 → **`지근 9`**·**맨 `지근`** | **뺀다** ← 여기 하나뿐이다 (다이아 유무 무관 — v1.7.10) |
+ * | **`운휴` 로 바꾼 날을 다시 `지근`** | **뺀다** (카스: *"휴무를 지근으로 바꾸면 −1"*) |
  * | 근무일 → 휴무(대체휴무 등) | 안 센다 (패턴 기준) |
  * | **근무일 → `운휴`·`지휴`** | **센다** ← v1.7.9에 더했다 ([REST_OVERRIDES]) |
  * | 근무일 → 연차·대휴·병가 등 그 밖의 휴가 | 안 센다 |
  *
  * 근무선택으로 **패턴 자체가 바뀌면** 개수도 따라 바뀌는 것이 맞다(그건 배정이 바뀐 것이다).
  *
- * ⚠ 판정은 [DutyCode.fill] 접두어가 `"지근"` 인지로 한다 — `DutyCode.FILL_OPTIONS` 네 개 중
- * 지근만이다. 접두어 없는 변경(연차·교육)은 `fill` 이 null 이라 자동으로 "센다" 쪽이다.
+ * ⚠ 판정은 **`fill ?: raw`** 가 `"지근"` 인지로 한다 — [DutyCode.colorType] 이 `충당` 주황을
+ * 가리는 꼴과 **똑같은 대칭**이다(v1.7.10). `fill` 만 보면 **다이아를 붙인 `지근 9` 만 빠지고
+ * 다이아 없는 맨 `지근` 은 그대로 세어진다** — 맨 `지근` 은 `DutyCode.parse` 가 `OVERRIDE_TYPES`
+ * 로 떨어뜨려 `fill` 이 null 이기 때문이다. v1.7.9 에서 맨 `지근` 이 저장·표시 가능해지자
+ * (*"아직 근무를 모를때 다이아 없이 저장을 하면 그냥 지근"*) 바로 이 구멍으로 −1 이 안 됐다.
+ * 접두어 없는 다른 변경(연차·교육)은 `fill` 도 null 이고 `raw` 도 `"지근"` 이 아니라
+ * 자동으로 "센다" 쪽이다.
  *
  * ⚠ 휴무 개수를 세는 자리는 두 곳이다(앱바 칩 `CalendarUiState.restDayCount` · 공유 이미지
  * `MonthImage`). **둘 다 이 한 곳을 통과해야 한다** — 각자 세면 화면과 공유 그림의 숫자가 갈린다.
@@ -71,7 +77,7 @@ val DaySchedule.countsAsRestDay: Boolean
     get() {
         val base = if (isOverridden) originalDutyRaw?.let(DutyCode::parse) ?: duty else duty
         // 휴무 → 운휴처럼 **양쪽 다 참**인 날도 `count {}` 라 한 번만 센다
-        return (base.isRest && !(isOverridden && duty.fill == "지근")) ||
+        return (base.isRest && !(isOverridden && (duty.fill ?: duty.raw) == "지근")) ||
             (isOverridden && duty.fill == null && duty.raw in REST_OVERRIDES)
     }
 

@@ -2191,6 +2191,56 @@ class PatternTest {
     }
 
     /**
+     * ⑥ **다이아 없는 맨 `지근` 도 −1** (v1.7.10 버그 수정). 카스 원문(2026-09-07):
+     * *"지근으로 하면 월휴무에서 하나 빠져야지?"* · *"휴무를 지근으로 바꾸면 휴무 개수가 −1로
+     * 되어야지."*
+     *
+     * v1.7.9 가 **맨 `지근`** 을 저장·표시할 수 있게 만들면서(*"아직 근무를 모를때 다이아 없이
+     * 저장을 하면 그냥 지근"*) 이 구멍이 났다 — `DutyCode.parse("지근")` 은 `OVERRIDE_TYPES` 로
+     * 떨어져 **`fill` 이 null** 이라, `duty.fill == "지근"` 판정을 그냥 빠져나가 휴무로 세어졌다.
+     * 고침은 **`(fill ?: raw) == "지근"`** — [DutyCode.colorType] 이 `충당` 을 가리는 꼴과 같은 대칭.
+     */
+    @Test fun restCount_bareJigeunAlsoDecreases() {
+        // 버그의 근거 — 맨 `지근` 은 `fill` 이 null 이다(그래서 `fill` 만 보면 샜다)
+        assertNull(DutyCode.parse("지근").fill)
+        assertEquals("지근", DutyCode.parse("지근").raw)
+
+        // ① 휴무 → **맨 `지근`**(다이아 없음): −1  ← 이번 버그
+        assertEquals("다이아 없는 지근도 휴무에서 빠진다", 0, restCount(listOf(day(1, "지근", original = "휴무"))))
+        assertEquals(1, restCount(listOf(day(1, "휴무"), day(2, "지근", original = "휴3"), day(3, "주간"))))
+
+        // ② 휴무 → `지근 9`(다이아 있음): 종전 동작 유지
+        assertEquals("다이아 붙은 지근은 종전대로", 0, restCount(listOf(day(1, "지근 9", original = "휴무"))))
+
+        // ④ **`운휴` 로 바꾼 날을 다시 `지근` 으로**: 안 센다 (카스 문장 그대로)
+        //    운휴는 근무일이든 휴무든 세어지는 날이므로(③), 그 날을 지근으로 바꾸면 다시 빠진다
+        assertEquals("근무일 → 운휴 → 지근", 0, restCount(listOf(day(1, "지근", original = "14"))))
+        assertEquals("휴무 → 운휴 → 지근", 0, restCount(listOf(day(1, "지근", original = "휴3"))))
+        assertEquals("지근 9 로 바꿔도 같다", 0, restCount(listOf(day(1, "지근 9", original = "14"))))
+
+        // ⑥ 표기·색은 **안 바뀐다** — 휴무 개수만 고친 것이다(`branchWordCodesKeepTheirPrefix` 와 한 벌)
+        assertEquals("지근", DutyCode.parse("지근").display)
+        assertEquals(DutyType.BRANCH, DutyCode.parse("지근").colorType)
+    }
+
+    /**
+     * ③⑤ **`운휴` 로 바꾼 날도 휴무다 — 그래서 그 날을 지근으로 바꾸면 −1 이다.**
+     * 카스 원문: *"기존 운휴로 되어있는날도 휴무야!"* — [restCount_bareJigeunAlsoDecreases] ④의 **근거**라
+     * 여기서 따로 잠근다. 동작은 v1.7.9 그대로고 이번에 **한 줄도 안 고쳤다**(회귀 방지 전용).
+     */
+    @Test fun restCount_unhyuDaysAreRest_andOtherFillsStillCount() {
+        // ③ 근무일 → `운휴` = 센다 · `휴N` → `운휴` = 센다(두 조건이 다 참이어도 **한 번만**)
+        assertEquals("근무일 14 → 운휴", 1, restCount(listOf(day(1, "운휴", original = "14"))))
+        assertEquals("휴3 → 운휴 (한 번만)", 1, restCount(listOf(day(1, "운휴", original = "휴3"))))
+        assertEquals(2, restCount(listOf(day(1, "운휴", original = "14"), day(2, "운휴", original = "휴3"))))
+
+        // ⑤ 휴무 → 충당·대기충당·교체·연차·대휴 = **종전대로 센다**(휴무에 나갔을 뿐이다)
+        listOf("충당 9", "대기충당 대2", "교체 45", "연차", "대휴").forEach {
+            assertEquals(it, 1, restCount(listOf(day(1, it, original = "휴무"))))
+        }
+    }
+
+    /**
      * 동료 탭 격자에 나올 수 있는 **모든 라벨** 전수 조사 — `저장값 → 표시 라벨` 쌍.
      *
      * 범위: 내장 패턴 4종 시퀀스 + 근무변경으로 고를 수 있는 전부 + 퇴역값 + 충당 계열 4종 ×
