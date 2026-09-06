@@ -8,7 +8,6 @@ import com.sinjeong.crewcalendar.presentation.mates.MatesHeader
 import com.sinjeong.crewcalendar.presentation.roster.mergeRoster
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.LocalDate
 
@@ -108,13 +107,55 @@ class MatesTest {
         assertEquals(16, 강성진.offset)
     }
 
-    /** ④ 견습(내장 명단에 없고 live만 있는 사람)은 그대로 보인다 — 본인이 근무를 고른다 */
-    @Test fun trainee_with_only_a_live_row_is_kept() {
+    /**
+     * ④ **견습은 본인이 고른 근무가 이긴다** — v1.7.9 ⑧-3 에서 뜻이 한 겹 늘었다.
+     *
+     * ⑧-2 까지 견습은 내장 명단에 **아예 없었고** 이 테스트는 *"live 만 있어도 줄이 생긴다"* 를
+     * 쟀다. ⑧-3 부터는 [BundledRoster.UNASSIGNED] 자리표시자로 **명단에 세워 두되 근무 칸만
+     * 비운다** — 그래서 이제 재는 것은 *"본인이 고르면 자리표시자가 사라지고 고른 교번이 쓰인다"* 다
+     * (카스 확정 2026-09-07 *"본인이 로그인해서 근무선택한 다이아"*).
+     *
+     * 규칙 자체([mergeRoster]의 `liveNames` 대조)는 **한 줄도 안 바꿨다** — 열두 명 다
+     * 동명이인이 아니라 이름만으로 지워진다.
+     */
+    @Test fun trainee_row_gives_way_to_the_offset_they_pick() {
         val trainees = listOf("김성민", "김충현", "원두환")
+        // 아무도 안 골랐을 때: 명단에 있고 offset 은 감시값이라 근무 칸이 비어 보인다
+        trainees.forEach { n ->
+            val row = bundledOnly.single { it.name == n }
+            assertEquals(n, CrewGroup.MAIN_DRIVER, row.group)
+            assertEquals(n, BundledRoster.UNASSIGNED, row.offset)
+            assertEquals(n, "미배정", BundledRoster.noDutyLabel(row.offset))
+        }
+        // 본인이 로그인해 근무를 고르면 그 줄이 이긴다 — 한 줄뿐이고 교번은 고른 값이다
         val rows = mergeRoster(null, trainees.map { live(it, CrewGroup.MAIN_DRIVER, 7) }, emptyList())
-        trainees.forEach { assertEquals(it, 1, rows.count { r -> r.name == it }) }
-        assertEquals(bundledOnly.size + trainees.size, rows.size)
-        assertTrue(trainees.none { n -> BundledRoster.forGroup(CrewGroup.MAIN_DRIVER).any { it.first == n } })
+        trainees.forEach { n ->
+            val row = rows.single { it.name == n }
+            assertEquals(n, 7, row.offset)
+            assertEquals(n, "uid_$n", row.uid)
+            assertNull("$n 감시값이 남았다", BundledRoster.noDutyLabel(row.offset))
+        }
+        assertEquals("자리표시자 3줄을 live 3줄이 대체 — 총원 불변", bundledOnly.size, rows.size)
+        // 소속을 바꿔 골라도 마찬가지다(내장 줄은 이름으로 지워진다)
+        val moved = mergeRoster(null, listOf(live("선철호", CrewGroup.BRANCH, 5)), emptyList())
+        assertEquals(1, moved.count { it.name == "선철호" })
+        assertEquals(CrewGroup.BRANCH, moved.single { it.name == "선철호" }.group)
+        assertEquals(5, moved.single { it.name == "선철호" }.offset)
+        assertEquals(bundledOnly.size, moved.size)
+    }
+
+    /** 육아휴직 2명도 같은 규칙 — 자리표시자 글자만 `휴직`이고 고르면 그 값이 이긴다 */
+    @Test fun onLeave_row_gives_way_to_the_offset_they_pick() {
+        listOf("김주식", "이한솔").forEach { n ->
+            val row = bundledOnly.single { it.name == n }
+            assertEquals(n, CrewGroup.MAIN_CONDUCTOR, row.group)
+            assertEquals(n, BundledRoster.ON_LEAVE, row.offset)
+            assertEquals(n, "휴직", BundledRoster.noDutyLabel(row.offset))
+        }
+        val rows = mergeRoster(null, listOf(live("이한솔", CrewGroup.MAIN_CONDUCTOR, 12)), emptyList())
+        assertEquals(1, rows.count { it.name == "이한솔" })
+        assertEquals(12, rows.single { it.name == "이한솔" }.offset)
+        assertEquals(bundledOnly.size, rows.size)
     }
 
     /** 실측 9명 전원 — 소속을 바꿔 로그인하면 인원이 정확히 9줄 줄어든다(275 → 266) */

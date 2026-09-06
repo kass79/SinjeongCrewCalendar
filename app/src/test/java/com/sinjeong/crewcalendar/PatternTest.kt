@@ -513,14 +513,105 @@ class PatternTest {
      * ⚠ **승무 3종만 잰다.** `SHIFT_4_2`·`SHIFT_CONTROL`·`OFFICE_DAY` 는 offset 이 교번이 아니라
      * **조(A0·B3·C2·D1)** 라 한 조에 여러 명이 같은 값을 쓰는 것이 정상이다(A조 세 명 · B조 네 명).
      * 이 셋을 넣으면 첫 줄에서 걸린다 — 일부러 뺀 것이니 도로 넣지 말 것.
+     *
+     * ⚠ **감시값(음수)도 뺀다**(v1.7.9 ⑧-3). [BundledRoster.UNASSIGNED](−1)·
+     * [BundledRoster.ON_LEAVE](−2)는 교번이 아니라 **"근무가 없다"는 표시**라 견습 10명이 다 같은
+     * −1 을 쓴다 — 4조2교대를 빼는 이유와 같다. 대신 **음수는 그 두 값뿐**이고 **이름 중복은
+     * 전원(감시값 포함)** 을 그대로 잰다. 음수가 실제 교번과 안 겹치는 근거는 [Pattern.offsetFor]
+     * 가 `floorMod` 라 늘 0 이상이라는 것이다.
      */
     @Test fun no_duplicate_offsets_within_crew_group() {
+        val sentinels = setOf(BundledRoster.UNASSIGNED, BundledRoster.ON_LEAVE)
         listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH).forEach { g ->
-            val list = BundledRoster.forGroup(g)
+            val all = BundledRoster.forGroup(g)
             val len = Bundled.patternFor(g).length
+            assertEquals("$g 이름 중복", all.size, all.map { it.first }.toSet().size)
+            assertTrue("$g 알 수 없는 음수 offset", all.all { it.second >= 0 || it.second in sentinels })
+            val list = all.filterNot { it.second in sentinels }
             assertEquals("$g offset 중복", list.size, list.map { it.second }.toSet().size)
-            assertEquals("$g 이름 중복", list.size, list.map { it.first }.toSet().size)
             assertTrue("$g offset 범위 초과", list.all { it.second in 0 until len })
+        }
+    }
+
+    /**
+     * **근무칸이 통째로 빈 12명은 명단에 세우되 근무를 지어내지 않는다**(v1.7.9 ⑧-3).
+     *
+     * 카스 답(2026-09-07): 견습 기관사 10명은 *"견습기관사(지금은 본선기관사 아무곳이나) 곧 배정
+     * 받음"* · *"본인이 로그인해서 근무선택한 다이아"*, 육아휴직 2명은 *"휴직으로 넣고 본인이
+     * 로그인해서 근무선택하면 그 다이아로"*.
+     *
+     * 소속 근거는 `직원_26년9월_2026_09_06_20_20_40.xlsx` **시트 소속 그대로**다 —
+     * 열 명은 `기관사` 시트에만 있고(`지선` 시트엔 없다) 두 명은 `차장` 시트에 있으며,
+     * 열두 명 다 **30칸이 전부 공백**이라 재현할 교번이 아예 없다. 사번표(`BundledStaff`)도
+     * 같은 갈래다(열 명 `DRIVERS` · 두 명 `CONDUCTORS`).
+     *
+     * 재는 것 넷: ① 제 소속 명단에 있다 ② offset 이 **감시값**이다 ③ [BundledRoster.noDutyLabel]
+     * 이 `미배정`·`휴직` 을 준다 ④ **[Pattern.dutyOn] 은 감시값을 받으면 안 된다** — 받으면
+     * `floorMod` 라 터지지 않고 **멀쩡한 다이아**를 돌려주므로(아래에서 실제로 확인한다)
+     * 그리는 자리(`DutyMatrix.MatrixRow`)가 ③으로 먼저 갈라야 한다.
+     */
+    @Test fun september2026_blank12_are_listed_without_a_duty() {
+        val trainees = listOf(
+            "김성민", "김승엽", "김충현", "박기태", "선철호",
+            "엄성진", "원두환", "장도영", "조성배", "최국성",
+        )
+        val onLeave = listOf("김주식", "이한솔")
+        mapOf(
+            CrewGroup.MAIN_DRIVER to (trainees to BundledRoster.UNASSIGNED),
+            CrewGroup.MAIN_CONDUCTOR to (onLeave to BundledRoster.ON_LEAVE),
+        ).forEach { (group, spec) ->
+            val (names, sentinel) = spec
+            val roster = BundledRoster.forGroup(group).toMap()
+            names.forEach { n ->
+                assertEquals("$n 이 ${group.label} 명단에 없다", sentinel, roster[n])
+            }
+            // 다른 소속에는 없다 — 한 사람이 두 줄로 뜨면 동명이인 규칙이 아니라 명단 오류다
+            (CrewGroup.entries - group).forEach { other ->
+                names.forEach { n ->
+                    assertNull("$n 이 ${other.label} 에도 있다", BundledRoster.forGroup(other).toMap()[n])
+                }
+            }
+        }
+        assertEquals("견습 미배정", "미배정", BundledRoster.noDutyLabel(BundledRoster.UNASSIGNED))
+        assertEquals("육아휴직", "휴직", BundledRoster.noDutyLabel(BundledRoster.ON_LEAVE))
+        assertNull("보통 교번에 감시값 글자가 붙었다", BundledRoster.noDutyLabel(0))
+        assertNull("보통 교번에 감시값 글자가 붙었다", BundledRoster.noDutyLabel(16))
+
+        // 인원 — 9월 근무표 실인원 239명(기관사 132 − 지선 27 = 105 · 차장 107 · 지선 27)과 같아졌다
+        assertEquals("본선기관사", 105, BundledRoster.MAIN_DRIVER.size)
+        assertEquals("본선차장", 107, BundledRoster.MAIN_CONDUCTOR.size)
+        assertEquals("지선", 27, BundledRoster.BRANCH.size)
+        assertEquals(
+            "승무 3종 실인원",
+            239,
+            listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH)
+                .sumOf { BundledRoster.forGroup(it).size },
+        )
+
+        // ④ **감시값을 dutyOn 에 넘기면 조용히 틀린다** — 이 사실이 그리는 자리의 분기 근거다.
+        //    floorMod 라 예외도 빈 값도 아니고 **진짜 다이아 하나**가 나온다.
+        val sep1 = LocalDate.of(2026, 9, 1)
+        val main = Bundled.MAIN_PATTERN
+        listOf(BundledRoster.UNASSIGNED, BundledRoster.ON_LEAVE).forEach { sentinel ->
+            val leaked = main.dutyOn(sep1, sentinel)
+            assertTrue("감시값 $sentinel 이 빈 값을 준다면 이 분기는 필요 없다", leaked.raw.isNotBlank())
+            // floorMod 라 감시값은 **멀쩡한 교번 하나**(107−1 · 107−2)를 그대로 사칭한다 —
+            // 예외도 빈 값도 아니라서 화면만 보면 눈치챌 수 없다. 그래서 그리기 전에 갈라야 한다.
+            assertEquals(
+                "감시값 $sentinel 이 offset ${Math.floorMod(sentinel, main.length)} 을 사칭한다",
+                main.dutyOn(sep1, Math.floorMod(sentinel, main.length)).raw,
+                leaked.raw,
+            )
+        }
+        // 명단 전체를 훑어 감시값 판정이 총체적인지 — 음수면 반드시 글자가 있고, 0 이상이면 없다
+        CrewGroup.entries.forEach { g ->
+            BundledRoster.forGroup(g).forEach { (n, off) ->
+                assertEquals(
+                    "$n(${g.label}) offset $off",
+                    off < 0,
+                    BundledRoster.noDutyLabel(off) != null,
+                )
+            }
         }
     }
 
@@ -2145,6 +2236,24 @@ class PatternTest {
         val widest = mateGridLabels().map { it.second }.maxByOrNull(::labelUnits)!!
         // 3.24 = `지대11`. 넘으면 DutyMatrix.UNIFORM_UNITS도 같이 고쳐야 한다
         assertEquals(widest.replace("\n", "/"), 3.24, labelUnits(widest), 0.001)
+    }
+
+    /**
+     * **근무 없음 글자도 같은 폭 안에 든다**(v1.7.9 ⑧-3). [BundledRoster.noDutyLabel] 은
+     * `DutyCode` 를 거치지 않고 그리는 자리에서 바로 들어가므로 위 전수 조사에 안 잡힌다 —
+     * 여기서 따로 잰다. `미배정` 3.00 · `휴직` 2.00 으로 둘 다 3.24 밑이라
+     * **표 전체 글자 크기(13sp)는 그대로다.** 넘는 글자로 바꾸면(예 네 글자) 그 칸만 눌리는 게
+     * 아니라 **표 전체가 같이 작아진다** — 두 글자로 줄이거나 `UNIFORM_UNITS` 를 같이 고칠 것.
+     */
+    @Test fun noDutyLabels_fit_uniform_units() {
+        listOf(BundledRoster.UNASSIGNED to 3.0, BundledRoster.ON_LEAVE to 2.0)
+            .forEach { (sentinel, units) ->
+                val label = BundledRoster.noDutyLabel(sentinel)!!
+                assertEquals(label, units, labelUnits(label), 0.001)
+                assertTrue("$label 이 UNIFORM_UNITS(3.24)를 넘는다", labelUnits(label) <= 3.24)
+                // 다른 근무와 같은 글자면 격자에서 구별이 안 된다
+                assertTrue("$label 이 근무 라벨과 겹친다", mateGridLabels().none { it.second == label })
+            }
     }
 
     /**

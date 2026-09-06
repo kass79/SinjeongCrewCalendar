@@ -701,6 +701,9 @@ fun MatrixRow(
             // (격자 글자 10.26sp보다 이름이 작아 보이는 역전을 막는 선).
             if (isFav) Text("★", fontSize = m.dowSp * 0.82f, color = duty.onStandby)
         }
+        // **근무가 없는 사람**(견습 `미배정` · 육아휴직 `휴직`)이면 글자, 아니면 null.
+        // 행마다 한 번만 물어본다 — offset 은 날짜와 무관하다.
+        val noDuty = BundledRoster.noDutyLabel(p.offset)
         Row(Modifier.horizontalScroll(hScroll)) {
             dates.forEach { date ->
                 val changed = overrides[date] != null
@@ -711,7 +714,12 @@ fun MatrixRow(
                     ?: seg?.let { s ->
                         Bundled.ALL_PATTERNS.firstOrNull { it.id == s.patternId }?.dutyOn(date, s.patternOffset)
                     }
-                    ?: pattern.dutyOn(date, p.offset)
+                    // ⚠ **감시값을 [Pattern.dutyOn] 에 넘기지 마라** — `floorMod` 라 −1·−2 도
+                    // 조용히 다이아 하나로 접힌다(터지지 않고 **틀린 값**이 나온다). 여기서 갈라
+                    // 빈 코드로 그린다: `DutyCode.parse(null)` 은 [DutyType.ETC] 라
+                    // [dutyCellColors] 가 **투명 바탕 + 회색 글자**를 준다 — "근무가 없다"는
+                    // 뜻에 맞고 근무 색 여섯 중 아무것도 사칭하지 않는다.
+                    ?: if (noDuty != null) DutyCode.parse(null) else pattern.dutyOn(date, p.offset)
                 val (bg, fg) = dutyCellColors(code.colorType, duty, MaterialTheme.colorScheme.onSurfaceVariant)
                 Box(
                     Modifier.width(m.cellW).height(m.cellH + m.rowPadV * 2)
@@ -725,7 +733,9 @@ fun MatrixRow(
                             vertical = m.rowPadV,
                         ),
                 ) {
-                    DutyChip(code.mateLabel.ifBlank { "·" }, bg, fg, m, changed)
+                    // 빈 코드 자리에 `미배정`·`휴직` 을 넣는다. 감시값이라도 근무변경·교번 구간이
+                    // 있으면 위에서 이미 진짜 코드가 잡혔고 `mateLabel` 이 비지 않아 그쪽이 이긴다.
+                    DutyChip(code.mateLabel.ifBlank { noDuty ?: "·" }, bg, fg, m, changed)
                 }
             }
         }
