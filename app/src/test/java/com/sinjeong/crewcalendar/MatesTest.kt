@@ -83,19 +83,29 @@ class MatesTest {
         assertEquals(bundledOnly.size, rows.size)
     }
 
-    /** 동명이인이 **다른 소속**으로 로그인해도 두 내장 줄은 손대지 않는다(세 줄이 된다). */
+    /**
+     * 동명이인이 **다른 소속**으로 로그인해도 두 내장 줄은 손대지 않는다(세 줄이 된다).
+     *
+     * live 소속은 v1.7.9에 `BRANCH` → `MAIN_DRIVER` 로 바꿨다 — 9월 근무표에서 **박두원(기관사)이
+     * 지선으로 옮겨** 이제 내장 두 줄이 `BRANCH`+`MAIN_CONDUCTOR` 다. 종전 값으로 두면
+     * live 가 같은 소속의 내장 줄을 덮어 두 줄이 되어 규칙이 아니라 명단 때문에 깨진다.
+     */
     @Test fun namesake_logging_in_elsewhere_adds_a_row_instead_of_deleting_one() {
-        val rows = mergeRoster(null, listOf(live("박두원", CrewGroup.BRANCH, 4)), emptyList())
+        val rows = mergeRoster(null, listOf(live("박두원", CrewGroup.MAIN_DRIVER, 4)), emptyList())
         assertEquals(3, rows.count { it.name == "박두원" })
         assertEquals(bundledOnly.size + 1, rows.size)
     }
 
-    /** ③ live 줄이 없는 사람은 내장 명단 그대로 남는다 */
+    /**
+     * ③ live 줄이 없는 사람은 내장 명단 그대로 남는다.
+     * 강성진의 기대값은 v1.7.9에 `BRANCH/0` → `MAIN_DRIVER/16` 으로 바뀌었다 —
+     * 9월 근무표에서 지선 → 본선으로 옮겼다(명단이 바뀐 것이지 규칙이 바뀐 게 아니다).
+     */
     @Test fun bundled_row_without_a_live_row_survives() {
         val rows = mergeRoster(null, listOf(live("박희수", CrewGroup.MAIN_DRIVER, 3)), emptyList())
         val 강성진 = rows.single { it.name == "강성진" }
-        assertEquals(CrewGroup.BRANCH, 강성진.group)
-        assertEquals(0, 강성진.offset)
+        assertEquals(CrewGroup.MAIN_DRIVER, 강성진.group)
+        assertEquals(16, 강성진.offset)
     }
 
     /** ④ 견습(내장 명단에 없고 live만 있는 사람)은 그대로 보인다 — 본인이 근무를 고른다 */
