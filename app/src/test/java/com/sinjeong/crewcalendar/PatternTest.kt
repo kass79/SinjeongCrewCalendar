@@ -165,11 +165,12 @@ class PatternTest {
         // 동료 저장 키(`이름|enum이름`)는 한 번도 안 바뀌었다 — 바뀌면 저장된 동료가 유령이 된다
         assertEquals("SHIFT_4_2", CrewGroup.SHIFT_4_2.name)
 
-        // ② 한 칩에 28명이 다 온다 (운용 12 + 관제 16). 갈라져 있으면 여기서 잡힌다
-        //    v1.7.9에 29 → 28: 박희수가 9월 근무표에서 지선으로 확인돼 `BRANCH`로 옮겨 갔다
+        // ② 한 칩에 29명이 다 온다 (운용 13 + 관제 16). 갈라져 있으면 여기서 잡힌다
+        //    v1.7.9: 박희수가 지선으로 나가 28이 됐다가(9월 근무표), 카스 확정으로 강민성이
+        //    그 B조 자리로 들어와 다시 29
         val all = BundledRoster.forGroup(CrewGroup.SHIFT_4_2)
-        assertEquals("4조2교대 전원", 28, all.size)
-        assertEquals("이름 중복", 28, all.map { it.first }.toSet().size)
+        assertEquals("4조2교대 전원", 29, all.size)
+        assertEquals("이름 중복", 29, all.map { it.first }.toSet().size)
         assertTrue("관제 16명이 4조2교대 명단에 없다", all.containsAll(BundledRoster.SHIFT_CONTROL))
         assertTrue("운용 13명이 4조2교대 명단에 없다", all.containsAll(BundledRoster.SHIFT_4_2))
 
@@ -381,21 +382,79 @@ class PatternTest {
         assertEquals("대조한 칸 수", 150, checked)   // 3소속 × 5명 × 10일
     }
 
+    private data class Mover(val group: CrewGroup, val sep1: String, val fromSep2: String)
+
     /**
-     * v1.7.9: 9월 근무표에서 **월 중간에 소속이 바뀐 10명**은 아직 못 담는다는 사실을 못 박는다.
+     * v1.7.9: 9월 근무표에서 **월 중간에 소속이 바뀐 10명**은 **9/2 이후로 맞춰 두었다**는 사실을 못 박는다.
      *
-     * 사람당 offset 이 하나뿐이라 9/1(옛 소속의 비번 하루) 과 9/2~9/30(새 소속) 을 동시에 못 적는다.
-     * 지금은 **옛 값 그대로**라 그 열 명은 9/2부터 틀린다 — 임의로 한쪽을 고르지 않았다는 것이
-     * 이 테스트의 내용이고, 카스가 정해 주면 값과 함께 이 테스트를 고친다.
-     * 예로 고상일 하나만 잰다(나머지 아홉도 같은 꼴 — [BundledRoster.BRANCH] KDoc 참고).
+     * 사람당 offset 이 하나뿐이라 9/1(옛 소속의 비번 하루)과 9/2~9/30(새 소속)을 동시에 못 적는다.
+     * **카스가 2026-09-06에 "9월 2일 이후로 맞추기"를 골랐다** — 그래서 내장값은 **새 소속의 새
+     * offset** 이고 **9/1 한 칸만 근무표와 다르다**(10월부터는 전원 정확하다).
+     *
+     * 재는 것 셋: ① 열 명이 **새 소속**에 있다 ② 9/2부터 근무표 실값과 같다
+     * ③ **9/1 은 다르다** — 이게 이 열 명이 특이 사례라는 표시다. ③이 통과하기 시작하면
+     * 자료구조가 늘어난 것이거나 근무표가 바뀐 것이니 [BundledRoster] KDoc 을 다시 써야 한다.
+     * 값은 `직원_26년9월_2026_09_06_20_20_40.xlsx` 셀 그대로다(9/2~9/7 여섯 칸씩).
      */
-    @Test fun september2026_midMonthMovers_are_still_unrepresentable() {
-        val offset = BundledRoster.BRANCH.toMap()["고상일"]!!
-        // 9/1 = 지선 비번(8월 지선 야간의 꼬리) — 옛 값이 맞히는 유일한 날
-        assertEquals("지13비", Bundled.BRANCH_PATTERN.dutyOn(LocalDate.of(2026, 9, 1), offset).raw)
-        // 9/2 부터는 본선(근무표 실값 `휴4`)인데 지선 순환은 `지휴4` 를 준다
-        assertEquals("지휴4", Bundled.BRANCH_PATTERN.dutyOn(LocalDate.of(2026, 9, 2), offset).raw)
-        assertEquals("휴4", Bundled.MAIN_PATTERN.dutyOn(LocalDate.of(2026, 9, 2), 55).raw)
+    @Test fun september2026_midMonthMovers_match_from_sep2() {
+        val movers = mapOf(
+            // 본선기관사 → 지선 (9/1 은 옛 본선 비번)
+            "민병주" to Mover(CrewGroup.BRANCH, "39비", "지휴6 지1 지10 지10비 지휴1 지대1"),
+            "박우준" to Mover(CrewGroup.BRANCH, "33비", "지휴3 지6 지대11 지대11비 지휴6 지1"),
+            "박원선" to Mover(CrewGroup.BRANCH, "34비", "지휴5 지2 지8 지휴7 지5 지14"),
+            "박정규" to Mover(CrewGroup.BRANCH, "38비", "지휴2 지7 지11 지11비 지휴3 지6"),
+            "박희우" to Mover(CrewGroup.BRANCH, "35비", "지휴4 지3 지대2 지12 지12비 지휴5"),
+            // 지선 → 본선기관사 (9/1 은 옛 지선 비번)
+            "고상일" to Mover(CrewGroup.MAIN_DRIVER, "지13비", "휴4 17 49 49비 휴11 7"),
+            "권영주" to Mover(CrewGroup.MAIN_DRIVER, "지대11비", "휴8 24 48 48비 휴7 대4"),
+            "김경환" to Mover(CrewGroup.MAIN_DRIVER, "지12비", "휴22 6 26 휴25 대13 대13비"),
+            "김서진" to Mover(CrewGroup.MAIN_DRIVER, "지11비", "휴21 12 28 휴19 대3 35"),
+            "황진성" to Mover(CrewGroup.MAIN_DRIVER, "지14비", "휴16 18 23 휴29 4 36"),
+        )
+        val sep1 = LocalDate.of(2026, 9, 1)
+        var checked = 0
+        movers.forEach { (name, m) ->
+            // ① 새 소속에 있고 옛 소속에는 없다
+            val offset = BundledRoster.forGroup(m.group).toMap()[name]
+                ?: throw AssertionError("$name 이 ${m.group.label} 명단에 없다")
+            val old = if (m.group == CrewGroup.BRANCH) CrewGroup.MAIN_DRIVER else CrewGroup.BRANCH
+            assertNull("$name 이 옛 소속 ${old.label} 에 남아 있다",
+                BundledRoster.forGroup(old).toMap()[name])
+            val pattern = Bundled.patternFor(m.group)
+            // ② 9/2부터는 근무표 실값과 같다
+            m.fromSep2.split(" ").forEachIndexed { i, expected ->
+                val date = sep1.plusDays(1L + i)
+                assertEquals("$name $date (${m.group.label} offset $offset)",
+                    expected, pattern.dutyOn(date, offset).raw)
+                checked++
+            }
+            // ③ 9/1 만 다르다 — 그 하루는 옛 소속의 비번(8월 야간의 꼬리)이라 담을 자리가 없다
+            assertNotEquals("$name 9/1 이 맞아 버렸다 — 월중 이동이 표현 가능해진 것인가?",
+                m.sep1, pattern.dutyOn(sep1, offset).raw)
+        }
+        assertEquals("대조한 칸 수", 60, checked)   // 10명 × 9/2~9/7 여섯 칸
+    }
+
+    /**
+     * v1.7.9: **강민성은 [BundledRoster.SHIFT_4_2] 의 B조**다 (카스 확정 2026-09-06
+     * *"4조2교대 박희수 자리로 갔어"*).
+     *
+     * 그가 9월 승무 근무표(기관사·차장·지선 세 시트) 어디에도 없는 것은 퇴직·전출이라서가 아니라
+     * **4조2교대가 이 근무표에 아예 안 나오기 때문**이다. 옛 지선 offset 26 은 9월 표에서
+     * 박석남의 자리라 그대로 두면 교번이 겹쳤다 — 그래서 지선에서는 뺐다.
+     */
+    @Test fun september2026_kangMinseong_is_in_shift42_not_branch() {
+        assertEquals("강민성은 박희수가 있던 B조", ShiftTeam.B.offset,
+            BundledRoster.SHIFT_4_2.toMap()["강민성"])
+        listOf(CrewGroup.BRANCH, CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR).forEach {
+            assertNull("강민성이 ${it.label} 에 남아 있다", BundledRoster.forGroup(it).toMap()["강민성"])
+        }
+        // 그 자리를 비운 박희수는 지선으로 갔다(카스 확정) — 4조2교대에는 없다
+        assertNull("박희수가 4조2교대에 남아 있다", BundledRoster.SHIFT_ALL.toMap()["박희수"])
+        assertEquals(5, BundledRoster.BRANCH.toMap()["박희수"])
+        // B조 한 자리를 두 사람이 맞바꾼 것이라 인원은 v1.7.8과 같은 29명으로 돌아온다
+        // (v1.7.9 중간에 박희수가 나가 28이었다)
+        assertEquals("4조2교대 전원", 29, BundledRoster.SHIFT_ALL.size)
     }
 
     /**
@@ -448,7 +507,13 @@ class PatternTest {
         }
     }
 
-    /** 같은 소속에 같은 offset이 둘이면 둘 중 하나가 틀린 것 — 8월 대조에서 실제로 잡힌 유형 */
+    /**
+     * 같은 소속에 같은 offset이 둘이면 둘 중 하나가 틀린 것 — 8월 대조에서 실제로 잡힌 유형.
+     *
+     * ⚠ **승무 3종만 잰다.** `SHIFT_4_2`·`SHIFT_CONTROL`·`OFFICE_DAY` 는 offset 이 교번이 아니라
+     * **조(A0·B3·C2·D1)** 라 한 조에 여러 명이 같은 값을 쓰는 것이 정상이다(A조 세 명 · B조 네 명).
+     * 이 셋을 넣으면 첫 줄에서 걸린다 — 일부러 뺀 것이니 도로 넣지 말 것.
+     */
     @Test fun no_duplicate_offsets_within_crew_group() {
         listOf(CrewGroup.MAIN_DRIVER, CrewGroup.MAIN_CONDUCTOR, CrewGroup.BRANCH).forEach { g ->
             val list = BundledRoster.forGroup(g)
