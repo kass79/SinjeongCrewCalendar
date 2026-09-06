@@ -842,7 +842,34 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 > 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
 
 
-## v1.7.11 — **휴일 운휴 다이아도 휴무** · 판정을 `Bundled.isHolidayIdleDia` 한 곳으로
+## v1.7.11 (123) — **휴일 운휴 다이아도 휴무** · 판정을 `Bundled.isHolidayIdleDia` 한 곳으로
+
+**2026-09-07 릴리즈 빌드 완료.** 카스가 v1.7.10 (122) 을 깔아 보고 짚은 한 건(①)을 고쳤다.
+`versionCode` **122 → 123** · `versionName` **1.7.10 → 1.7.11**(`app/build.gradle.kts` 실값을
+읽고 +1 — 읽은 값 `122`).
+
+**테스트 393건 전건 통과**(`:app:compileDebugUnitTestKotlin` 먼저 → `tools\runtests.ps1`).
+**391 → 393건**(①에서 +2).
+**릴리즈 서명 확인**: `aapt2 dump badging`(build-tools 37.0.0)에 `application-debuggable` **0건** ·
+
+```
+package: name='com.sinjeong.crewcalendar' versionCode='123' versionName='1.7.11' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'
+```
+
+산출물(`C:\Users\admin\Downloads`, 스킬 `sinjeong-crew-calendar` 의 산출물 관례 그대로):
+
+| 파일 | 크기 |
+|---|---|
+| `신정승무캘린더_체험판.apk` (release, 덮어씀) | 40,519,518 B |
+| `신정승무캘린더_v1.7.11.aab` (플레이 콘솔용) | 40,087,831 B |
+| `신정승무캘린더_v1.7.11.zip` (APK 압축 — 카톡 전달용) | 39,121,256 B |
+
+zip 은 열어서 확인했다 — 항목 **1개**(`신정승무캘린더_체험판.apk`, 40,519,518 B)이고
+압축 해제본이 원본 APK 와 **SHA-256 까지 같다**(`47472AE8…24A71DC0`).
+v1.7.7·v1.7.8·v1.7.9·v1.7.10 산출물과 쇼츠 mp4·`신정승무캘린더_영상소스` 폴더는 그대로 두었다.
+
+이 회차의 화면 검증은 **전부 디버그 빌드**로 했다(아래 실측 표). 에뮬(`emulator-5554`)에는
+릴리즈를 **설치하지 않았다** — 서명이 달라 실제 동료(강민성) 계정 로그인이 날아간다.
 
 ### ① 토·일·공휴일에 걸린 본선 주간 26~29(`운휴`)를 **월 휴무 개수에 넣는다**
 
