@@ -207,6 +207,41 @@ private const val CARD_K = 0.70f
  */
 private const val NUMBER_MIN_SP = 7.7f
 
+/*
+ * ── v1.7.12 ② 카드 **껍데기** 줄이기 (그림은 한 픽셀도 안 건드린다) ──────────────
+ *
+ * 카스: *"신정지선 에뮬레이터 크기를 조금더 줄여주면 좋긴하지..그게 더 최적화 되니까"*.
+ * [CARD_K]·[NUMBER_MIN_SP] 는 **v1.7.10 실측 하한**이라(위 차선 몸통 안 여백 위/아래 5/4px)
+ * 손대지 않았다. 대신 노선 그림 **바깥**만 줄였다.
+ *
+ * v1.7.10 카드 593px(접힘·density 420 = 225.9dp)의 내역:
+ *   바깥 여백 8dp + **헤더 48dp** + 캔버스 117.9dp + **하단 칩 줄 52dp**.
+ * 헤더와 칩 줄이 48dp 씩인 것은 글자가 커서가 아니라 그 안의 **누를 수 있는 것**(↻ ·
+ * `본선 전체 보기`)이 머티리얼의 `minimumInteractiveComponentSize` = **48dp 터치 영역**을
+ * 요구하기 때문이다 — 둘이 합쳐 카드의 44%다.
+ *
+ * ⚠ **터치 영역은 그대로 48dp 로 둔다**(접근성 하한). 대신 두 Row 의 **레이아웃 높이만**
+ * 아래 값으로 잡는다: 최소 터치 크기 modifier 는 부모 제약을 무시하고 제 노드를 48dp 로
+ * 보고하므로, 손끝에 걸리는 넓이는 48dp 그대로이고 **눈에 보이는 것**(↻ 원 23dp · 칩 알약
+ * ~22dp)은 어차피 그보다 작아 잘리지 않는다 — 남는 빈 띠만 사라진다.
+ */
+
+/** 헤더 줄 레이아웃 높이 — `신정지선 실시간`(펼침 17sp × 배율 상한 1.2 ≈ 24.5dp)이 든다. */
+private val HEADER_H = 34.dp
+
+/** 하단 칩 줄 레이아웃 높이 — 칩 글자(펼침 12.5sp × 1.2) + 칩 세로 여백 3dp×2 가 든다. */
+private val CHIP_ROW_H = 34.dp
+
+/**
+ * 칩 줄과 **역 이름 사이** 틈 — 없애지 마라.
+ *
+ * 칩 알약은 이 줄의 **맨 위**에서 시작한다(실측: 알약 위 = 캔버스 아래). 그런데 역 이름
+ * 글자는 배율 1.2 에서 [nameH] 를 **약 4px 넘어** 캔버스 밖으로 나온다(`Canvas` 는 안 자른다).
+ * v1.7.12 ② 가 이 틈을 0 으로 만들었더니 **배율 1.5 에서 `신도림` 이 알약에 3px 먹혔다**(실측).
+ * 6dp = 16px 이면 그 위로 13px 이 남는다.
+ */
+private val CHIP_ROW_GAP = 6.dp
+
 /** **아래 선로(신도림행 = 주 선로)** 두께 — 역 흰 점이 선 위에 살짝 얹혀 보이는 굵기다. */
 private val LINE_H = 5.dp
 
@@ -486,9 +521,14 @@ private fun LineMapCard(
                  * 칸)을 먼저 가져가므로, 지붕 위 행선판([LOCO_BOARD_H] = 17)은 비어 있는
                  * `r = 1` 칸(31 + 2dp) 안에 그대로 들어간다. 굴뚝 연기도 같은 자리다.
                  */
+                // ⚠ **꼬리 여백 `7dp * CARD_K` 는 빈 띠가 아니다 — 줄이지 마라.**
+                // v1.7.12 ② 에서 `3dp * CARD_K` 로 줄였다가 **글자배율 1.5 에서 `신도림` 이름
+                // 아랫부분이 잘렸다**(실측 크롭). 이름 글자는 카드 안 배율 상한 1.2 에서
+                // 약 13.1dp 인데 [nameH] 는 12.6dp 뿐이라 **넘치는 만큼을 이 꼬리가 받는다**
+                // (`drawText` 는 캔버스 밖을 자른다). 되돌렸다.
                 val canvasH = laneH + UP_LINE_H + laneH + LINE_H + nameH + 7.dp * CARD_K
 
-                Column(Modifier.padding(vertical = 4.dp)) {
+                Column(Modifier.padding(vertical = 2.dp)) {
                     BranchHeader(nowMillis, big, pal, onRefresh)
                     /*
                      * 내 열차 한 줄 — `내 열차 5581 · 신도림행 · 양천구청 진입`.
@@ -501,7 +541,7 @@ private fun LineMapCard(
                         } ?: ("내 열차 미검출 · 오늘 열번 " + shortNos(candidates)),
                         fontSize = (if (big) 12.5f else 11f).sp,
                         color = pal.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(start = 12.dp, end = 12.dp, top = 1.dp),
+                        modifier = Modifier.padding(horizontal = 12.dp),
                     )
 
                     // 위치 보간 드리프트 + 뒤로가기 방지(단조 전진)
@@ -959,7 +999,11 @@ private fun LineMapCard(
 
                     // ── 하단 칩 한 줄 ─────────────────────────────────────────
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 2.dp),
+                        // ⚠ v1.7.12 ② — 높이를 [CHIP_ROW_H] 로 잡는다. `본선 전체 보기` 칩의
+                        // 48dp 최소 터치 영역은 그대로고(노드가 부모 제약을 무시한다) 보이는
+                        // 알약도 그대로다 — 위아래로 남던 빈 띠만 사라진다.
+                        Modifier.fillMaxWidth().padding(top = CHIP_ROW_GAP)
+                            .height(CHIP_ROW_H).padding(horizontal = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
@@ -1014,7 +1058,10 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, pal: MapPalette, onRefre
     }
     val sp = (if (big) 17f else 15f).sp
     Row(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 6.dp),
+        // ⚠ v1.7.12 ② — 높이를 [HEADER_H] 로 잡는다. ↻ 의 48dp 터치 영역은 그대로다
+        // (`minimumInteractiveComponentSize` 노드가 부모 제약 밖으로 넘친다). 보이는 원은
+        // 23dp 라 잘리지 않고, 남던 빈 띠 14dp 만 사라진다.
+        Modifier.fillMaxWidth().height(HEADER_H).padding(start = 12.dp, end = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text("신정지선 실시간", fontSize = sp, fontWeight = FontWeight.Bold,

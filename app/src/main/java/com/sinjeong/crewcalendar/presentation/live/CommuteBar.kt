@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.presentation.live
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -9,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -29,6 +31,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -56,6 +68,14 @@ import kotlinx.coroutines.launch
  *
  * 호출 예산: 칩 하나를 1분 펼쳐 두면 4회다. 지선 카드(10초/4초)와 달리 사용자가 직접 펼쳐야
  * 도는 경로라 평소엔 0회다.
+ *
+ * ## v1.7.12 ① — 펼친 칸은 **가로 미니 노선 한 줄**(칩 줄은 그대로)
+ *
+ * 카스: *"아이콘을 좀 더 귀엽게 각호선 색상에 맞게 … 세로칸은 최소화 해서 일자로"*.
+ * 종전엔 다가오는 열차 최대 세 대를 **글자 목록**으로 세로로 쌓았다(약 131dp). 이제
+ * [CommuteMiniLine] 이 한 줄로 접는다 — 왼쪽 끝이 `3번째 전역`, 오른쪽 끝이 등록한 역,
+ * 그 위에 **호선 색 꼬마 기관차**가 서고, 오른쪽에 **가장 가까운 한 대**의 남은 시간·종착이 붙는다.
+ * 칩 줄은 v1.7.9 확정 그대로다(한 줄·옆으로 밀기·최대 4개) — 카스가 고른 것이 *"제안 A"* 다.
  */
 @Composable
 internal fun CommuteBar(
@@ -111,59 +131,161 @@ internal fun CommuteBar(
         }
         open?.let { s ->
             val at = commuteAtStation(rows, s)
-            val next3 = commuteApproaching(rows, s)
+            val next = commuteApproaching(rows, s)
+            // 가까운 순 — [commuteAtStation] 은 지금 역에 든 열차(`arvlCd` 0·1), [commuteApproaching]
+            // 은 그 뒤로 다가오는 열차다. 맨 앞이 **가장 가까운 한 대**이고 오른쪽 글자가 그것을 말한다.
+            val near = listOfNotNull(at) + next
+            val lead = near.firstOrNull()
+            // 아이콘 자리 — 같은 칸이 겹치면 **가까운 것만** 남긴다(먼저 온 것이 이긴다).
+            val slots = near.map { commuteSlot(it.arvlMsg2, it.arvlCd) }.distinct()
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
                 shape = RoundedCornerShape(10.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Column(
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp),
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(
-                        "${lineName(s.subwayId)} ${s.name} · ${s.updnLine}",
-                        fontSize = 11.sp, fontWeight = FontWeight.ExtraBold,
-                        color = MaterialTheme.colorScheme.primary,
-                        maxLines = 1, overflow = TextOverflow.Ellipsis,
-                    )
-                    at?.let {
+                    if (lead == null) {
+                        // 빈 상태·오류는 **한 줄로만** 말한다(확정 표 — 문구는 v1.7.9 그대로).
                         Text(
-                            "${atStationText(it.arvlCd)} · ${it.destName}행",
-                            fontSize = 13.sp, fontWeight = FontWeight.ExtraBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            when {
+                                error != null -> error!!
+                                loading -> "실시간 조회 중…"
+                                !inService() -> "운행 시간이 아닙니다"
+                                else -> "다가오는 열차가 없습니다"
+                            },
+                            fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         )
-                    }
-                    next3.forEach { r ->
-                        Column {
+                    } else {
+                        CommuteMiniLine(s, slots, Modifier.weight(1f).height(MINI_H))
+                        Spacer(Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                positionText(r),
-                                fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                                if (at != null) atStationText(at.arvlCd) else etaText(lead.etaSec),
+                                fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                "${etaText(r.etaSec)} · ${r.destName}행",
-                                fontSize = 11.sp,
-                                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                "${lead.destName}행",
+                                fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
-                    // 빈 상태·오류는 **한 줄로만** 말한다(확정 표 — 지도 위에 얹지 않는다).
-                    if (at == null && next3.isEmpty()) Text(
-                        when {
-                            error != null -> error!!
-                            loading -> "실시간 조회 중…"
-                            !inService() -> "운행 시간이 아닙니다"
-                            else -> "다가오는 열차가 없습니다"
-                        },
-                        fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
                 }
             }
         }
     }
+}
+
+
+/* ── 미니 노선 한 줄 (v1.7.12 ①) ───────────────────────────── */
+
+/**
+ * 펼친 칸 높이. 세로로 쌓던 글자 목록(약 131dp)을 **한 줄**로 접은 값이다 —
+ * 카스: *"세로칸은 최소화 해서 일자로 보여주면 좋지"*.
+ */
+private val MINI_H = 40.dp
+
+/** 기관차 한 대가 선 위로 차지하는 높이(굴뚝 끝 ~ 바퀴 바닥). 배율 1 일 때의 값이다. */
+private val LOCO_TOP_ROOM = 18.dp
+
+/**
+ * **가로 미니 노선 한 줄** — 왼쪽 끝이 `3번째 전역`, 오른쪽 끝이 **등록한 그 역**(큰 점)이고
+ * 그 위에 다가오는 열차가 기관차로 선다. 칸 좌표는 순수 함수 [commuteSlot] 이 낸다.
+ *
+ * 색은 **호선 색**([lineArgb])이다 — 카스: *"아이콘을 좀 더 귀엽게 각호선 색상에 맞게"*.
+ * 다만 **글자는 테마 색**을 쓴다(`onSurfaceVariant`) — 1호선 남색(`#0052A4`)·7호선
+ * 올리브(`#747F00`) 같은 어두운 호선색은 다크 카드 위에서 대비가 무너진다. 그림(선·점·몸통)만
+ * 호선 색이고 읽어야 하는 글자는 테마가 보장하는 대비를 쓴다.
+ */
+@Composable
+private fun CommuteMiniLine(station: CommuteStation, slots: List<Int>, modifier: Modifier) {
+    val line = Color(lineArgb(station.subwayId))
+    val ink = MaterialTheme.colorScheme.onSurfaceVariant
+    val tm = rememberTextMeasurer()
+    Canvas(modifier) {
+        val nameL = tm.measure(
+            station.name,
+            TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ink),
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
+        val farL = tm.measure(
+            "${COMMUTE_SLOTS - 1}번째 전역",
+            TextStyle(fontSize = 8.sp, color = ink.copy(alpha = 0.7f)),
+            maxLines = 1,
+        )
+        // 라벨은 선 밑에 눕는다 — 캔버스 아래쪽을 라벨 높이만큼 비우고 나머지가 그림 자리다.
+        val labelH = maxOf(nameL.size.height, farL.size.height).toFloat()
+        val y = size.height - labelH - 2.dp.toPx()
+        // 양 끝 여백 = 라벨 반 폭(글자가 캔버스 밖으로 안 나간다) — 큰 점 반지름보다는 늘 크다.
+        val padL = maxOf(farL.size.width / 2f, 6.dp.toPx())
+        val padR = maxOf(nameL.size.width / 2f, 6.dp.toPx())
+        val x0 = padL
+        val step = (size.width - padL - padR) / (COMMUTE_SLOTS - 1)
+        fun xOf(slot: Int) = x0 + step * slot.coerceIn(0, COMMUTE_SLOTS - 1)
+
+        drawLine(line.copy(alpha = 0.32f), Offset(x0, y), Offset(x0 + step * (COMMUTE_SLOTS - 1), y),
+            strokeWidth = 3.5.dp.toPx(), cap = StrokeCap.Round)
+        // 지나온 역은 작은 흰 점 + 호선색 테, **등록한 역**만 꽉 찬 큰 점이다.
+        // ⚠ 기관차가 선 칸엔 점을 안 찍는다 — 점이 바퀴 사이로 삐져나와 **턱수염처럼** 보였다
+        //   (실측 크롭 둘 다). 그 칸은 기관차가 표시를 대신하고, 어느 역인지는 밑 라벨이 말한다.
+        for (i in 0 until COMMUTE_SLOTS - 1) {
+            if (i in slots) continue
+            drawCircle(Color.White, 3.2.dp.toPx(), Offset(xOf(i), y))
+            drawCircle(line, 3.2.dp.toPx(), Offset(xOf(i), y), style = Stroke(1.8.dp.toPx()))
+        }
+        if (COMMUTE_SLOTS - 1 !in slots)
+            drawCircle(line, 5.4.dp.toPx(), Offset(xOf(COMMUTE_SLOTS - 1), y))
+
+        drawText(farL, topLeft = Offset(x0 - farL.size.width / 2f, y + 2.dp.toPx()))
+        drawText(nameL, topLeft = Offset(
+            (xOf(COMMUTE_SLOTS - 1) - nameL.size.width / 2f)
+                .coerceIn(0f, (size.width - nameL.size.width).coerceAtLeast(0f)),
+            y + 2.dp.toPx()))
+
+        // 기관차 키 — 선 위에 남은 자리에 맞춘다. 글자배율을 키우면 라벨이 두꺼워져 선이
+        // 올라오는데, 그때 아이콘을 안 줄이면 굴뚝이 카드 위로 삐져나간다(배율 1.5 실측 자리).
+        val k = (y / LOCO_TOP_ROOM.toPx()).coerceIn(0.55f, 1f)
+        slots.forEach { drawCommuteLoco(xOf(it), y, line, ink, k) }
+    }
+}
+
+/**
+ * **귀여운 꼬마 기관차** — 둥근 몸통 + 흰 창 둘 + 눈웃음 + 바퀴 둘 + 굴뚝(시안 그대로).
+ * `(cx, railY)` 는 **바퀴가 닿는 선로 위 한 점**이고 그림은 거기서 위로 자란다.
+ *
+ * ⚠ **열번을 넣지 않는다.** 확정 표의 *"열차 아이콘 = 열번 상자"* 는 실시간 **지도**(본선·지선)
+ * 규칙이다 — 거기선 내 열번을 눈으로 찾는 것이 화면의 목적이라 열번이 아이콘 안에 있어야 한다.
+ * 이 칸은 *"내가 탈 열차가 몇 정거장 앞"* 을 말하는 도착 정보라 열번이 할 일이 없고, 몸통이
+ * 22dp 라 4자리가 물리적으로 안 든다. [Loco.drawLoco] 를 쓰지 않는 이유도 같다(그쪽은 열번·
+ * 행선판·연기를 그리는 지도용 함수다).
+ */
+private fun DrawScope.drawCommuteLoco(cx: Float, railY: Float, body: Color, wheel: Color, k: Float) {
+    fun u(v: Float) = v.dp.toPx() * k
+    val w = u(22f)                 // 몸통 폭   (시안 76 units)
+    val h = u(11.6f)               // 몸통 높이 (시안 40 units — 가로:세로 1.9:1)
+    val r = u(2.0f)                // 바퀴 반지름 (시안 7)
+    val cy = railY - r - u(7f)     // 몸통 중심 — 바퀴가 선로에 닿고 몸통은 그 위에 뜬다
+    // 굴뚝 (몸통 가운데 위)
+    drawRoundRect(body, Offset(cx - u(2.3f), cy - h / 2f - u(3.2f)), Size(u(4.6f), u(4f)),
+        CornerRadius(u(1.2f)))
+    // 몸통
+    drawRoundRect(body, Offset(cx - w / 2f, cy - h / 2f), Size(w, h), CornerRadius(u(3.8f)))
+    // 창 둘 (= 눈)
+    val ww = u(6.4f); val wh = u(4.9f); val wy = cy - u(3.8f)
+    drawRoundRect(Color.White, Offset(cx - u(8.1f), wy), Size(ww, wh), CornerRadius(u(1.7f)))
+    drawRoundRect(Color.White, Offset(cx + u(1.2f), wy), Size(ww, wh), CornerRadius(u(1.7f)))
+    // 눈웃음 — 아래로 볼록한 얇은 호(`useCenter = false` 라 반달이 아니라 선이다)
+    drawArc(Color.White, 20f, 140f, false,
+        Offset(cx - u(3.5f), cy + u(1.6f)), Size(u(7f), u(3.4f)),
+        style = Stroke(u(1.2f), cap = StrokeCap.Round))
+    // 바퀴 둘 — 늘 선로 쪽이다(지도 기관차와 같은 규칙)
+    drawCircle(wheel, r, Offset(cx - u(5.7f), railY - r))
+    drawCircle(wheel, r, Offset(cx + u(5.7f), railY - r))
 }
 
 /* ── 설정 > 출퇴근 역 등록 ──────────────────────────────────── */
