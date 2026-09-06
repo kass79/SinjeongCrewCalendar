@@ -328,10 +328,22 @@ internal object MatesHeader {
  *  · **‹ › 구간 이동**은 v1.6.39에서 지웠다가 v1.6.42 ⑦에서 되살렸다. 달(月) 이동이 아니라
  *    구간 이동이다 — › 한 번에 `8/21~9/20` → `9/21~10/20`. 과거 방향은 오늘 구간에서 막는다
  *    ([MatesViewModel.period]).
+ *
+ * ## 즐겨찾기 탭 = 이 화면을 고정해서 연 것 (v1.7.10 ④)
+ * 카스: *"난 단지 동료탭에 들어가면 즐겨찾기로 바로 갈수있게 조금더 편하게 해놓고 싶을 뿐"* →
+ * 하단 탭에 `즐겨찾기` 를 하나 더 놓고, 그 라우트가 이 **같은 화면**을 [lockToFavorites] 로 연다.
+ * 화면을 새로 짜지 않는다 — 매트릭스·근무변경·행로표·★그룹이 두 벌이 되면 한쪽만 낡는다.
+ *
+ * @param lockToFavorites ★즐겨찾기 보기로 **고정**. 소속 칩 줄(`전체` + 2행 3열 격자)을 감추고
+ *   ★그룹 하위 필터(`★전체`·동호회·우리 조·기타)만 남긴다. 동료 탭은 이 값이 `false` 라
+ *   **한 줄도 안 바뀐다**(진입 기본 전체 명단·칩 6개·★ 토글 전부 종전 그대로).
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
+fun MatesScreen(
+    lockToFavorites: Boolean = false,
+    viewModel: MatesViewModel = hiltViewModel(),
+) {
     val mates by viewModel.mates.collectAsStateWithLifecycle()
     val user by viewModel.user.collectAsStateWithLifecycle()
     val liveUsers by viewModel.liveUsers.collectAsStateWithLifecycle()
@@ -339,8 +351,11 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
     var query by remember { mutableStateOf("") }
     /** 선택된 소속 칩. null = 소속 필터 없음 */
     var category by remember { mutableStateOf<CrewGroup?>(null) }
-    /** ★즐겨찾기 칩. `category`와 배타 — **둘 다 꺼져 있으면 전체 명단**(진입 기본값, v1.6.42 ⑤) */
-    var favMode by remember { mutableStateOf(false) }
+    /**
+     * ★즐겨찾기 칩. `category`와 배타 — **둘 다 꺼져 있으면 전체 명단**(진입 기본값, v1.6.42 ⑤).
+     * 즐겨찾기 탭([lockToFavorites])에서는 켠 채로 시작하고 칩 줄 자체가 없어 꺼지지 않는다.
+     */
+    var favMode by remember { mutableStateOf(lockToFavorites) }
     /** ★그룹 하위 필터. `null` = 전체. ★즐겨찾기를 고른 동안에만 쓰인다(셋째 줄). */
     var favFilter by remember { mutableStateOf<FavGroup?>(null) }
     var showAdd by remember { mutableStateOf(false) }
@@ -478,7 +493,8 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                      * **68dp**다 — 4/5면 54dp라 제목이 살고, 1 : 1이면 34dp라 `동…`으로 잘린다.
                      */
                     Text(
-                        "동료", fontWeight = FontWeight.ExtraBold, fontSize = 17.sp,
+                        if (lockToFavorites) "즐겨찾기" else "동료",
+                        fontWeight = FontWeight.ExtraBold, fontSize = 17.sp,
                         maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(4f, fill = false),
                     )
@@ -527,7 +543,14 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                      * 없앴다** — 상단바는 목록 밖이라 무엇을 덮을 일이 없다.
                      * 동작(`showAdd = true`)은 그대로다.
                      */
-                    IconButton(
+                    /*
+                     * ⚠ **즐겨찾기 탭에는 이 버튼이 없다**(v1.7.10 ④). 동료를 새로 등록하는 자리는
+                     * 동료 탭이고(빈 안내도 그리로 보낸다), 무엇보다 **제목이 잘렸다** —
+                     * 360dp · 배율 1.5 실측에서 `즐겨찾기`(4자, 17sp × 1.5 = 306px)가 제목 몫
+                     * 273px 을 넘겨 `즐겨찾…`이 됐다(`동료`는 2자라 종전엔 남았다). 이 버튼
+                     * 36dp(108px)를 덜면 제목 몫이 359px 이 되어 **온전한 낱말**이 든다.
+                     */
+                    if (!lockToFavorites) IconButton(
                         onClick = { showAdd = true },
                         modifier = Modifier.size(36.dp),
                     ) { Icon(Icons.Default.PersonAdd, "동료 추가", Modifier.size(22.dp)) }
@@ -601,7 +624,9 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             // 좌우 여백 12 → 10dp, 칸 사이 5 → 4dp: 키운 글자(15dp)가 360dp에 들어가도록 되찾은 폭.
             // ⚠ `height(IntrinsicSize.Min)`이 `전체` 칩을 격자 두 행 높이에 맞춘다 — 고정 dp가
             //   아니라서 칩 글자를 키워 행이 높아져도 따라온다.
-            Row(
+            // ⚠ **즐겨찾기 탭에서는 이 줄이 통째로 없다**(v1.7.10 ④) — 보기가 ★로 고정이라
+            //   고를 것이 없고, 그 자리(칩 두 행 ≈ 79dp)를 명단이 그대로 가져간다.
+            if (!lockToFavorites) Row(
                 Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp)
                     .height(IntrinsicSize.Min),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -676,7 +701,7 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
             // `onlyMe` = ★즐겨찾기 화면에 내 행 하나만 남은 상태(담은 동료 0명 또는 ★그룹 필터가 0명).
             // **내 행은 필터와 무관하게 늘 들어 있어 `rows`가 절대 비지 않는다** — 따로 안 잡으면
             // 한 줄만 덩그러니 뜨고 아무 설명이 없다. 검색 중일 때는 제외(내가 검색에 걸린 정상 결과다).
-            val onlyMe = favMode && q.isEmpty() && rows.none { !it.isMe }
+            val onlyMe = favMode && q.isEmpty() && onlyMyRow(rows)
             if (onlyMe || rows.isEmpty()) Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 when {
                     q.isNotEmpty() -> EmptyHint(
@@ -689,6 +714,12 @@ fun MatesScreen(viewModel: MatesViewModel = hiltViewModel()) {
                         "이름을 눌러 뜨는 시트에서 ★그룹을 골라 담으면 여기 모입니다.",
                         "전체 보기",
                     ) { favFilter = null }
+                    // 즐겨찾기 탭은 돌아갈 칩이 없다 — **어디서 담는지**를 대신 말한다(v1.7.10 ④).
+                    // 빈 화면으로 두지 않는 이유가 v1.6.42 ⑤가 기본값을 바꾼 바로 그 이유다.
+                    favMode && lockToFavorites -> EmptyHint(
+                        "아직 담은 동료가 없습니다",
+                        "동료 탭에서 이름을 누르고 ★을 골라 담으면 여기 모입니다.",
+                    )
                     favMode -> EmptyHint(
                         "아직 담은 동료가 없습니다",
                         "★즐겨찾기를 다시 눌러 전체 명단으로 돌아간 뒤 이름을 누르면 ★로 담을 수 있습니다.\n" +

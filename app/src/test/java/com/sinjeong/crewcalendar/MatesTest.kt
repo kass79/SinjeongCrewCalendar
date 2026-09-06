@@ -8,7 +8,9 @@ import com.sinjeong.crewcalendar.domain.model.Mate
 import com.sinjeong.crewcalendar.domain.model.ReviewerAccount
 import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.presentation.mates.MatesHeader
+import com.sinjeong.crewcalendar.presentation.roster.MatrixPerson
 import com.sinjeong.crewcalendar.presentation.roster.mergeRoster
+import com.sinjeong.crewcalendar.presentation.roster.onlyMyRow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
@@ -368,5 +370,44 @@ class MatesTest {
         )
         // 견습(감시값)도 막지 않는다 — 막으면 본인이 고른 값이 서버에 안 남는다
         assertEquals(false, BundledRoster.isLoginDefaultUser("김성민", CrewRole.DRIVER_BRANCH, branch, 0))
+    }
+
+    /**
+     * ④ **하단 탭 넷** — `달력 · 동료 · 즐겨찾기 · 설정`(v1.7.10, 카스 지정).
+     *
+     * 아이콘은 못 잠근다(테스트 하네스에 Compose 가 없어 `ImageVector` 를 못 든다) —
+     * 그래서 [BottomTabs] 가 **문자열만** 들고 있고 `Tab` 이 아이콘만 든다.
+     * 즐겨찾기가 **동료 바로 뒤**인 것이 요청의 핵심이라 자리까지 못 박는다.
+     */
+    @Test fun bottom_tabs_are_calendar_mates_favorites_settings() {
+        assertEquals(
+            listOf("calendar" to "달력", "mates" to "동료", "favorites" to "즐겨찾기", "settings" to "설정"),
+            BottomTabs.ORDER,
+        )
+        // 즐겨찾기는 동료와 설정 사이 — 세 번째 자리다
+        val routes = BottomTabs.ORDER.map { it.first }
+        assertEquals(2, routes.indexOf(BottomTabs.FAVORITES))
+        assertEquals(routes.indexOf(BottomTabs.MATES) + 1, routes.indexOf(BottomTabs.FAVORITES))
+        assertEquals(routes.indexOf(BottomTabs.FAVORITES) + 1, routes.indexOf(BottomTabs.SETTINGS))
+        // 라우트는 서로 달라야 한다 — 같으면 네비게이션이 조용히 한 탭으로 합쳐진다
+        assertEquals(4, routes.toSet().size)
+        // 라벨의 단일 출처(`Tab.label` 이 이 함수로 읽는다)
+        assertEquals("즐겨찾기", BottomTabs.labelOf(BottomTabs.FAVORITES))
+        assertEquals("동료", BottomTabs.labelOf(BottomTabs.MATES))
+        // 목록에 없는 라우트는 터지지 않고 그대로 보인다
+        assertEquals("없는탭", BottomTabs.labelOf("없는탭"))
+    }
+
+    /**
+     * ④ **즐겨찾기 0명 판정** — 내 행은 필터와 무관하게 늘 들어 있어 목록이 비지 않는다.
+     * 이 판정이 없으면 즐겨찾기 탭이 **내 한 줄만 뜬 채 아무 설명 없는 화면**이 된다.
+     */
+    @Test fun favorites_with_nobody_saved_is_only_my_row() {
+        val me = MatrixPerson("강성진 (나)", CrewGroup.MAIN_DRIVER, 16, isMe = true)
+        val mate = MatrixPerson("박희수", CrewGroup.BRANCH, 5)
+        assertEquals(true, onlyMyRow(listOf(me)))
+        assertEquals(true, onlyMyRow(emptyList()))
+        assertEquals(false, onlyMyRow(listOf(me, mate)))
+        assertEquals(false, onlyMyRow(listOf(mate)))
     }
 }

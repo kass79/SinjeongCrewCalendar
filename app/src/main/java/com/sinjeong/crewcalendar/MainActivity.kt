@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
@@ -147,10 +148,43 @@ private fun AlarmPermissionGate() {
     )
 }
 
-private enum class Tab(val route: String, val label: String, val icon: ImageVector) {
-    Calendar("calendar", "달력", Icons.Default.CalendarMonth),
-    Mates("mates", "동료", Icons.Default.Groups),
-    Settings("settings", "설정", Icons.Default.Settings),
+/**
+ * 하단 탭 **라우트·라벨 한 곳** (v1.7.10 ④).
+ *
+ * 카스: *"맨 밑에 달력 동료 즐겨찾기 설정 ← 이렇게 4개로"* — `즐겨찾기` 는 **동료 바로 뒤**다.
+ * 즐겨찾기 탭은 화면을 새로 짜지 않고 [MatesScreen] 을 ★즐겨찾기 보기로 **고정해서** 연다
+ * (`lockToFavorites`) — 동료 탭은 종전 그대로(진입 기본 전체 명단·소속 칩 6개).
+ *
+ * ⚠ **왜 `object` 인가** — 테스트 하네스(`tools/runtests.ps1` 의 JUnitCore)에는 Compose 가 없다.
+ * [Tab] 은 아이콘이 `ImageVector` 라 클래스 로드부터 터지지만, 문자열뿐인 이 목록은 그대로
+ * 잠글 수 있다(`MatesScreen` 의 `MatesHeader` 와 같은 처방).
+ */
+internal object BottomTabs {
+    const val CALENDAR = "calendar"
+    const val MATES = "mates"
+    const val FAVORITES = "favorites"
+    const val SETTINGS = "settings"
+
+    /** 왼쪽부터 순서 그대로 = 화면의 탭 줄. 라벨의 **단일 출처**다([Tab] 은 아이콘만 든다). */
+    val ORDER: List<Pair<String, String>> = listOf(
+        CALENDAR to "달력",
+        MATES to "동료",
+        FAVORITES to "즐겨찾기",
+        SETTINGS to "설정",
+    )
+
+    /** 목록에 없는 라우트는 라우트 이름 그대로 — 어긋나면 화면에 보이되 터지지는 않는다. */
+    fun labelOf(route: String): String = ORDER.firstOrNull { it.first == route }?.second ?: route
+}
+
+private enum class Tab(val route: String, val icon: ImageVector) {
+    Calendar(BottomTabs.CALENDAR, Icons.Default.CalendarMonth),
+    Mates(BottomTabs.MATES, Icons.Default.Groups),
+    // 채운 별 = "담아 둔 것". 동료 탭 행의 ★ 표시와 같은 뜻이라 모양을 맞춘다.
+    Favorites(BottomTabs.FAVORITES, Icons.Default.Star),
+    Settings(BottomTabs.SETTINGS, Icons.Default.Settings);
+
+    val label: String get() = BottomTabs.labelOf(route)
 }
 
 @Composable
@@ -207,8 +241,15 @@ private fun AppRoot(
             //   M3가 남는 높이를 위아래로 **반씩** 나눠 갖기 때문에 부족분의 2배를 넣어야 그만큼 내려온다
             //   (10으로는 배율 2.0에서 여유가 0px까지 떨어졌다). 이 값이면 배율 1.0~2.0 내내 여유 4dp대 유지.
             //   raw fontScale로 계산한다 — sp↔dp 변환은 비선형 룩업이라 레이아웃 산수에 쓰지 않는다(v1.6.42 ⑥).
+            //
+            // **v1.7.10 ④ — 탭이 넷이 되며 60 → 56dp**(카스: *"전체 세로 크기를 약간 줄여서 최적화"*).
+            // 그냥 깎은 게 아니라 **먼저 항목을 낮췄다** — 아래 라벨의 `lineHeight` 를 M3 기본
+            // `labelMedium` **16sp** 에서 **12sp** 로 조였다.
+            // 에뮬 실측(420dpi·배율 1.0): 바 242 → **231px**(−11px = −4dp) · **알약 위 여유
+            // 10 → 7px**(2.7dp). 배율 1.5 에서도 8px, 2.0 에서 9px, 360dp·1.5 에서 10px 로
+            // 알약은 어느 배율에서도 안 잘린다(v1.6.59 는 여유가 1.9dp였고 1.15에서 0이 됐다).
             val labelGrow = ((LocalDensity.current.fontScale - 1f) * 16f).coerceAtLeast(0f).dp
-            NavigationBar(modifier = Modifier.height(60.dp + labelGrow + gestureBar)) {
+            NavigationBar(modifier = Modifier.height(56.dp + labelGrow + gestureBar)) {
                 Tab.entries.forEach { tab ->
                     NavigationBarItem(
                         selected = currentDest?.hierarchy?.any { it.route == tab.route } == true,
@@ -237,7 +278,16 @@ private fun AppRoot(
                             }
                         },
                         icon = { Icon(tab.icon, tab.label, modifier = Modifier.size(20.dp)) },
-                        label = { Text(tab.label, fontSize = 10.sp, maxLines = 1) },
+                        // 10sp 글자에 M3 기본 줄높이 16sp·자간 0.5sp 가 따라오던 것을 조인다.
+                        // `lineHeight` 는 **세로**(위 주석), `letterSpacing` 은 **가로**를 되찾는다 —
+                        // 네 탭에서 가장 긴 `즐겨찾기`(4자)가 자간만으로 2sp 를 더 먹고 있었다.
+                        label = {
+                            Text(
+                                tab.label,
+                                fontSize = 10.sp, lineHeight = 12.sp, letterSpacing = 0.sp,
+                                maxLines = 1, softWrap = false,
+                            )
+                        },
                     )
                 }
             }
@@ -255,6 +305,9 @@ private fun AppRoot(
             // "deadhead" 라우트·DeadheadScreen 은 v1.6.86에서 삭제. 편승시각표는 달력 상세시트의
             // 전체화면 행로표(`fullTimetable = "tt_deadhead"`)로 이미 대체돼 navigate 호출이 0건이었다.
             composable(Tab.Mates.route) { MatesScreen() }
+            // 즐겨찾기 탭 = **같은 화면**을 ★즐겨찾기로 고정해서 연다(v1.7.10 ④).
+            // 새 화면을 만들지 않는다 — 두 벌이 되면 한쪽만 낡는다(`MatesScreen` KDoc).
+            composable(Tab.Favorites.route) { MatesScreen(lockToFavorites = true) }
             composable(Tab.Settings.route) {
                 SettingsScreen(
                     onOpenContacts = { nav.navigate("contacts") },

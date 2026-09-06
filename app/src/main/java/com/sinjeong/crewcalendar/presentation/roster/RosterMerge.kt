@@ -23,6 +23,14 @@ val MatrixPerson.cleanName: String get() = name.removeSuffix(" (나)").trim()
 val MatrixPerson.key: String get() = mateKey(cleanName, group)
 
 /**
+ * ★즐겨찾기 보기에 **내 행 하나만** 남았나 = 담은 동료가 0명(또는 ★그룹 필터에 0명)이라는 뜻.
+ *
+ * 내 행은 필터와 무관하게 늘 들어 있어 목록이 **절대 비지 않는다** — 따로 안 잡으면 한 줄만
+ * 덩그러니 뜨고 아무 설명이 없다. 즐겨찾기 탭(v1.7.10 ④)은 이 판정으로 안내 한 줄을 띄운다.
+ */
+fun onlyMyRow(rows: List<MatrixPerson>): Boolean = rows.none { !it.isMe }
+
+/**
  * 동료 탭 전체 명단 합성 — **나 → 로그인 근무자(live) → 수동등록 동료 → 내장 명단** 순으로
  * 겹치는 것을 지운다. 합치는 규칙은 여기 한 곳에만 둔다.
  *
