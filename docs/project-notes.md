@@ -898,6 +898,29 @@ duty.raw in REST_OVERRIDES)` 를 더했다. `REST_OVERRIDES = setOf("운휴", "�
 (그 날의 `raw` 는 `"26"` 이고 `isOverridden` 도 false 다).
 ❓ **대휴도 세야 하면 말해 달라** — 지금은 안 센다.
 
+### ③ 본선 `전체 보기` — **펼침(wide)에서는 가로 그대로** (사용자: *"폴더 7 같은건 펼치면 가로로 본선으로 바로 볼수있게 해주면 좋겠어!"* → 확정 *"눌러서 가로 전체로."*)
+
+`MainLineMap.MainLineMapDialog` 의 회전 판정 **한 줄**만 바꿨다.
+- before: `val portrait = maxHeight > maxWidth`
+- after: `val wide = LocalConfiguration.current.screenWidthDp >= 600` · `val portrait = maxHeight > maxWidth && !wide`
+
+펼침이면 `portrait` 가 거짓이 돼 **기존 else 가지**(회전 없음 · `mapDeg = 0f` · 가로로 화면 채움)로
+간다 — `cw`·`ch`·`inset` 이 전부 자동으로 else(가로) 계산을 탄다. 새 레이아웃을 안 만들고 이미 있는
+가로 경로를 그대로 태웠다(`CabScreen` 은 원래 `mapDeg = 0` 가로 설계다). **접힌 폰 세로**
+(`screenWidthDp < 600`)는 종전대로 90° 회전 — **회귀 없음**. 잣대는 `MainCalendarScreen.kt:138`·
+`LineMap.kt:419` 의 wide 와 **같은 값**(`screenWidthDp >= 600`). 정사각형에 가까운 펼침 창은 위아래
+레터박스가 남는데 카스가 가로를 원한 결과라 정상이다. 임포트 `LocalConfiguration` 한 줄 추가.
+
+### ④ 신정지선 실시간 카드 **한 단계 더 축소** (사용자: *"신정지선 실시간 전체 에뮬레이터 크기를 약간 더 줄여주고"*)
+
+단일 손잡이 `LineMap.CARD_K` **0.85 → 0.77**(약 9% 더 작아짐). 선로 두께·기관차 배율·역명 sp·
+캔버스 높이·차선 여백이 전부 이 값을 한 번씩 곱해 비율이 안 깨진다.
+⚠ 열번 판독: 주 선로(신도림행) `11 × 0.77 = 8.47sp` 판독 양호 · 위 차선(까치산행)
+`11 × 0.77 × 0.85 = 7.2sp` 로 종전 참고 하한 7.7sp 를 밑돈다. 까치산행은 연하게 물러선 **보조 차선**
+이라 에뮬 확대 크롭으로 판독을 확인했다(5개 역·입고 칩·`본선 전체 보기` 칩 안 잘림). `drawLoco` 의
+11 은 **본선 지도([Loco.kt])와 공유**라 못 올린다(올리면 본선 타 열차 열번이 같이 커져 회귀) —
+여기가 실질 하한이다. 접힘 바텀시트·펼침 상세 패널 양쪽에서 확인했다.
+
 ### 검증
 
 - 단위 테스트 **356건 전건 통과**(v1.7.8 355건 + 신규 `restCount_increasesWhenWorkdayBecomesUnhyuOrJihyu` 1건).

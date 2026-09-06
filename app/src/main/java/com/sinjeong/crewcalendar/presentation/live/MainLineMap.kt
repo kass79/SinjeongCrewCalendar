@@ -66,6 +66,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -591,7 +592,14 @@ internal fun MainLineMapDialog(
         }
         Surface(Modifier.fillMaxSize(), color = pal.bg) {
             BoxWithConstraints(Modifier.fillMaxSize()) {
-                val portrait = maxHeight > maxWidth
+                // 폴드 **펼침(wide)** 에서는 세로 창이어도 90° 로 안 눕히고 **가로 그대로**
+                // 화면을 크게 채운다(v1.7.9 카스 확정: *"눌러서 가로 전체로."*). 접힌 폰 세로
+                // (`screenWidthDp < 600`)만 종전처럼 회전해 연다. 잣대는 이 저장소가 쓰는 wide
+                // 값과 **같은 `screenWidthDp >= 600`**(`MainCalendarScreen`·`LineMap` 과 한 값) —
+                // 펼침이면 `portrait` 가 거짓이 돼 아래 **else 가지(회전 없음·`mapDeg = 0f`·
+                // 가로 채움)** 로 간다. `cw`/`ch`/`inset` 도 자동으로 else 계산을 탄다.
+                val wide = LocalConfiguration.current.screenWidthDp >= 600
+                val portrait = maxHeight > maxWidth && !wide
                 // 돌린 뒤의 **내용 크기**. 세로 창이면 가로세로를 맞바꿔 잡는다.
                 val cw = if (portrait) maxHeight else maxWidth
                 val ch = if (portrait) maxWidth else maxHeight
