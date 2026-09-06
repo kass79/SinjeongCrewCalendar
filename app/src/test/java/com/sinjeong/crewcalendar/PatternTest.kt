@@ -442,7 +442,10 @@ class PatternTest {
 
         val branch = DutyCode.parse("대기충당 지3")
         assertEquals(DutyType.BRANCH, branch.type)
-        assertEquals(DutyType.FILL, branch.colorType)
+        // v1.7.9 — `대기충당`·`교체`는 **고른 다이아의 제 색**을 따른다(사용자: *"대기충당이랑
+        // 교체는 그냥 달력 그대로 색깔이어도 될거같은데(주간이면 주간색깔,야간이면 야간색깔로)?"*).
+        // 주황으로 강제하는 것은 `충당` 하나뿐이다.
+        assertEquals(DutyType.BRANCH, branch.colorType)
         assertTrue(branch.isBranch)
         assertEquals("지3", branch.diaRaw)
 
@@ -450,7 +453,7 @@ class PatternTest {
         val night = DutyCode.parse("교체 45")
         assertEquals(DutyType.MAIN_NIGHT, night.type)
         assertTrue(night.isOvernight)
-        assertEquals(DutyType.FILL, night.colorType)
+        assertEquals(DutyType.MAIN_NIGHT, night.colorType)   // 야간이면 야간색(v1.7.9)
 
         // 출근시각이 실제로 다이아 기준으로 붙는다
         val weekday = LocalDate.of(2026, 8, 18)             // 화요일(평일)
@@ -472,14 +475,18 @@ class PatternTest {
         // 알 수 없는 다이아가 붙어도 충당 색·표기는 유지(깨진 데이터 방어)
         assertEquals(DutyType.STANDBY, DutyCode.parse("충당 없는다이아").type)
 
-        // v1.7.9 — **다이아 없는 충당 계열도 주황**이다. `colorType` 이 `fill` 만 봤다면
+        // v1.7.9 — **다이아 없는 맨 `충당` 도 주황**이다. `colorType` 이 `fill` 만 봤다면
         // 근무변경 시트의 옵션 칩(`parse("충당")`)과 옛 저장값만 노랑으로 남아 두 색이 됐다.
-        listOf("충당", "대기충당", "교체").forEach {
-            assertEquals(it, DutyType.FILL, DutyCode.parse(it).colorType)
-            assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).type)   // 뜻(대기 근무)은 그대로
-        }
+        assertEquals(DutyType.FILL, DutyCode.parse("충당").colorType)
+        assertEquals(DutyType.STANDBY, DutyCode.parse("충당").type)      // 뜻(대기 근무)은 그대로
         assertEquals(DutyType.FILL, DutyCode.parse("충당 없는다이아").colorType)
-        // 대기 다이아 자체는 노랑 그대로 — 이번에 갈린 건 충당 계열뿐이다
+        // **맨 `대기충당`·`교체` 칩은 대기 노랑**이다(v1.7.9) — 따라갈 다이아가 없으니 제 낱말의
+        // 뜻(대기 근무)을 그대로 쓴다. 맨 `지근` 칩이 지선 초록인 것과 같은 규칙이다.
+        listOf("대기충당", "교체").forEach {
+            assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).colorType)
+            assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).type)
+        }
+        // 대기 다이아 자체는 노랑 그대로 — 이번에 갈린 건 `충당` 하나뿐이다
         listOf("대2", "대11", "대3 4").forEach {
             assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).colorType)
         }
@@ -494,14 +501,19 @@ class PatternTest {
      * ⚠ 저장값·조회 키는 그대로여야 한다 — [DutyCode.diaRaw]가 행로표·편승알람 키다.
      */
     @Test fun gridLabel_folds_only_fill_codes() {
-        listOf("대기충당 지2" to "대기충당\n지2", "충당 9" to "충당\n9", "교체 45" to "교체\n45")
-            .forEach { (raw, expected) ->
+        listOf(
+            // 저장값, 격자 두 줄, **색**(v1.7.9 — `충당`만 주황, 나머지는 다이아의 제 색)
+            Triple("대기충당 지2", "대기충당\n지2", DutyType.BRANCH),
+            Triple("충당 9", "충당\n9", DutyType.FILL),
+            Triple("교체 45", "교체\n45", DutyType.MAIN_NIGHT),
+        )
+            .forEach { (raw, expected, color) ->
                 val c = DutyCode.parse(raw)
                 assertEquals(raw, expected, c.gridLabel)
-                // 표시만 바꾼다: 저장값·조회 키·색은 불변
+                // 표시만 바꾼다: 저장값·조회 키는 불변
                 assertEquals(raw, raw, c.raw)
                 assertEquals(raw, raw.substringAfter(' '), c.diaRaw)
-                assertEquals(raw, DutyType.FILL, c.colorType)
+                assertEquals(raw, color, c.colorType)
                 // 폭 넉넉한 곳(위젯·알림·상세시트)은 줄바꿈 없는 한 줄 그대로
                 assertTrue(raw, '\n' !in c.display && '\n' !in c.displayLong)
             }
@@ -510,6 +522,39 @@ class PatternTest {
             val c = DutyCode.parse(it)
             assertEquals(it, c.display, c.gridLabel)
         }
+    }
+
+    /**
+     * v1.7.9 — **지선 낱말 코드는 "지"를 안 뗀다.** 사용자(2026-09-06):
+     * *"지휴로 바꾸었을때 휴<-밖에 안나오네? 지휴로 나오면 좋겠는데?"* ·
+     * *"지근이라고 할때도 아직 근무를 모를때 다이아 없이 저장을 하면 그냥 지근<- 이라고
+     * 표시되면 좋겠어. 지금은 근 으로만 표시되네?"*
+     *
+     * 종전 규칙은 **`isBranch` 면 무조건** `raw.removePrefix("지")` 라 낱말 코드가 첫 글자를 잃었다
+     * (`지휴`→`휴` 는 본선 휴무와, `지휴5`→`휴5` 는 본선 `휴5` 와 **글자가 같아졌다**).
+     * 이제 **뒤가 전부 숫자일 때만** 뗀다 — 번호 다이아(`지3`·`지12`)는 종전 그대로다.
+     * 동료 탭은 v1.6.53에 같은 이유로 이미 `raw` 를 쓰고 있었다(`DutyMatrix.mateLabel`).
+     */
+    @Test fun branchWordCodesKeepTheirPrefix() {
+        // 낱말·비번호 코드 — 통째로 남는다
+        listOf("지휴", "지휴5", "지근", "지대1", "지대11").forEach {
+            assertEquals(it, it, DutyCode.parse(it).display)
+            assertEquals(it, it, DutyCode.parse(it).gridLabel)
+        }
+        // 번호 다이아는 종전대로 "지"를 뗀다 (번호대가 본선과 갈려 안 헷갈린다)
+        listOf("지1" to "1", "지3" to "3", "지8" to "8", "지12" to "12", "지14" to "14")
+            .forEach { (raw, cell) -> assertEquals(raw, cell, DutyCode.parse(raw).display) }
+        // **본선 휴무·휴5 와 글자가 갈린다** — 이 테스트의 목적
+        assertTrue(DutyCode.parse("지휴").display != DutyCode.parse("휴무").display)
+        assertTrue(DutyCode.parse("지휴5").display != DutyCode.parse("휴5").display)
+        // 익일 비번은 여전히 `~` 한 글자 — `POST_NIGHT` 가지가 먼저 가로챈다(v1.6.79 확정)
+        assertEquals("~", DutyCode.parse("지13비").display)
+        assertEquals("~", DutyCode.parse("지대11비").display)
+        // 색은 종전 그대로 — 표기만 바뀐 것이다
+        assertEquals(DutyType.BRANCH, DutyCode.parse("지근").colorType)
+        assertEquals(DutyType.BRANCH_REST, DutyCode.parse("지휴").colorType)
+        // 깨진 한 글자 `"지"` 가 빈 칸으로 표시되지 않는다
+        assertEquals("지", DutyCode.parse("지").display)
     }
 
     /**
@@ -1819,9 +1864,10 @@ class PatternTest {
         // 깨진 다이아가 붙어도 지근의 타입으로 떨어진다(충당 주황으로 새지 않는다)
         assertEquals(DutyType.BRANCH, DutyCode.parse("지근 없는다이아").colorType)
 
-        // 충당 3종은 주황(v1.7.9) — 지근과 갈린다
-        listOf("충당 9", "대기충당 지3", "교체 45")
-            .forEach { assertEquals(it, DutyType.FILL, DutyCode.parse(it).colorType) }
+        // **`충당` 하나만 주황**(v1.7.9) — `지근`·`대기충당`·`교체` 셋은 다이아의 제 색이다
+        assertEquals(DutyType.FILL, DutyCode.parse("충당 9").colorType)
+        assertEquals(DutyType.BRANCH, DutyCode.parse("대기충당 지3").colorType)
+        assertEquals(DutyType.MAIN_NIGHT, DutyCode.parse("교체 45").colorType)
     }
 
     /**
