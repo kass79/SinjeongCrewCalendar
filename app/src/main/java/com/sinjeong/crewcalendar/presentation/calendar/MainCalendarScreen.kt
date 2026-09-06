@@ -67,6 +67,8 @@ import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.weekStartOf
 import com.sinjeong.crewcalendar.presentation.admin.AdminGate
 import com.sinjeong.crewcalendar.presentation.live.BranchLiveMap
+import com.sinjeong.crewcalendar.presentation.live.CommuteBar
+import com.sinjeong.crewcalendar.presentation.live.CommuteStation
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import com.sinjeong.crewcalendar.presentation.menu.MenuDialog
 import com.sinjeong.crewcalendar.presentation.notice.NoticeBanner
@@ -115,6 +117,8 @@ fun MainCalendarScreen(
     // **달력 탭만** 본다 — 상세시트·근무선택 시트·하단 탭바는 종전 테마 그대로다.
     val calStyle by viewModel.themeController.calendarStyle.collectAsStateWithLifecycle()
     val pal = calendarPalette(calStyle)
+    // v1.7.9 ⑦ — 설정에 등록한 출퇴근 역. 비어 있으면 상세시트가 그 줄을 아예 안 그린다.
+    val commuteStations by viewModel.themeController.commuteStations.collectAsStateWithLifecycle()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
         ThemeMode.DARK -> true
@@ -391,6 +395,7 @@ fun MainCalendarScreen(
                         onClose = { panelEpochDay = null },
                         recentMemos = viewModel.recentMemos.collectAsStateWithLifecycle().value,
                         mapStyle = mapStyle,
+                        commuteStations = commuteStations,
                         compact = false,
                         // imePadding()이 verticalScroll()보다 앞 — 키보드만큼 스크롤 뷰포트가 줄어야
                         // 메모 TextField의 bringIntoView가 보이는 영역으로 스크롤한다.
@@ -447,6 +452,7 @@ fun MainCalendarScreen(
                     onClose = { viewModel.selectDate(null) },
                     recentMemos = viewModel.recentMemos.collectAsStateWithLifecycle().value,
                     mapStyle = mapStyle,
+                    commuteStations = commuteStations,
                     modifier = Modifier.verticalScroll(scroll),
                 )
             }
@@ -1177,6 +1183,8 @@ private fun DayDetailContent(
     recentMemos: List<String> = emptyList(),
     /** 실시간 지도 스타일(v1.7.0) — 설정 > 화면 > 지도 스타일. 색만 정한다. */
     mapStyle: MapStyle = MapStyle.CAB,
+    /** 설정 > 화면 > **출퇴근 역**(v1.7.9 ⑦). 비면 행로표 위 칩 줄을 안 그린다. */
+    commuteStations: List<CommuteStation> = emptyList(),
     compact: Boolean = true,   // true=접힘 바텀시트(기존 그대로), false=펼침 오른쪽 패널
     modifier: Modifier = Modifier,
 ) {
@@ -1275,6 +1283,17 @@ private fun DayDetailContent(
                     }
                 }
             }
+            /*
+             * 출퇴근 역 실시간(v1.7.9 ⑦) — 자리는 **행로표 위**다(사용자: *"행로표 위쪽에 …
+             * 역 칸을 만드는건 어때?"*). 등록이 0개면 [CommuteBar] 가 바로 반환해 높이 0이다.
+             *
+             * ⚠ **오늘 시트에서만** 그린다 — 도착 API 는 "지금 다가오는 열차"뿐이라 어제·내일
+             * 칸에 띄우면 그 날짜의 정보인 줄 읽힌다([BranchLiveMap] 도 같은 이유로 오늘만이다).
+             * ⚠ **[day.date] 기준이지 [effDate] 가 아니다** — 비번 날 행로표는 전날 야간 것이지만
+             *   출퇴근 열차는 **지금 이 순간**의 것이라 전날로 되돌릴 값이 없다.
+             */
+            if (day.date == LocalDate.now()) CommuteBar(commuteStations)
+
             // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
             // ⚠ 아래는 전부 **[effDuty]·[effDate]** 기준이다 — 비번이면 전날 야간, 아니면 오늘 그대로.
             val holiday = Bundled.isHolidayTimetable(effDate)

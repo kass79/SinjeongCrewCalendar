@@ -109,6 +109,18 @@ internal data class PositionRow(
  */
 internal data class ArrivalRow(
     val trainNo: String, val destName: String, val etaSec: Int, val arvlCd: String = "",
+    /* ── 아래 다섯은 **출퇴근 역 실시간**(v1.7.9 ⑦)이 쓴다. 전부 기본값이 있어 지선 입고
+     *    경로([refineInbound])는 한 줄도 안 바뀐다 — `BranchLiveTest` 가 그걸 잠근다. */
+    /** 호선 id — `1002` 2호선 · `1005` 5호선 … 같은 이름 다른 노선을 가른다([lineName]) */
+    val subwayId: String = "",
+    /** ⚠ 도착 API 는 **낱말**을 준다 — `상행`·`하행`·`내선`·`외선`(위치 API 의 `"0"/"1"` 아님) */
+    val updnLine: String = "",
+    /** `"방화행 - 화곡방면"` — 등록 화면의 방향 칩 라벨([boundOf]) */
+    val trainLineNm: String = "",
+    /** 승강장 전광판 문장 — `"까치산 전역출발"`·`"6분 후 (오목교…)"`·`"8분 후"` */
+    val arvlMsg2: String = "",
+    /** 그 열차가 **지금 있는 역** 이름 */
+    val arvlMsg3: String = "",
 )
 
 /**
@@ -301,6 +313,11 @@ internal object BranchLive {
                 destName = field(o, "bstatnNm").orEmpty(),
                 etaSec = field(o, "barvlDt")?.toIntOrNull() ?: return@mapNotNull null,
                 arvlCd = field(o, "arvlCd").orEmpty(),
+                subwayId = field(o, "subwayId").orEmpty(),
+                updnLine = field(o, "updnLine").orEmpty(),
+                trainLineNm = field(o, "trainLineNm").orEmpty(),
+                arvlMsg2 = field(o, "arvlMsg2").orEmpty(),
+                arvlMsg3 = field(o, "arvlMsg3").orEmpty(),
             )
         }.toList()
 
@@ -813,6 +830,18 @@ internal object BranchLive {
 
     private suspend fun fetchArrivals(station: String) =
         fetch("realtimeStationArrival/0/12/${URLEncoder.encode(station, "UTF-8")}").map(::parseArrivals)
+
+    /**
+     * **출퇴근 역 실시간**(v1.7.9 ⑦) — 역 이름 하나에 API **딱 1회**. [fetchArrivals] 를 그대로
+     * 연 것뿐이라 키 로테이션·한도 백오프가 지선 카드와 같은 한 곳을 탄다.
+     *
+     * ⚠ 캐시가 없다 — 지선 스냅샷([loadSnapshot])과 달리 역이 사용자마다 다르다. 호출 빈도는
+     * **부르는 쪽**이 지킨다: 등록 검증 1회, 화면은 펼친 동안 15초에 1회([CommuteBar]).
+     * ⚠ **`INFO-200`(운행 종료·0건)은 성공이고 빈 목록**이다([apiError]) — 오류로 다루면
+     * [fetch] 재시도가 한 바퀴 더 돌아 호출이 두 배가 된다(v1.7.7 D3).
+     */
+    internal suspend fun arrivalsAt(station: String): Result<List<ArrivalRow>> =
+        fetchArrivals(station)
 
     /**
      * **양천구청으로 다가오는 신도림행 열차가 있나** — 적응형 갱신 주기의 판정(v1.6.70).

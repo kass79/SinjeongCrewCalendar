@@ -36,7 +36,10 @@ import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
 import com.sinjeong.crewcalendar.presentation.weather.WX_LOC_FIXED_KEY
 import dagger.hilt.android.lifecycle.HiltViewModel
+import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
+import com.sinjeong.crewcalendar.presentation.live.CommuteSettingDialog
 import com.sinjeong.crewcalendar.presentation.live.Line2TimetableLoader
+import com.sinjeong.crewcalendar.presentation.live.lineName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -305,6 +308,28 @@ fun SettingsScreen(
                     }
                 }
             }
+
+            /*
+             * 출퇴근 역(v1.7.9 ⑦) — 사용자 원문 *"설정에 출퇴큰 자주이용하는 역을 등록을 하면
+             * 행로표 위쪽에 … 그 역을 클릭하면 위치정보를 볼수있으니.. 출퇴근 하기 편하지~~!!"*
+             *
+             * 스타일 두 줄 **바로 아래**다 — 셋 다 "달력·지도 화면에 무엇이 어떻게 보이나"다.
+             * 등록 화면은 별도 라우트를 안 판다(다이얼로그 하나면 끝나는 일이라).
+             */
+            val commute by viewModel.themeController.commuteStations.collectAsStateWithLifecycle()
+            var showCommute by remember { mutableStateOf(false) }
+            SettingRow(
+                title = "출퇴근 역",
+                sub = if (commute.isEmpty())
+                    "등록하면 달력 상세시트 행로표 위에 실시간 도착이 뜹니다 (최대 ${COMMUTE_MAX}개)"
+                else commute.joinToString(" · ") { "${lineName(it.subwayId)} ${it.name}" },
+                onClick = { showCommute = true },
+            )
+            if (showCommute) CommuteSettingDialog(
+                stations = commute,
+                onSave = { viewModel.themeController.setCommuteStations(it) },
+                onDismiss = { showCommute = false },
+            )
 
             // 날씨 (v1.6.68). 달력 헤더 칩이 어디 날씨인지 고른다.
             // 선택지는 **둘뿐이다** — "지도에서 임의 지점 고르기"는 만들지 마라. 이 앱 사용자는

@@ -2,6 +2,10 @@ package com.sinjeong.crewcalendar.presentation.theme
 
 import android.content.Context
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
+import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
+import com.sinjeong.crewcalendar.presentation.live.CommuteStation
+import com.sinjeong.crewcalendar.presentation.live.decodeCommute
+import com.sinjeong.crewcalendar.presentation.live.encodeCommute
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +74,24 @@ class ThemeController @Inject constructor(
     fun setCalendarStyle(style: CalendarStyle) {
         _calendarStyle.value = style
         prefs.edit().putString("calendar_style", style.name).apply()
+    }
+
+    /**
+     * 출퇴근 역(v1.7.9 ⑦) — 지도·달력 스타일과 **같은 저장소·같은 방식**(`theme` prefs,
+     * 키 `commute_stations`). 값은 `역명|subwayId|updnLine` 을 `;` 로 이은 한 줄이라
+     * JSON 라이브러리를 새로 넣지 않는다(직렬화는 순수 함수 [encodeCommute]·[decodeCommute]).
+     *
+     * 설정에서 등록·삭제하면 달력 상세시트가 곧바로 따라온다(앱 재시작 없음).
+     * 멤버가 `internal` 인 것은 [CommuteStation] 이 `internal` 이라서다 — 이 클래스는 public 이다.
+     */
+    private val _commuteStations =
+        MutableStateFlow(decodeCommute(prefs.getString("commute_stations", null)))
+    internal val commuteStations: StateFlow<List<CommuteStation>> = _commuteStations
+
+    internal fun setCommuteStations(list: List<CommuteStation>) {
+        val capped = list.take(COMMUTE_MAX)
+        _commuteStations.value = capped
+        prefs.edit().putString("commute_stations", encodeCommute(capped)).apply()
     }
 
     /** 우상단 달 아이콘: 현재 보이는 테마의 반대로 강제 전환 */
