@@ -89,6 +89,11 @@ data class DutyColors(
     val main: Color, val onMain: Color,
     val rest: Color, val onRest: Color,
     val standby: Color, val onStandby: Color,
+    /**
+     * 충당·대기충당·교체(`DutyType.FILL`) — **주황**. v1.7.9에 [standby] 노랑에서 갈라 나왔다
+     * (2026-09-06 사용자: *"충당으로 변경할때 색상이 대기 색상이랑 비슷하네? 주황색 계열 어때?"*).
+     */
+    val fill: Color, val onFill: Color,
     val branch: Color, val onBranch: Color,
     val off: Color, val onOff: Color,
     val night: Color, val onNight: Color,
@@ -100,6 +105,9 @@ private val LightDutyColors = DutyColors(
     main = Color(0xFFE8FAF0), onMain = Color(0xFF00210E),
     rest = Color(0xFFFFF0EC), onRest = Color(0xFFB3271E),
     standby = Color(0xFFFFF8E8), onStandby = Color(0xFF755B00),
+    // 충당 계열 = 주황 (v1.7.9). 명암비 **6.11:1**. 대기 노랑(#FFF8E8)과 CIELAB ΔE 11.5,
+    // 휴무 분홍(#FFF0EC)과 13.9 — 같은 달에 나란히 놓여도 한눈에 갈린다.
+    fill = Color(0xFFFFE4C8), onFill = Color(0xFF8A4000),
     branch = Color(0xFFCDF4FA), onBranch = Color(0xFF006874),
     // 비번 = 야간과 같은 보라 계열, 채도만 반으로 (v1.6.21 사용자 선택).
     // 야간 다음날이 비번이라 두 칸이 한 덩어리로 보여야 근무 흐름이 읽힌다 →
@@ -115,6 +123,8 @@ private val DarkDutyColors = DutyColors(
     main = Color(0xFF005229), onMain = Color(0xFFA8F2C1),
     rest = Color(0xFF521811), onRest = Color(0xFFFFB4AB),
     standby = Color(0xFF443300), onStandby = Color(0xFFF2C14B),
+    // 충당 계열 = 주황 (v1.7.9). 명암비 **7.60:1**. 대기 갈황(#443300)과 ΔE 10.8, 휴무(#521811)와 16.6
+    fill = Color(0xFF4A2A08), onFill = Color(0xFFFFB874),
     branch = Color(0xFF004F58), onBranch = Color(0xFF82D3E0),
     // 비번 = 야간보다 한 단계 어둡고 채도 낮은 딥퍼플 (배경 L* 19.4 vs 25.7, C 17.5 vs 34.1).
     // 다크에서 "연하다" = 존재감이 약하다 → 종전 회록(#2B322B)이 야간보다 어두웠던 관계를 그대로 유지.

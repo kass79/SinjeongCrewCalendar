@@ -842,6 +842,76 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 > 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
 
 
+## v1.7.9 (진행 중 — 9/8 배포 예정, 산출물 없음)
+
+**버전은 120 / 1.7.8 그대로다** — 9/8까지 수정만 모으고 그때 한 번에 올린다.
+체험판 APK·aab·zip 은 v1.7.8 것을 그대로 두었고 이 회차는 **디버그 빌드로만** 검증했다.
+
+### ① 충당 계열 색 = 대기 노랑 → **주황** (사용자: *"충당으로 변경할때 색상이 대기 색상이랑 비슷하네? 주황색 계열 어때?"*)
+
+색 전용 enum 값 **`DutyType.FILL`** 을 더했다. **`DutyCode.type` 은 절대 이 값이 안 된다** —
+`충당 9` 의 `type` 은 다이아 9 의 타입(MAIN_DAY)이고, 이 값은 **`colorType` 만** 돌려준다.
+그래서 `duty.type` 을 보는 `when` 넷(`Bundled.timeRowFor`·`WeeklyHours`·`BundledTimetable`·
+`MyTrain`)은 **한 줄도 안 고쳤다** — 넷 다 `else ->` 가 있어 컴파일도 안 막고, 분기를 만들면
+영영 안 밟히는 죽은 가지가 된다.
+
+판정은 `colorType = if ((fill ?: raw) in STANDBY_FILL) FILL else type` 한 줄.
+⚠ **`fill` 만 보면 안 된다** — 다이아 없이 저장된 옛 `"충당"` 과 **근무변경 시트 옵션 칩**
+(`DutyCode.parse("충당")`)은 `fill` 이 null 이라 노랑으로 남는다. 그래서 `fill ?: raw` 다.
+`지근` 은 v1.6.47 확정대로 **고른 다이아의 제 색** 그대로(주황 아님).
+
+색 값(전부 계산해 확인):
+
+| 판 | 바탕 | 글자 | 명암비 | 대기와 ΔE(CIELAB) | 휴무와 ΔE |
+|---|---|---|---|---|---|
+| 라이트 `LightDutyColors.fill` | `#FFE4C8` | `#8A4000` | **6.11:1** | 11.5 | 13.9 |
+| 다크 `DarkDutyColors.fill` | `#4A2A08` | `#FFB874` | **7.60:1** | 10.8 | 16.6 |
+| 클레이 `CalendarArgb.ClayDutyFill` | `#FADCBB` | `#8A4A10` | **5.22:1** | 9.5 | 13.6 |
+
+⚠ **클레이만 제안값(`#F8E3CD`)에서 한 단 진하게** 잡았다. 크림 위 파스텔이라 그 값은 대기
+(`#F8EDD2`)와 ΔE 가 **5.2 밖에 안 됐다**(라이트 판은 11.5). 이 건 자체가 *"충당이 대기랑
+비슷하다"* 는 지적이라 클레이에서만 안 갈리면 고친 게 아니다. 클레이 하한 4.6:1 은 지킨다.
+
+건드린 곳: `DutyCode.kt`(enum + `colorType` + KDoc) · `Theme.kt`(`DutyColors.fill/onFill` 추가,
+라이트·다크 값) · `CalendarStyle.kt`(`ClayDutyFill/OnFill` + `CLAY_DUTY`) ·
+`DutyMatrix.dutyCellColors`·`DutyPalette.dutyPalette` 에 `FILL` 분기.
+호출부 8곳은 전부 `code.colorType` 을 넘기고 있어 **한 줄도 안 고쳤다** —
+달력 칸 칩·근무변경 옵션 칩·동료 탭·모아보기·공유 월 이미지·위젯이 자동으로 따라온다.
+`grep -rn "STANDBY" app/src/main` 로 훑었고 **색 목적의 STANDBY 하드코딩은 위 두 함수뿐**이었다
+(`Bundled.kt`·`BundledTimetable.kt` 의 STANDBY 는 시각표 조회라 색과 무관).
+
+### ② 근무일을 `운휴`·`지휴` 로 바꾸면 **휴무 개수 +1** (사용자: *"운휴,지휴로 바꿔도 휴무갯수에 플러스 해야해!"*)
+
+`DaySchedule.countsAsRestDay`(`Schedule.kt`) 한 곳에 `|| (isOverridden && duty.fill == null &&
+duty.raw in REST_OVERRIDES)` 를 더했다. `REST_OVERRIDES = setOf("운휴", "지휴")`.
+앱바 칩(`restDayCount`)과 공유 월 이미지(`MonthImage`)가 같은 한 곳을 통과한다.
+
+이 둘은 휴가가 아니라 **그날의 휴무 배정 자체가 생긴 것**이다(운휴 = 열차가 안 다녀 쉬는 날,
+지휴 = 지선 휴일). 연차·대휴·병가처럼 *배정된 근무일을 휴가로 쓴* 것과 다르다.
+
+- `14` → `운휴` **센다** / `지3` → `지휴` **센다**
+- `14` → `연차`·`대휴`·`보상`·`병가`·`촉연` **안 센다** (사용자가 운휴·지휴만 짚었다)
+- `휴3` → `운휴` **한 번만** 센다 (두 조건이 다 참인 날)
+- `휴3` → `지근 12` **안 센다** · 휴무 → `충당 9` **센다** (둘 다 v1.6.83 확정 그대로)
+
+⚠ 달력 칸이 **본선 주간 26~29 휴일**에 `운휴` 라고 적는 것은 **근무일 표기**라 이 건과 무관하다
+(그 날의 `raw` 는 `"26"` 이고 `isOverridden` 도 false 다).
+❓ **대휴도 세야 하면 말해 달라** — 지금은 안 센다.
+
+### 검증
+
+- 단위 테스트 **356건 전건 통과**(v1.7.8 355건 + 신규 `restCount_increasesWhenWorkdayBecomesUnhyuOrJihyu` 1건).
+  기존 `colorType` 단언은 `STANDBY` → `FILL` 로 갱신했고, `WidgetStripTest` 의 "모든 근무 타입에 색이 있다"가
+  새 `FILL` 도 자동으로 잡는다.
+- 에뮬레이터 `emulator-5554` 디버그 빌드 실측(픽셀 샘플):
+  근무변경 옵션 시트 — 충당·대기충당·교체 `#FFE4C8`(주황) / 운휴·지휴 `#FFF0EC`(휴무) /
+  지근 `#E8FAF0`(주간 초록) / 교육·회행 보라. **저장은 하지 않았다.**
+  달력 칸 — 라이트 충당 `#FFE4C8` vs 대1 `#FFF8E8` · 클레이 `#FADCBB` vs `#F8EDD2` ·
+  다크 `#4A2A08` vs `#443300`. 세 판 모두 확대 크롭에서 한눈에 갈린다.
+  앱바 휴무 칩 **휴 8개 → (근무일 하나를 운휴로) 휴 9개**.
+- 임시 훅(`// TEMPHOOK`)은 `MainCalendarViewModel` 에만 넣었다가 제거했고
+  `git diff | grep TEMPHOOK` **0건** · 훅 없는 빌드로 재설치·콜드스타트까지 확인했다.
+
 ## v1.7.8 (120) — 개정 지선 휴일 행로표(26.9) 전수 대조 · 행로표 이미지 PDF 렌더 교체
 
 사용자가 카톡으로 받은 **개정 지선 휴일 행로표 PDF**

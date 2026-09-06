@@ -90,7 +90,7 @@ data class CalendarUiState(
     val isLoading: Boolean = true,
     val error: String? = null,
 ) {
-    /** 이달 휴일 갯수 (앱바 칩) — 충당으로 나가도 안 줄고 **지근으로 바꿀 때만** 준다([countsAsRestDay]) */
+    /** 이달 휴일 갯수 (앱바 칩) — 충당으로 나가도 안 줄고 **지근으로 바꿀 때만** 준다. 근무일을 운휴·지휴로 바꾸면 는다([countsAsRestDay]) */
     val restDayCount: Int get() = days.count { it.countsAsRestDay }
 
     /**

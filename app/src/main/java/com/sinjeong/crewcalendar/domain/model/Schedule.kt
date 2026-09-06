@@ -56,6 +56,8 @@ data class DaySchedule(
  * | 휴무 → 연차·교육 등 그 밖의 변경 | **센다** |
  * | 휴무 → **`지근`** | **뺀다** ← 여기 하나뿐이다 |
  * | 근무일 → 휴무(대체휴무 등) | 안 센다 (패턴 기준) |
+ * | **근무일 → `운휴`·`지휴`** | **센다** ← v1.7.9에 더했다 ([REST_OVERRIDES]) |
+ * | 근무일 → 연차·대휴·병가 등 그 밖의 휴가 | 안 센다 |
  *
  * 근무선택으로 **패턴 자체가 바뀌면** 개수도 따라 바뀌는 것이 맞다(그건 배정이 바뀐 것이다).
  *
@@ -68,5 +70,23 @@ data class DaySchedule(
 val DaySchedule.countsAsRestDay: Boolean
     get() {
         val base = if (isOverridden) originalDutyRaw?.let(DutyCode::parse) ?: duty else duty
-        return base.isRest && !(isOverridden && duty.fill == "지근")
+        // 휴무 → 운휴처럼 **양쪽 다 참**인 날도 `count {}` 라 한 번만 센다
+        return (base.isRest && !(isOverridden && duty.fill == "지근")) ||
+            (isOverridden && duty.fill == null && duty.raw in REST_OVERRIDES)
     }
+
+/**
+ * **근무일을 이걸로 바꾸면 휴무 개수가 는다**(v1.7.9). 2026-09-06 사용자 원문:
+ * *"운휴,지휴로 바꿔도 휴무갯수에 플러스 해야해!"*
+ *
+ * 이 둘은 휴가가 아니라 **그날의 휴무 배정 자체가 생긴 것**이다(운휴 = 열차가 안 다녀 쉬는 날,
+ * 지휴 = 지선 휴일). 연차·대휴·병가처럼 *배정된 근무일을 휴가로 쓴* 것과 다르므로 [countsAsRestDay]
+ * 표의 `근무일 → 휴무` 줄(안 센다)에서 이 둘만 빠져나온다.
+ *
+ * ⚠ **사용자가 말한 둘뿐이다** — 연차·대휴 등을 여기 넣으려면 사용자에게 먼저 물을 것.
+ * ⚠ `fill == null` 을 같이 보는 이유: `충당 운휴` 같은 저장값은 없지만, 접두어가 붙은 값은
+ *   `raw` 가 `"충당 …"` 이라 어차피 안 걸린다 — 규칙을 글로 못 박아 두는 가드다.
+ * ⚠ 달력 칸이 **본선 주간 26~29 휴일**에 `운휴`라고 적는 것은 **근무일 표기**라 여기와 무관하다
+ *   (그 날의 `raw` 는 `"26"` 이고 `isOverridden` 도 false 다).
+ */
+private val REST_OVERRIDES = setOf("운휴", "지휴")

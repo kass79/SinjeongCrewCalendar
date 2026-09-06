@@ -432,7 +432,7 @@ class PatternTest {
     @Test fun fillCode_inherits_dia_but_keeps_standby_color() {
         val main = DutyCode.parse("충당 9")
         assertEquals(DutyType.MAIN_DAY, main.type)
-        assertEquals(DutyType.STANDBY, main.colorType)      // 색은 대기 노랑 유지
+        assertEquals(DutyType.FILL, main.colorType)         // 색은 충당 주황(v1.7.9, 종전 대기 노랑)
         assertEquals(9, main.number)
         assertEquals("충당", main.fill)
         assertEquals("9", main.diaRaw)
@@ -442,7 +442,7 @@ class PatternTest {
 
         val branch = DutyCode.parse("대기충당 지3")
         assertEquals(DutyType.BRANCH, branch.type)
-        assertEquals(DutyType.STANDBY, branch.colorType)
+        assertEquals(DutyType.FILL, branch.colorType)
         assertTrue(branch.isBranch)
         assertEquals("지3", branch.diaRaw)
 
@@ -450,7 +450,7 @@ class PatternTest {
         val night = DutyCode.parse("교체 45")
         assertEquals(DutyType.MAIN_NIGHT, night.type)
         assertTrue(night.isOvernight)
-        assertEquals(DutyType.STANDBY, night.colorType)
+        assertEquals(DutyType.FILL, night.colorType)
 
         // 출근시각이 실제로 다이아 기준으로 붙는다
         val weekday = LocalDate.of(2026, 8, 18)             // 화요일(평일)
@@ -471,6 +471,19 @@ class PatternTest {
         assertEquals("대3 4", legacy.display)
         // 알 수 없는 다이아가 붙어도 충당 색·표기는 유지(깨진 데이터 방어)
         assertEquals(DutyType.STANDBY, DutyCode.parse("충당 없는다이아").type)
+
+        // v1.7.9 — **다이아 없는 충당 계열도 주황**이다. `colorType` 이 `fill` 만 봤다면
+        // 근무변경 시트의 옵션 칩(`parse("충당")`)과 옛 저장값만 노랑으로 남아 두 색이 됐다.
+        listOf("충당", "대기충당", "교체").forEach {
+            assertEquals(it, DutyType.FILL, DutyCode.parse(it).colorType)
+            assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).type)   // 뜻(대기 근무)은 그대로
+        }
+        assertEquals(DutyType.FILL, DutyCode.parse("충당 없는다이아").colorType)
+        // 대기 다이아 자체는 노랑 그대로 — 이번에 갈린 건 충당 계열뿐이다
+        listOf("대2", "대11", "대3 4").forEach {
+            assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).colorType)
+        }
+        assertEquals(DutyType.BRANCH_STANDBY, DutyCode.parse("지대1").colorType)  // 지선 대기도 노랑
     }
 
     /**
@@ -488,7 +501,7 @@ class PatternTest {
                 // 표시만 바꾼다: 저장값·조회 키·색은 불변
                 assertEquals(raw, raw, c.raw)
                 assertEquals(raw, raw.substringAfter(' '), c.diaRaw)
-                assertEquals(raw, DutyType.STANDBY, c.colorType)
+                assertEquals(raw, DutyType.FILL, c.colorType)
                 // 폭 넉넉한 곳(위젯·알림·상세시트)은 줄바꿈 없는 한 줄 그대로
                 assertTrue(raw, '\n' !in c.display && '\n' !in c.displayLong)
             }
@@ -1770,8 +1783,8 @@ class PatternTest {
      * 사용자: *"근무변경에서 지근은 다이아 선택이 없네?"* / *"지근은 지선이 아니고 지정근무야~
      * 어떤 근무가 선택될지 몰라!"* → 지선 전용이 아니라 충당 계열과 **같은** 소속 → 다이아 흐름.
      *
-     * ⚠ 핵심은 **색이 노랑으로 새지 않는 것**이다. `colorType`이 `fill != null`로 갈렸다면
-     * 다이아를 고른 순간 지근이 대기 노랑으로 돌변했다 — 노랑 강제는 충당 3종에만 걸린다.
+     * ⚠ 핵심은 **색이 충당 주황으로 새지 않는 것**이다. `colorType`이 `fill != null`로 갈렸다면
+     * 다이아를 고른 순간 지근이 충당색으로 돌변했다 — 색 강제는 충당 3종에만 걸린다.
      */
     @Test fun jigeun_takes_a_dia_but_never_turns_standby_yellow() {
         assertTrue("지근" in DutyCode.FILL_OPTIONS)
@@ -1780,7 +1793,7 @@ class PatternTest {
         assertEquals("지근", branch.fill)
         assertEquals("지2", branch.diaRaw)                  // 행로표·편승알람 조회 키
         assertEquals(DutyType.BRANCH, branch.type)
-        assertEquals(DutyType.BRANCH, branch.colorType)     // ⚠ 노랑 아님
+        assertEquals(DutyType.BRANCH, branch.colorType)     // ⚠ 충당 주황 아님
         assertEquals("지근\n지2", branch.gridLabel)
         assertTrue(branch.isBranch)
 
@@ -1803,12 +1816,12 @@ class PatternTest {
         assertEquals(DutyType.BRANCH, bare.type)
         assertEquals(DutyType.BRANCH, bare.colorType)
         assertEquals(bare.display, bare.gridLabel)          // 한 줄 그대로
-        // 깨진 다이아가 붙어도 지근의 타입으로 떨어진다(대기 노랑으로 새지 않는다)
+        // 깨진 다이아가 붙어도 지근의 타입으로 떨어진다(충당 주황으로 새지 않는다)
         assertEquals(DutyType.BRANCH, DutyCode.parse("지근 없는다이아").colorType)
 
-        // 충당 3종은 종전대로 노랑
+        // 충당 3종은 주황(v1.7.9) — 지근과 갈린다
         listOf("충당 9", "대기충당 지3", "교체 45")
-            .forEach { assertEquals(it, DutyType.STANDBY, DutyCode.parse(it).colorType) }
+            .forEach { assertEquals(it, DutyType.FILL, DutyCode.parse(it).colorType) }
     }
 
     /**
@@ -1871,6 +1884,29 @@ class PatternTest {
         val plain = listOf(day(1, "휴무"), day(2, "주간"), day(3, "휴무"), day(4, "비번"), day(5, "야간"))
         assertEquals(plain.count { it.duty.isRest }, restCount(plain))
         assertEquals(2, restCount(plain))
+    }
+
+    /**
+     * ⑤ **근무일 → `운휴`·`지휴` 는 +1** (v1.7.9). 2026-09-06 사용자 원문:
+     * *"운휴,지휴로 바꿔도 휴무갯수에 플러스 해야해!"*
+     *
+     * 다른 휴가(연차·대휴·병가 …)는 **종전대로 안 센다** — 사용자가 이 둘만 짚었다.
+     */
+    @Test fun restCount_increasesWhenWorkdayBecomesUnhyuOrJihyu() {
+        assertEquals("근무일 14 → 운휴", 1, restCount(listOf(day(1, "운휴", original = "14"))))
+        assertEquals("근무일 지3 → 지휴", 1, restCount(listOf(day(1, "지휴", original = "지3"))))
+        // 그 밖의 휴가는 안 센다 (사용자가 운휴·지휴만 말했다)
+        listOf("연차", "대휴", "보상", "병가", "촉연").forEach {
+            assertEquals(it, 0, restCount(listOf(day(1, it, original = "14"))))
+        }
+        // 휴무 → 운휴는 **한 번만** 센다(두 조건이 다 참인 날)
+        assertEquals(1, restCount(listOf(day(1, "운휴", original = "휴3"))))
+        // 지근으로 바꾼 휴무는 여전히 뺀다(v1.6.83 확정) — 운휴 규칙이 이걸 뒤집지 않는다
+        assertEquals(0, restCount(listOf(day(1, "지근 12", original = "휴3"))))
+        // 휴무에 충당으로 나간 날은 여전히 센다(v1.6.83 확정)
+        assertEquals(1, restCount(listOf(day(1, "충당 9", original = "휴3"))))
+        // 근무변경이 아니라 **패턴이 원래 운휴**인 날은 종전 경로(base.isRest)로 센다
+        assertEquals(1, restCount(listOf(day(1, "운휴"))))
     }
 
     /**

@@ -18,6 +18,19 @@ enum class DutyType {
     MAIN_DAY, MAIN_NIGHT, POST_NIGHT, REST, STANDBY,
     BRANCH, BRANCH_NIGHT, BRANCH_STANDBY, BRANCH_REST,
     OFFICE, SPECIAL, ETC,
+
+    /**
+     * **[DutyCode.colorType] 전용 — 근무 종별이 아니라 색 한 칸이다**(v1.7.9).
+     * 충당 계열(`충당`·`대기충당`·`교체`)의 **주황**이고, `대기`(노랑)와 눈으로 갈리라고 나눴다
+     * (2026-09-06 사용자: *"충당으로 변경할때 색상이 대기 색상이랑 비슷하네? 주황색 계열 어때?"*).
+     *
+     * ⚠ **[DutyCode.type] 은 절대 `FILL` 이 되지 않는다** — `충당 9` 의 `type` 은 **다이아 9 의
+     * 타입**(MAIN_DAY)이고 다이아 없는 옛 `충당` 은 [DutyCode.Companion.OVERRIDE_TYPES] 대로
+     * `STANDBY` 다. 그래서 `duty.type` 을 보는 `when`(시각표·행로표·주52·내 열차)은 이 값을
+     * 받을 일이 없다 — 거기 `FILL` 분기를 만들지 말 것(죽은 가지가 된다).
+     * 색 매핑 함수 둘(`dutyCellColors`·`dutyPalette`)만 이 값을 받는다.
+     */
+    FILL,
 }
 
 data class DutyCode(
@@ -50,14 +63,22 @@ data class DutyCode(
             ((type == DutyType.STANDBY || type == DutyType.BRANCH_STANDBY) && (number ?: 0) >= 11)
 
     /**
-     * 색 기준 타입. **충당·대기충당·교체 3종만** 어떤 다이아를 대신 뛰든 **대기(노랑)** 로 보인다 —
-     * 달력·동료근무·동료 탭·공유 이미지 색 매핑은 전부 이 값을 쓴다.
+     * 색 기준 타입. **충당·대기충당·교체 3종만** 어떤 다이아를 대신 뛰든 **주황([DutyType.FILL])** 으로
+     * 보인다 — 달력·동료근무·동료 탭·공유 이미지 색 매핑은 전부 이 값을 쓴다.
      *
-     * ⚠ `지근`(지정근무)은 v1.6.47에서 다이아를 붙일 수 있게 됐지만 **노랑 강제 대상이 아니다.**
-     * 조건이 `fill != null` 이었다면 다이아를 고른 순간 `지근`이 대기 노랑으로 돌변했다 —
-     * 고른 다이아의 제 색(주간 초록·야간 보라 …)을 그대로 따르는 것이 맞다.
+     * v1.7.9 이전엔 이 셋이 **대기(노랑)** 였다. 사용자 지적 *"충당으로 변경할때 색상이 대기
+     * 색상이랑 비슷하네? 주황색 계열 어때?"* (2026-09-06) 로 색만 [DutyType.FILL] 로 갈랐다 —
+     * **뜻은 그대로**(여전히 대기 근무를 대신 뛰는 날)고 타입·번호·출근시각·행로표도 그대로다.
+     *
+     * ⚠ 판정이 `fill` 이 아니라 **`fill ?: raw`** 인 이유: 다이아 없이 저장된 옛 값 `"충당"` 과
+     * 근무변경 시트의 옵션 칩(`DutyCode.parse("충당")`)은 `fill` 이 null 이고 `type` 만
+     * `STANDBY` 다. `fill` 만 보면 **다이아를 붙인 것만 주황이 되고 칩은 노랑으로 남는다.**
+     *
+     * ⚠ `지근`(지정근무)은 v1.6.47에서 다이아를 붙일 수 있게 됐지만 **주황 강제 대상이 아니다.**
+     * 조건이 `fill != null` 이었다면 다이아를 고른 순간 `지근`이 충당색으로 돌변했다 —
+     * 고른 다이아의 제 색(주간 초록·야간 보라 …)을 그대로 따르는 것이 맞다(v1.6.47 사용자 확정).
      */
-    val colorType: DutyType get() = if (fill != null && fill in STANDBY_FILL) DutyType.STANDBY else type
+    val colorType: DutyType get() = if ((fill ?: raw) in STANDBY_FILL) DutyType.FILL else type
 
     /** 시각표·행로표 조회용 원본. 충당 계열이면 대신 뛰는 다이아 쪽("지3")만 남긴다 */
     val diaRaw: String get() = if (fill != null) raw.substringAfter(' ').trim() else raw
@@ -94,7 +115,7 @@ data class DutyCode(
      * 전부 아랫줄에 큰 글자를 준다.
      *
      * ⚠ 저장값([raw])·[diaRaw]·[colorType]은 건드리지 않는다. 행로표·편승알람 조회 키는 [diaRaw]고
-     * 색은 [colorType]이 늘 대기(노랑)로 되돌린다 — 표시만 바꾸는 값이다.
+     * 색은 [colorType]이 늘 충당 주황([DutyType.FILL])으로 되돌린다 — 표시만 바꾸는 값이다.
      * ⚠ 위젯·알림·상세시트는 폭이 넉넉해 [display]/[displayLong]을 그대로 쓴다(줄바꿈이 섞이면 안 된다).
      */
     val gridLabel: String get() = if (fill != null) "$fill\n$diaRaw" else display
@@ -228,8 +249,11 @@ data class DutyCode(
         val FILL_OPTIONS = setOf("충당", "대기충당", "교체", "지근")
 
         /**
-         * [FILL_OPTIONS] 중 **색을 대기(노랑)로 강제**하는 것들 — 대기 근무를 대신 뛰는 3종뿐이다.
+         * [FILL_OPTIONS] 중 **색을 충당 주황([DutyType.FILL])으로 강제**하는 것들 — 대기 근무를
+         * 대신 뛰는 3종뿐이다. v1.7.9 전엔 대기(노랑)였다([colorType] 주석).
          * `지근`은 여기 없다: 지정근무는 고른 다이아의 제 색(주간 초록·야간 보라 …)으로 보여야 한다.
+         *
+         * ⚠ 이름은 그대로 둔다 — 이 셋은 **여전히 대기 근무를 대신 뛰는 것**이고 바뀐 건 색뿐이다.
          */
         private val STANDBY_FILL = setOf("충당", "대기충당", "교체")
 
@@ -296,7 +320,7 @@ data class DutyCode(
             val s = raw?.trim()?.removeSuffix(".0") ?: return DutyCode("", DutyType.ETC)
             if (s.isEmpty()) return DutyCode("", DutyType.ETC)
             // "충당 9" = 9번 다이아 대행 → 다이아를 그대로 파싱해 타입·번호·지선여부를 물려받는다.
-            // 그래야 출근시각·행로표·열번·야간 익일 비번이 자동으로 따라온다. 색만 colorType이 대기로 돌린다.
+            // 그래야 출근시각·행로표·열번·야간 익일 비번이 자동으로 따라온다. 색만 colorType이 주황(FILL)으로 돌린다.
             // 첫 토큰이 FILL_OPTIONS 일 때만 걸리므로 옛 데이터("충당" 단독, "대3 4")는 아래 경로 그대로.
             if (' ' in s) {
                 val head = s.substringBefore(' ')

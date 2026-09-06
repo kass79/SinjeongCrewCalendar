@@ -135,6 +135,16 @@ internal object CalendarArgb {
     val ClayDutyOnRest = 0xFFB23A22L
     val ClayDutyStandby = 0xFFF8EDD2L
     val ClayDutyOnStandby = 0xFF86660FL
+    /**
+     * 충당 계열(`DutyType.FILL`) — **주황 파스텔**(v1.7.9). 글자 대비 **5.22:1**.
+     *
+     * ⚠ 제안값 `#F8E3CD` 에서 한 단 진하게 잡았다 — 크림 위 파스텔이라 대기 노랑
+     * ([ClayDutyStandby])과 CIELAB ΔE 가 **5.2 밖에 안 됐다**(라이트 판은 11.5). 이 건 자체가
+     * *"충당이 대기랑 비슷하다"* 는 지적이라 클레이에서만 안 갈리면 고친 게 아니다.
+     * 지금 값은 ΔE **대기 9.5 · 휴무 13.6**.
+     */
+    val ClayDutyFill = 0xFFFADCBBL
+    val ClayDutyOnFill = 0xFF8A4A10L
     val ClayDutyBranch = 0xFFDCEEF3L
     val ClayDutyOnBranch = 0xFF1B6771L
 
@@ -219,6 +229,7 @@ internal val CLAY_DUTY = DutyColors(
     main = Color(CalendarArgb.ClayDutyMain), onMain = Color(CalendarArgb.ClayDutyOnMain),
     rest = Color(CalendarArgb.ClayDutyRest), onRest = Color(CalendarArgb.ClayDutyOnRest),
     standby = Color(CalendarArgb.ClayDutyStandby), onStandby = Color(CalendarArgb.ClayDutyOnStandby),
+    fill = Color(CalendarArgb.ClayDutyFill), onFill = Color(CalendarArgb.ClayDutyOnFill),
     branch = Color(CalendarArgb.ClayDutyBranch), onBranch = Color(CalendarArgb.ClayDutyOnBranch),
     off = Color(CalendarArgb.ClayDutyOff), onOff = Color(CalendarArgb.ClayDutyOnOff),
     night = Color(CalendarArgb.ClayDutyNight), onNight = Color(CalendarArgb.ClayDutyOnNight),

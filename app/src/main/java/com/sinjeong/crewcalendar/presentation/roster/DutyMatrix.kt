@@ -344,7 +344,7 @@ private val NAME_W_SCALED = 50.dp
  * 색을 두 벌로 두면 한쪽만 고치는 사고가 난다(v1.6.17이 [DutyMatrix]를 뽑은 이유 그대로).
  *
  * ⚠ 넘길 값은 [DutyCode.type]이 아니라 **[DutyCode.colorType]** 이다 — 대행("충당 9" 꼴)은
- * 시각·행로표를 원래 근무에서 가져오되 색만 대기(노랑)로 되돌려야 한다.
+ * 시각·행로표를 원래 근무에서 가져오되 색만 충당 주황([DutyType.FILL])으로 되돌려야 한다.
  * 월 이미지·위젯(`util/DutyPalette.dutyPalette`)은 Compose 밖이라 Int 사본을 따로 들고 있다.
  */
 fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Color, Color> =
@@ -354,6 +354,8 @@ fun dutyCellColors(type: DutyType, duty: DutyColors, fallback: Color): Pair<Colo
         DutyType.POST_NIGHT -> duty.off to duty.onOff
         DutyType.REST, DutyType.BRANCH_REST -> duty.rest to duty.onRest
         DutyType.STANDBY, DutyType.BRANCH_STANDBY -> duty.standby to duty.onStandby
+        // 충당·대기충당·교체 — 대기 노랑에서 갈라 나온 주황(v1.7.9). `colorType`만 이 값을 준다
+        DutyType.FILL -> duty.fill to duty.onFill
         DutyType.BRANCH -> duty.main to duty.onMain
         DutyType.ETC -> Color.Transparent to fallback
     }
