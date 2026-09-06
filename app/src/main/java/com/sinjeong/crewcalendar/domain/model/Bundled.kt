@@ -507,4 +507,31 @@ object Bundled {
 
     /** 출근시각 문자열 (없으면 null) */
     fun signOn(duty: DutyCode, date: LocalDate): String? = timeRowFor(duty, date)?.signOn
+
+    /**
+     * **휴일 운휴 다이아인가** (v1.7.11) — 배정은 근무일인데 **그 날 시각표에 그 다이아가 없는** 날.
+     *
+     * 현재 자료로는 **본선 주간 26~29 가 토·일·공휴일에 걸린 날** 하나뿐이다
+     * ([MAIN_DAY_WEEKDAY] 는 1~29 인데 [MAIN_DAY_HOLIDAY] 는 **1~25** 다 — 열차가 안 다녀
+     * 26~29 가 통째로 빠진다). 달력 칸·공유 월 이미지가 빈 시각 자리에 빨간 **`운휴`** 를 적고,
+     * 주52 시간은 **0**(미정이 아니다)이며, v1.7.11 부터 **월 휴무 개수에도 들어간다**
+     * ([DaySchedule.countsAsRestDay]).
+     *
+     * ⚠ **`signOn(duty, date) == null` 을 빼지 말 것.** 이 조건이 "휴일 시각표에 없다"를 말하는
+     * 전부다. 빼면 **휴일에도 시각이 있는 다이아**(주간 1~25·야간 33~51·지선 지1~지14·대기 대N)
+     * 까지 전부 운휴로 잡힌다. 종전 세 벌의 조건은 `signOn` 을 안 적었지만 그건 **호출 자리가
+     * 이미 시각 없음을 보장**했기 때문이다(달력·월이미지는 `day.signOn == null` 인 `else` 가지
+     * 안, 주52는 시각표를 본 앞 가지들이 이미 return 한 뒤). 함수로 모으면 그 보장이 사라지므로
+     * 조건이 스스로 서야 한다.
+     *
+     * ⚠ 이 판정은 **네 곳이 같이 쓴다** — `MainCalendarScreen`(달력 칸 `운휴` 글자) ·
+     * `MonthImage`(공유 월 이미지) · `WeeklyHours`(그 날 0분) · [DaySchedule.countsAsRestDay].
+     * v1.7.10 까지는 앞 셋에 **같은 조건이 복사돼** 있었고 주석이 *"세 곳이 같아야 한다"* 고
+     * 경고만 했다. **조건을 다시 베끼지 말 것.**
+     *
+     * ⚠ 근무변경된 날은 **원래 다이아**(`base`)로 물어야 한다 — [DaySchedule.countsAsRestDay] 참고.
+     */
+    fun isHolidayIdleDia(duty: DutyCode, date: LocalDate): Boolean =
+        duty.isWorkDay && duty.number != null &&
+            isHolidayTimetable(date) && signOn(duty, date) == null
 }

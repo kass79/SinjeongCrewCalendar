@@ -147,8 +147,8 @@ object WeeklyHours {
 
         // ⑤ **휴일 운휴 다이아**(본선 주간 26~29) — 휴일 시각표에도 행로표에도 없는 근무일이다.
         //    열차가 안 다니는 날이라 0이지 미정이 아니다(달력 칸이 그 자리에 `운휴`라고 적는다).
-        //    ⚠ 같은 조건이 `MainCalendarScreen`·`MonthImage` 의 `운휴` 표기에도 있다 — 세 곳이 같아야 한다.
-        if (duty.isWorkDay && n != null && holiday) return 0
+        //    판정은 `Bundled.isHolidayIdleDia` **한 곳**(v1.7.11 — 종전엔 여기·달력·월이미지 세 벌이었다).
+        if (Bundled.isHolidayIdleDia(duty, date)) return 0
 
         // ⑥ 교육·회행·번호 없는 지근·직접입력 — 시간 미정.
         return null

@@ -120,11 +120,11 @@ fun renderMonthImage(context: Context, month: YearMonth, days: List<DaySchedule>
             }
         }
         // 출근시각. 없으면 휴일 운휴 다이아(본선 주간 26~29)인지 보고 그 자리를 채운다 —
-        // 앱 MainCalendarScreen.kt:671~682과 같은 조건·같은 색.
+        // 판정은 `Bundled.isHolidayIdleDia` **한 곳**(v1.7.11), 색만 여기 값이다.
         val so = day.signOn
         if (so != null) {
             txt(so, left + cellW / 2, top + 128f, 24f, 0xFF6B6B78.toInt(), center = true)
-        } else if (day.duty.isWorkDay && day.duty.number != null && Bundled.isHolidayTimetable(day.date)) {
+        } else if (Bundled.isHolidayIdleDia(day.duty, day.date)) {
             txt("운휴", left + cellW / 2, top + 128f, 24f, 0xFFC4302B.toInt(), bold = true, center = true)
         }
     }

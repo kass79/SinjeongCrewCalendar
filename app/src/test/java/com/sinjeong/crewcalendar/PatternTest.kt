@@ -22,6 +22,7 @@ import com.sinjeong.crewcalendar.domain.model.scheduleSegment
 import com.sinjeong.crewcalendar.domain.model.segmentOn
 import com.sinjeong.crewcalendar.domain.model.teamBadge
 import com.sinjeong.crewcalendar.domain.model.withSegments
+import com.sinjeong.crewcalendar.domain.usecase.WeeklyHours
 import com.sinjeong.crewcalendar.presentation.calendar.DutyPickerState
 import com.sinjeong.crewcalendar.widget.signOnAt
 import org.junit.Assert.assertEquals
@@ -2238,6 +2239,103 @@ class PatternTest {
         listOf("충당 9", "대기충당 대2", "교체 45", "연차", "대휴").forEach {
             assertEquals(it, 1, restCount(listOf(day(1, it, original = "휴무"))))
         }
+    }
+
+    // ── 휴일 운휴 다이아도 휴무다 (v1.7.11) ──────────────────────────
+    //
+    // 카스 원문(2026-09-07): *"주말에 토,일 주간 26,27,28,29 운휴는 휴일로 안잡힌듯 ..?
+    // 휴무 개수가 안맞네?"* · *"만약 그쪽에 지근으로 지정하면 빼는거지.."*
+    //
+    // v1.7.10 까지 `Schedule.kt` 의 KDoc 은 *"휴일 26~29 의 `운휴` 는 근무일 표기라 휴무 개수와
+    // 무관하다"* 고 **일부러 빼 놓았다.** 카스가 그 판단을 뒤집었다.
+    //
+    // 2026년 9월 기준 날짜: 토 5·12·19·26 / 일 6·13·20·27 / 공휴일 24(추석연휴 목)·25(추석 금) /
+    // 평일 7·8·9·10·11 …
+
+    /** 이 달에서 토·일·공휴일을 대표하는 세 날 — 세 날짜꼴을 다 밟는다 */
+    private val holidayKinds = listOf(5 to "토요일", 6 to "일요일", 24 to "공휴일(추석연휴)")
+
+    /**
+     * ①②③④ **휴일에 걸린 26~29 는 휴무로 센다. `지근` 으로 바꾸면 −1, `연차` 로 바꾸면 그대로.**
+     *
+     * ④ 평일의 26~29 는 **근무일**이라 안 센다 — 같은 다이아가 날짜꼴로만 갈린다.
+     */
+    @Test fun restCount_holidayIdleDiaCountsAsRest() {
+        // ① 토·일·공휴일 × 26·27·28·29 = 네 다이아 × 세 날짜꼴 전부 센다
+        holidayKinds.forEach { (d, kind) ->
+            (26..29).forEach { n ->
+                assertEquals("$kind $n 번은 운휴라 휴무다", 1, restCount(listOf(day(d, "$n"))))
+            }
+        }
+        // 한 달치로 세도 같다 — 토 26·일 27 두 칸이 그대로 더해진다
+        assertEquals(
+            2,
+            restCount(listOf(day(5, "26"), day(6, "27"), day(7, "28"), day(8, "29"))),
+        )
+
+        // ② 그 날을 **`지근`** 으로 바꾸면 −1 (다이아 없는 맨 지근 · 다이아 붙은 지근 둘 다)
+        //    ⚠ 판정은 `duty` 가 아니라 **`base`**(원래 다이아 "26")로 한다 — ③이 그 근거다
+        holidayKinds.forEach { (d, kind) ->
+            assertEquals("$kind 26 → 맨 지근", 0, restCount(listOf(day(d, "지근", original = "26"))))
+            assertEquals("$kind 26 → 지근 26", 0, restCount(listOf(day(d, "지근 26", original = "26"))))
+            assertEquals("$kind 29 → 지근 9", 0, restCount(listOf(day(d, "지근 9", original = "29"))))
+        }
+
+        // ③ 그 날을 **`연차`** 로 바꾸면 **센다** — 원래 휴무였으니 `휴무 → 연차` 줄과 같다.
+        //    `duty` 로 판정했다면 여기서 0이 나온다(연차는 근무일이 아니다) — **`base` 를 쓰는 이유**.
+        holidayKinds.forEach { (d, kind) ->
+            listOf("연차", "대휴", "충당 9", "교체 45").forEach {
+                assertEquals("$kind 26 → $it", 1, restCount(listOf(day(d, it, original = "26"))))
+            }
+        }
+
+        // ④ **평일**의 26~29 는 근무일이다 — 안 센다
+        listOf(7, 8, 9, 10).forEachIndexed { i, d ->
+            assertEquals("평일 ${26 + i}", 0, restCount(listOf(day(d, "${26 + i}"))))
+        }
+        assertEquals(0, restCount((26..29).map { day(it - 19, "$it") }))  // 7~10일(월~목)
+    }
+
+    /**
+     * ⑤⑦ **판정은 [Bundled.isHolidayIdleDia] 한 곳**이고 `signOn == null` 가드가 그 핵심이다.
+     *
+     * 종전엔 같은 조건이 `MainCalendarScreen`(달력 칸 `운휴` 글자)·`MonthImage`(공유 월 이미지)·
+     * `WeeklyHours`(그 날 0분) **세 벌**로 복사돼 있었고, 셋 다 `signOn` 을 안 적은 채
+     * **호출 자리가 시각 없음을 보장**하는 데 기대고 있었다. 함수로 모으면 그 보장이 사라지므로
+     * 조건이 스스로 서야 한다 — 이 테스트가 그 가드를 잠근다.
+     */
+    @Test fun holidayIdleDia_isOneSharedRuleGuardedBySignOn() {
+        // 근거: 평일 시각표는 1~29 인데 **휴일 시각표는 1~25** 다 — 26~29 가 통째로 빠진다
+        assertEquals((1..29).toSet(), Bundled.MAIN_DAY_WEEKDAY.keys)
+        assertEquals((1..25).toSet(), Bundled.MAIN_DAY_HOLIDAY.keys)
+
+        val sat = LocalDate.of(2026, 9, 5)
+        val mon = LocalDate.of(2026, 9, 7)
+        fun idle(raw: String, date: LocalDate) = Bundled.isHolidayIdleDia(DutyCode.parse(raw), date)
+
+        // ① 휴일 26~29 만 참
+        (26..29).forEach { assertTrue("토요일 $it", idle("$it", sat)) }
+        (26..29).forEach { assertFalse("평일 $it", idle("$it", mon)) }
+
+        // ⑤ **휴일이라도 시각이 있는 다이아는 거짓** ← `signOn == null` 가드의 증명.
+        //    이 줄이 깨지면 휴일 근무가 전부 운휴로 잡혀 휴무 개수·주52·달력 글자가 한꺼번에 틀린다.
+        listOf("1", "14", "25", "지3", "지13", "대2", "대11", "33", "51").forEach {
+            assertNotNull("휴일 시각표에 $it 이 있어야 한다", Bundled.signOn(DutyCode.parse(it), sat))
+            assertFalse("휴일이지만 시각이 있는 $it", idle(it, sat))
+        }
+        // 근무일이 아니거나 번호가 없으면 애초에 거짓
+        listOf("휴3", "~", "연차", "지휴", "지근", "주간", "야간", "교육").forEach {
+            assertFalse(it, idle(it, sat))
+        }
+
+        // ⑦ 네 호출부가 같은 함수를 본다. 화면 둘(`MainCalendarScreen`·`MonthImage`)은 Compose·
+        //    Android 라 이 하네스에서 못 부르니 **컴파일 참조**가 보증이고, 여기서는 나머지 둘을 잠근다.
+        assertTrue(day(5, "26").countsAsRestDay)                       // 휴무 개수
+        assertEquals(0, WeeklyHours.minutesOf(day(5, "26")))           // 주52 = 그 날 0분
+        assertEquals(0, WeeklyHours.minutesOf(day(6, "29")))
+        // 평일은 셋 다 종전 그대로(계 시간이 나오고 휴무도 아니다)
+        assertFalse(day(7, "26").countsAsRestDay)
+        assertTrue("평일 26 은 행로표 계가 나온다", (WeeklyHours.minutesOf(day(7, "26")) ?: 0) > 0)
     }
 
     /**

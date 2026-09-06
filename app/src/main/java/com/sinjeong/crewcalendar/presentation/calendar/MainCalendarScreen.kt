@@ -1106,8 +1106,9 @@ private fun DayCell(
                 day.signOn, fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
                 color = pal.text, onTextLayout = markTight,
             )
-        } else if (day.duty.isWorkDay && day.duty.number != null && Bundled.isHolidayTimetable(day.date)) {
-            // 휴일 운휴 다이아(본선 주간 26~29) — 시각이 아예 없어 칸이 비어 보이던 자리를 채운다
+        } else if (Bundled.isHolidayIdleDia(day.duty, day.date)) {
+            // 휴일 운휴 다이아(본선 주간 26~29) — 시각이 아예 없어 칸이 비어 보이던 자리를 채운다.
+            // 판정은 `Bundled.isHolidayIdleDia` **한 곳** — 월 이미지·주52·휴무 개수가 같이 본다(v1.7.11).
             Text(
                 "운휴", fontSize = signOnSize, lineHeight = signOnSize * 1.06, fontWeight = FontWeight.Bold,
                 color = duty.sunday, onTextLayout = markTight,
