@@ -301,6 +301,19 @@ private const val TAG = "BranchLive"
  */
 private const val CLAY_SHADOW_MAX = 15
 
+/**
+ * 지도 캔버스 **세로 상한 = 가로 × 이 값**(v1.7.13 ⑥가).
+ *
+ * 카스: *"본선 전체보기 … **세로가 너무 길어서** 쪼금 어색하긴 한데? 최적화 시켜줘!"* —
+ * 펼침(700 × 690dp)에서 루프가 거의 정사각형이 되어 세로 변 5역이 늘어지고 가운데가 비었다
+ * (실측 루프 세로/가로 **0.83**). 접힘 폰(회전 뒤 913 × 330dp)의 실측 비는 **0.32** 다.
+ *
+ * ⚠ **접힘 폰·가로 화면에서는 이 상한이 안 걸린다** — 913 × 0.62 = 566dp 가 그 화면의 세로보다
+ * 크기 때문이다. v1.7.9 확정(접힘 폰 세로 회전)은 그대로 살아 있다. **키우면 다시 정사각형**,
+ * **줄이면 납작해져 역 이름이 붙는다** — 고치기 전에 펼침에서 실측할 것.
+ */
+private const val LOOP_MAX_H = 0.70f
+
 /** 폴드 펼침 기관차 배수 — [margin] 과 [drawCabLoop] 이 **같은 값**을 봐야 한다. */
 private fun locoScale(big: Boolean) = if (big) 54f / LOCO_LEN else 1f
 
@@ -648,8 +661,11 @@ internal fun MainLineMapDialog(
  * 재되(터치 영역이 살아 있다) 신고 높이만 줄이고 **가운데 정렬로 얹어** 위아래로 고르게
  * 넘치게 한다 — Row 는 clip 하지 않으므로 넘친 자리도 그대로 눌린다.
  * 자식이 [h] 보다 작으면 아무것도 안 한다.
+ *
+ * 지선 카드 헤더·칩 줄(v1.7.12 ②)에 이어 **출퇴근 역 칩 줄**(v1.7.13 ③)이 같은 처방을 쓴다 —
+ * 그래서 `internal` 이다([CommuteBar]).
  */
-private fun Modifier.shrinkHeight(h: Dp) = layout { measurable, constraints ->
+internal fun Modifier.shrinkHeight(h: Dp) = layout { measurable, constraints ->
     val p = measurable.measure(constraints.copy(minHeight = 0))
     val out = minOf(p.height, h.roundToPx())
     layout(p.width, out) { p.place(0, (out - p.height) / 2) }
@@ -766,7 +782,30 @@ private fun CabScreen(
     Column(Modifier.fillMaxSize().padding(inset)) {
         CabHeader(nowMillis, mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
             delay, nextSec, mineHidden, big, pal, onRefresh, onDismiss)
-        Box(Modifier.fillMaxWidth().weight(1f)) {
+        /*
+         * ── 루프가 정사각형이 되는 것을 막는다 (v1.7.13 ⑥가) ─────────
+         *
+         * 카스(2026-09-07, 폴드 펼침에서 봄): *"**본선 전체보기** 바로 보이는건 좋은데..
+         * **세로가 너무 길어서** 쪼금 어색하긴 한데? 최적화 시켜줘!"*
+         *
+         * 종전엔 루프가 캔버스를 **세로까지 꽉** 채웠다. 접힘 폰(가로 913 × 세로 330dp)에서는
+         * 그게 곧 납작한 가로 지도인데, 펼침(700 × 690dp)에서는 **거의 정사각형**이 된다 —
+         * 가로 변에 17·16역이 촘촘히 눕고 세로 변에는 **5역이 1,000px 에 늘어져** 가운데가
+         * 통째로 빈다(실측 캡처 `41_old_unfolded_map_clay.png`, 루프 세로/가로 = **0.83**).
+         *
+         * 그래서 **가로의 [LOOP_MAX_H] 배**를 세로 상한으로 걸고 남는 위아래는 여백으로 둔다.
+         * 값은 접힘 폰의 실측 비(0.32)와 펼침의 0.83 사이에서 골랐다 — 화면은 넓게 쓰되
+         * 세로 변이 늘어지지 않는 자리다.
+         *
+         * ⚠ **접힘 폰 세로(90° 회전)는 한 픽셀도 안 바뀐다**(v1.7.9 확정 · 회귀 금지) —
+         * 거기서는 `가로 913dp × 0.62 = 566dp` 가 이미 있는 세로(≈330dp)보다 커서 상한이
+         * 안 걸린다. 가로 화면도 같다. **펼침에서만** 걸린다.
+         */
+        BoxWithConstraints(
+            Modifier.fillMaxWidth().weight(1f),
+            contentAlignment = Alignment.Center,
+        ) {
+            val mapH = minOf(maxHeight, maxWidth * LOOP_MAX_H)
             val d = LocalDensity.current
             // 지도 안 글자배율 상한 — 그림은 dp, 글자만 sp라 배율을 키우면 역 이름이 넘친다.
             // ⚠ TextMeasurer 는 반드시 이 안에서 만든다(지선 지도와 같은 처방).
@@ -831,7 +870,9 @@ private fun CabScreen(
                  */
                 val pick by rememberUpdatedState(onPick)
                 Canvas(
-                    Modifier.fillMaxSize().pointerInput(Unit) {
+                    // ⚠ 세로는 [mapH](= 가로 × [LOOP_MAX_H] 상한)다 — `fillMaxSize` 로 되돌리면
+                    //   펼침에서 루프가 다시 정사각형이 된다(v1.7.13 ⑥가).
+                    Modifier.fillMaxWidth().height(mapH).pointerInput(Unit) {
                         detectTapGestures { tap ->
                             fun dist(o: Offset) =
                                 hypot((o.x - tap.x).toDouble(), (o.y - tap.y).toDouble())

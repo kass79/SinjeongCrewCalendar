@@ -2,6 +2,7 @@ package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.presentation.live.ArrivalRow
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
+import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
 import com.sinjeong.crewcalendar.presentation.live.CommuteStation
 import com.sinjeong.crewcalendar.presentation.live.atStationText
 import com.sinjeong.crewcalendar.presentation.live.boundOf
@@ -234,11 +235,22 @@ class CommuteTest {
         )
     }
 
+    /**
+     * v1.7.13 ④ — 카스: *"최대 5개까지 선택할수있었으면 해!"* (v1.7.9~12 는 4개였다).
+     * 상한은 [COMMUTE_MAX] 한 곳이고 **저장·복원 양쪽**이 같이 자른다.
+     */
     @Test
-    fun `등록은 네 개까지다`() {
-        val five = (1..5).map { CommuteStation("역$it", "1002", "내선") }
-        assertEquals(4, encodeCommute(five).split(";").size)
-        assertEquals(4, decodeCommute(five.joinToString(";") { "${it.name}|1002|내선" }).size)
+    fun `등록은 다섯 개까지다`() {
+        assertEquals(5, COMMUTE_MAX)
+        val six = (1..6).map { CommuteStation("역$it", "1002", "내선") }
+        // 다섯은 그대로 살고 여섯째가 버려진다 — 저장할 때도, 읽을 때도.
+        assertEquals(5, encodeCommute(six).split(";").size)
+        assertEquals("역5", encodeCommute(six).split(";")[4].substringBefore("|"))
+        val back = decodeCommute(six.joinToString(";") { "${it.name}|1002|내선" })
+        assertEquals(5, back.size)
+        assertEquals("역5", back.last().name)
+        // 딱 다섯이면 한 칸도 안 버린다(경계).
+        assertEquals(5, decodeCommute(encodeCommute(six.take(5))).size)
     }
 
     @Test

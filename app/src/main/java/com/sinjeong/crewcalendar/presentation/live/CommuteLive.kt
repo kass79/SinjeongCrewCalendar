@@ -14,8 +14,16 @@ package com.sinjeong.crewcalendar.presentation.live
  * "전후 3정거장"은 **"앞으로 들어오는 열차 최대 3대"**로 만든다(사용자 동의 완료).
  */
 
-/** 등록 상한 — 상세시트 칩 한 줄에 드는 수(사용자 예시가 마곡·까치산 2·까치산 5·신도림 넉 장이다) */
-internal const val COMMUTE_MAX = 4
+/**
+ * 등록 상한. v1.7.9 는 **4**(사용자 예시가 마곡·까치산 2·까치산 5·신도림 넉 장이었다)였고
+ * v1.7.13 에서 카스가 **5** 로 올렸다 — *"최대 5개까지 선택할수있었으면 해!"*.
+ *
+ * ⚠ **칩 줄은 여전히 한 줄이다**(v1.7.9 카스 확정 — 두 줄 접기 금지). 다섯째 칩은 오른쪽으로
+ * 밀려 가로 스크롤로 본다. 늘리는 것은 이 상수 하나이고 저장·복원·안내 문구가 전부 이 값을
+ * 읽는다([encodeCommute]·[decodeCommute]·`ThemeController.setCommuteStations`·`CommuteBar`·
+ * `SettingsScreen`) — 숫자를 다시 적어 넣지 말 것.
+ */
+internal const val COMMUTE_MAX = 5
 
 /** 한 번에 보여 주는 다가오는 열차 수 */
 internal const val COMMUTE_ROWS = 3
@@ -250,6 +258,52 @@ internal fun commuteSlot(arvlMsg2: String, arvlCd: String): Int {
     PREV_STATIONS.find(msg)?.let { return (last - it.groupValues[1].length).coerceIn(0, last) }
     if (arvlCd == "3" || arvlCd == "4" || arvlCd == "5") return last - 1
     return 0
+}
+
+/**
+ * 열차 한 대를 **한 걸음** 앞으로 옮긴다 — 미니 노선 연속 좌표 `0f..[COMMUTE_SLOTS]-1f`(v1.7.13 ①).
+ *
+ * 카스: *"역으로 다가오는 **열차아이콘이 안움직이는데?**"* — v1.7.12 는 15초 폴링 때마다
+ * 칸을 뛰고 그 사이엔 멈춰 있었다. 재료는 이미 응답에 있다: **남은 초**([etaSec] = `barvlDt`,
+ * 화면 오른쪽의 `N분 M초`)가 1초씩 준다. 그 값으로 칸 사이를 메우면 **API 를 더 안 부른다.**
+ *
+ * ## 규칙 — 확정 표 *"열차 이동 = 시간 기반 등속 전진"*(v1.7.5)을 그대로 따른다
+ *
+ *  ⓐ **앞으로만 간다.** [dtSec] 이 음수면 0 이고, 새 응답이 뒤를 가리켜도 [prev] 를 들고 버틴다.
+ *  ⓑ **다음 칸을 안 넘는다.** 예측이 실측을 앞질러 있지도 않은 도착을 그리지 않는다
+ *     (`CREEP_MARGIN` 과 같은 취지 · 여기는 칸이 6개뿐이라 **한 칸이 상한**이다).
+ *  ⓒ **도착·진입이면 역 점 위에 선다** — [commuteSlot] 이 이미 마지막 칸을 주므로 그대로 멈춘다.
+ *
+ * ## ⚠ **자리를 눈금에서 다시 계산하지 말 것** — 그러면 폴링마다 멎는다
+ *
+ * 처음엔 `칸 + 남은칸 × 조회뒤흐른초 ÷ 눈금` 으로 **매번 다시 계산**했다. 에뮬 실측(2026-09-07
+ * 03:58:41~54, 5호선 마곡)에서 15초 동안 `0.075 → 0.232` 로 잘 흐르다가 **다음 폴링에서
+ * 계산값이 0 으로 되감겼고**, ⓐ 가 뒷걸음은 막았지만 자리가 `0.232` 에 **13초를 붙박여** 있었다.
+ * 15초 중 2초만 움직이는 셈이라 카스가 말한 그 "안 움직인다"가 그대로 돌아온다.
+ *
+ * 그래서 [prev] 에 **걸음을 더한다**(v1.7.5 `stepMotion` 과 같은 꼴). 속도만 폴링마다 새로
+ * 잡는다 — `남은 초 ÷ 남은 칸` = **한 칸에 몇 초**. 칸이 정수로 되감겨도 자리는 안 되감긴다.
+ *
+ * ⚠ **`TrainMotion.stepMotion` 을 그대로는 못 쓴다.** 그쪽은 43역 **순환** 좌표라 `unfold` 가
+ * 반 바퀴(여기선 3칸)를 넘는 차이를 "뒤로"로 접는다 — 0번 칸 열차가 5번 칸을 목표로 받으면
+ * **−1 칸(뒤)** 이 된다(실산: `d = 5 → 5 > 3 → d − 6 = −1`). 순환이 아닌 6칸 자에는 안 맞아
+ * 여기 순수 함수를 따로 두고 `CommuteMiniTest` 가 잠근다.
+ *
+ * @param prev 직전 걸음의 자리(처음 본 열차면 `null` — 그때는 [slot] 에서 시작한다).
+ * @param slot [commuteSlot] 이 낸 칸.
+ * @param etaSec 지금 응답의 남은 초(`barvlDt`) — **속도만** 여기서 나온다.
+ * @param dtSec 직전 걸음 뒤로 흐른 초(1초 눈금이면 1). 음수는 0 으로 본다.
+ */
+internal fun commuteAdvance(prev: Float?, slot: Int, etaSec: Int, dtSec: Float): Float {
+    val last = (COMMUTE_SLOTS - 1).toFloat()
+    if (slot >= COMMUTE_SLOTS - 1) return last                      // ⓒ 도착 — 역 점 위
+    if (prev == null) return slot.toFloat().coerceIn(0f, last)      // 처음 본 열차
+    /** 한 칸에 몇 초 — 남은 칸을 남은 초에 간다고 본 **등속** 하나. 하한 1초(0 나눗셈 방지). */
+    val secPerSlot = (etaSec.toFloat() / (COMMUTE_SLOTS - 1 - slot)).coerceAtLeast(1f)
+    // ⓑ 상한은 다음 칸. 다만 [prev] 가 이미 그보다 앞이면(칸이 뒤로 온 이상한 응답)
+    // 끌어내리지 않고 **그 자리에 선다** — ⓐ.
+    val stop = maxOf(minOf(slot + 1f, last), prev)
+    return (prev + dtSec.coerceAtLeast(0f) / secPerSlot).coerceIn(0f, stop)
 }
 
 /* ── 호선 색 ─────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import com.sinjeong.crewcalendar.presentation.live.COMMUTE_LINE_FALLBACK_ARGB
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_SLOTS
 import com.sinjeong.crewcalendar.presentation.live.LINE_ARGB
 import com.sinjeong.crewcalendar.presentation.live.LINE_NAMES
+import com.sinjeong.crewcalendar.presentation.live.commuteAdvance
 import com.sinjeong.crewcalendar.presentation.live.commuteSlot
 import com.sinjeong.crewcalendar.presentation.live.lineArgb
 import org.junit.Assert.assertEquals
@@ -144,5 +145,82 @@ class CommuteMiniTest {
         listOf("1001", "1002", "1003", "1004", "1005", "1006", "1007", "1008", "1009",
             "1032", "1063", "1065", "1067", "1075", "1077", "1081", "1092", "1093", "9999")
             .forEach { assertEquals(it, 0xFFL, (lineArgb(it) ushr 24) and 0xFFL) }
+    }
+
+    /* ── 칸 사이 보간 (v1.7.13 ①) ────────────────────────────
+     *
+     * 카스: *"역으로 다가오는 열차아이콘이 안움직이는데?"* — [commuteAdvance] 가 남은 초로
+     * 칸 사이를 메운다. 확정 표 "열차 이동 = 시간 기반 등속 전진"의 세 조항을 잠근다.
+     */
+
+    @Test
+    fun `처음 본 열차는 그 칸에서 시작한다`() {
+        assertEquals(0f, commuteAdvance(null, 0, 300, 0f), 1e-4f)
+        assertEquals(3f, commuteAdvance(null, 3, 120, 9f), 1e-4f)  // dt 가 있어도 튀지 않는다
+    }
+
+    @Test
+    fun `시간이 흐르면 등속으로 앞으로 간다`() {
+        // 칸 2 · 남은 300초 → 남은 칸 3개를 300초에 = **한 칸에 100초**.
+        assertEquals(2.01f, commuteAdvance(2f, 2, 300, 1f), 1e-4f)
+        assertEquals(2.10f, commuteAdvance(2f, 2, 300, 10f), 1e-4f)
+        // 1초 눈금을 열 번 밟아도 같은 자리에 온다(누적).
+        var p = 2f
+        repeat(10) { p = commuteAdvance(p, 2, 300, 1f) }
+        assertEquals(2.10f, p, 1e-3f)
+    }
+
+    /**
+     * ⚠ **v1.7.13 ① 을 처음 만들 때 낸 버그를 잠근다.** 자리를 "칸 + 흐른 초"로 매번 다시
+     * 계산했더니 15초 폴링마다 계산값이 칸으로 되감겨, 뒷걸음은 안 하지만 **13초를 붙박여**
+     * 있었다(에뮬 실측 2026-09-07 03:58, 5호선 마곡). 걸음을 더하는 지금 꼴은 안 멎는다.
+     */
+    @Test
+    fun `폴링이 와도 자리가 안 멎는다`() {
+        var p = commuteAdvance(null, 0, 300, 0f)                   // 조회 ① 눈금 300초
+        repeat(15) { p = commuteAdvance(p, 0, 300, 1f) }           // 15초 흐름
+        assertEquals(0.25f, p, 1e-3f)                              // 한 칸 60초 → 0.25칸
+        val after = commuteAdvance(p, 0, 285, 1f)                  // 조회 ② 같은 칸·줄어든 눈금
+        assertTrue("폴링 뒤에도 이어 가야 한다 ($p → $after)", after > p)
+    }
+
+    @Test
+    fun `다음 칸을 절대 안 넘는다`() {
+        // 응답이 늦어 걸음이 커져도 예측은 한 칸에서 선다 — 있지도 않은 도착을 안 그린다.
+        assertEquals(3f, commuteAdvance(2f, 2, 300, 99_999f), 1e-4f)
+        assertEquals(1f, commuteAdvance(0.5f, 0, 60, 600f), 1e-4f)
+        // 남은 초가 0 이하로 와도 마찬가지(0 나눗셈 없음).
+        assertEquals(3f, commuteAdvance(2f, 2, 0, 5f), 1e-4f)
+        assertEquals(3f, commuteAdvance(2f, 2, -5, 3f), 1e-4f)
+    }
+
+    @Test
+    fun `앞으로만 간다 - 뒤로는 한 픽셀도 안 물러난다`() {
+        // 흐른 시간이 0 이거나 음수(시계 되돌림)면 제자리.
+        assertEquals(2.15f, commuteAdvance(2.15f, 2, 285, 0f), 1e-4f)
+        assertEquals(2.15f, commuteAdvance(2.15f, 2, 285, -9f), 1e-4f)
+        // 칸 자체가 뒤로 온 이상한 응답에도 끌어내리지 않는다(그 자리에 선다).
+        assertEquals(3.4f, commuteAdvance(3.4f, 1, 400, 0f), 1e-4f)
+        assertEquals(3.4f, commuteAdvance(3.4f, 1, 400, 30f), 1e-4f)
+    }
+
+    @Test
+    fun `도착 진입이면 역 점 위에 선다`() {
+        // arvlCd 0·1 은 commuteSlot 이 이미 마지막 칸을 준다 — 거기서는 더 안 움직인다.
+        assertEquals(last.toFloat(), commuteAdvance(null, last, 0, 0f), 1e-4f)
+        assertEquals(last.toFloat(), commuteAdvance(null, last, 30, 999f), 1e-4f)
+        assertEquals(last.toFloat(), commuteAdvance(2.5f, last, 30, 0f), 1e-4f)
+    }
+
+    @Test
+    fun `자리는 늘 0 과 마지막 칸 사이다 - 예외 0`() {
+        val etas = listOf(-10, 0, 1, 37, 300, 4000, Int.MAX_VALUE)
+        val dts = listOf(-5f, 0f, 0.5f, 15f, 600f, 1e9f)
+        val prevs = listOf<Float?>(null, 0f, 2.4f, last.toFloat())
+        for (s in -2..COMMUTE_SLOTS + 1) for (e in etas) for (t in dts) for (p in prevs) {
+            val v = commuteAdvance(p, s, e, t)
+            assertTrue("prev=$p slot=$s eta=$e dt=$t → $v", v >= 0f && v <= last.toFloat())
+            assertTrue("prev=$p slot=$s eta=$e dt=$t → $v", !v.isNaN())
+        }
     }
 }

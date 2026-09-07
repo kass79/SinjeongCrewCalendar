@@ -10,13 +10,17 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -31,6 +35,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -76,7 +81,22 @@ import kotlinx.coroutines.launch
  * [CommuteMiniLine] 이 한 줄로 접는다 — 왼쪽 끝이 `5번째 전역+`(v1.7.12 ③ 에서 4칸→6칸),
  * 오른쪽 끝이 등록한 역,
  * 그 위에 **호선 색 꼬마 기관차**가 서고, 오른쪽에 **가장 가까운 한 대**의 남은 시간·종착이 붙는다.
- * 칩 줄은 v1.7.9 확정 그대로다(한 줄·옆으로 밀기·최대 4개) — 카스가 고른 것이 *"제안 A"* 다.
+ * 칩 줄은 v1.7.9 확정 그대로다(한 줄·옆으로 밀기·최대 [COMMUTE_MAX] 개) — 카스가 고른 것이
+ * *"제안 A"* 다.
+ *
+ * ## v1.7.13 — ① 기관차가 **1초마다 앞으로** · ③ 더 낮게 · ⑦ 닫는 손잡이
+ *
+ * ① 카스: *"역으로 다가오는 **열차아이콘이 안움직이는데?**"* — v1.7.12 는 15초 폴링 때마다
+ * 칸을 뛰고 그 사이엔 멈춰 있었다. 이제 **1초 눈금**([tickMs])이 돌고 자리는 순수 함수
+ * [commuteAdvance] 가 남은 초로 칸 사이를 메운다. **API 는 더 안 부른다**(15초 그대로).
+ * 눈금은 [LaunchedEffect] 라 **펼친 동안만** 돌고 접으면 멎는다. 오른쪽 `N분 M초` 도 같은
+ * 눈금을 타 1초씩 준다(종전엔 15초마다 뭉텅이로 줄었다).
+ *
+ * ⑦ 카스: *"출퇴근역은 **바로 꺼지는 버튼**도 만들어주면 좋지!"* — **고른 칩에 `×` 를 단다.**
+ * 닫는 동작은 v1.7.9 부터 있었다(같은 칩을 다시 누르면 접힌다) — 없던 것은 **그게 보이는
+ * 손잡이**였다. 그래서 칩 안에 넣었다: ⓐ 세로가 **한 픽셀도 안 는다**(③ 과 안 부딪힌다) ⓑ
+ * 터치 영역은 칩이 이미 갖고 있는 **48dp** 그대로다(아이콘만 16dp — 지선 카드 ↻ 와 같은 처방)
+ * ⓒ 누르면 [open] 이 null 이 돼 **15초 폴링과 1초 눈금이 둘 다 그 자리에서 멎는다.**
  */
 @Composable
 internal fun CommuteBar(
@@ -88,6 +108,10 @@ internal fun CommuteBar(
     var rows by remember { mutableStateOf(emptyList<ArrivalRow>()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    /** 마지막 조회 시각(ms) — 오른쪽 `N분 M초` 를 1초씩 줄이는 원점이다. */
+    var fetchedAt by remember { mutableStateOf(0L) }
+    /** **1초 눈금** — 이 값이 바뀌는 것이 곧 리컴포지션이고 [commuteAdvance] 의 한 걸음이다. */
+    var tickMs by remember { mutableStateOf(System.currentTimeMillis()) }
 
     /*
      * 눈금은 **절대 시각**으로 놓는다 — `delay(15_000)` 로 재우면 네트워크에 쓴 시간과 delay
@@ -101,7 +125,7 @@ internal fun CommuteBar(
         var next = System.currentTimeMillis()
         while (isActive) {
             BranchLive.arrivalsAt(s.name)
-                .onSuccess { rows = it; error = null }
+                .onSuccess { rows = it; error = null; fetchedAt = System.currentTimeMillis() }
                 .onFailure { error = BranchLive.humanError(it) }
             loading = false
             next += 15_000
@@ -111,10 +135,27 @@ internal fun CommuteBar(
         }
     }
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    /*
+     * **1초 눈금**(v1.7.13 ①) — 호출은 한 번도 안 한다. 조회 뒤 흐른 초만 세어 [commuteAdvance]
+     * 가 칸 사이를 메우게 하고, 오른쪽 `N분 M초` 도 같이 준다. 키가 [open] 이라 **접거나 시트를
+     * 닫으면 이 루프도 취소돼 멎는다**(폴링과 같은 수명).
+     */
+    LaunchedEffect(open) {
+        if (open == null) return@LaunchedEffect
+        // ⚠ **열 때 눈금을 다시 맞춘다.** 안 그러면 [tickMs] 가 시트를 연 시각에 멈춰 있다가
+        // 첫 눈금에서 `dt` 가 그만큼(실측 69초) 뛰어 기관차가 한 칸을 순간이동한다.
+        tickMs = System.currentTimeMillis()
+        while (isActive) {
+            delay(1_000)
+            tickMs = System.currentTimeMillis()
+        }
+    }
+
+    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(
-            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).shrinkHeight(CHIP_ROW_H),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             stations.forEach { s ->
                 FilterChip(
@@ -127,6 +168,11 @@ internal fun CommuteBar(
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
                     },
+                    // ⑦ **닫는 손잡이** — 고른 칩에만 붙는다. 칩을 누르면 접히는 동작
+                    // (v1.7.9)의 눈에 보이는 표시이고, 터치 영역은 칩의 48dp 그대로다.
+                    trailingIcon = if (open != s) null else {
+                        { Icon(Icons.Filled.Close, "닫기", Modifier.size(16.dp)) }
+                    },
                 )
             }
         }
@@ -137,8 +183,25 @@ internal fun CommuteBar(
             // 은 그 뒤로 다가오는 열차다. 맨 앞이 **가장 가까운 한 대**이고 오른쪽 글자가 그것을 말한다.
             val near = listOfNotNull(at) + next
             val lead = near.firstOrNull()
-            // 아이콘 자리 — 같은 칸이 겹치면 **가까운 것만** 남긴다(먼저 온 것이 이긴다).
-            val slots = near.map { commuteSlot(it.arvlMsg2, it.arvlCd) }.distinct()
+            /*
+             * 아이콘 자리(v1.7.13 ①) — **연속 좌표**다. 같은 칸이 겹치면 종전대로 **가까운 것만**
+             * 남기고([distinctBy] 는 앞엣것을 남긴다 = 가까운 쪽), 그 한 대를 [commuteAdvance] 가
+             * 한 걸음씩 앞으로 옮긴다.
+             *
+             * 장부는 `열번 → (자리, 그 걸음의 시각)` 이고 **[open] 이 바뀌면 통째로 버린다**
+             * (칩을 옮기면 다른 역 이야기라 이어 달릴 것이 없다). 한 역의 목록은 세 대뿐이라
+             * 따로 솎아 낼 것이 없다.
+             *
+             * ⚠ 걸음의 크기는 **[tickMs] 차이**로 잰다 — 그래서 한 눈금 안에 리컴포지션이
+             * 몇 번 돌아도(응답 도착·테마 변경 …) `dt = 0` 이라 **두 번 걷지 않는다.**
+             */
+            val ledger = remember(s) { mutableMapOf<String, Pair<Float, Long>>() }
+            val pos = near.distinctBy { commuteSlot(it.arvlMsg2, it.arvlCd) }.map { r ->
+                val was = ledger[r.trainNo]
+                val dt = if (was == null) 0f else (tickMs - was.second) / 1000f
+                commuteAdvance(was?.first, commuteSlot(r.arvlMsg2, r.arvlCd), r.etaSec, dt)
+                    .also { ledger[r.trainNo] = it to tickMs }
+            }
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -146,7 +209,7 @@ internal fun CommuteBar(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     if (lead == null) {
@@ -161,18 +224,41 @@ internal fun CommuteBar(
                             fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis,
                         )
                     } else {
-                        CommuteMiniLine(s, slots, Modifier.weight(1f).height(MINI_H))
+                        /*
+                         * ⚠ **칸 키는 배율을 따라간다.** 오른쪽 두 줄은 sp 라 배율 1.5 에서
+                         * 45dp 가 되는데 미니 노선을 32dp 로 못 박아 두면 그 차이만큼 캔버스가
+                         * 비고, 밑 라벨(sp)이 두꺼워진 만큼 **기관차만 작아진다**
+                         * (실측: 배율 1.5 에서 `k` 가 1.0 → 0.67 로 떨어졌다). 두 줄과 같은 키를
+                         * 주면 칸 높이는 그대로면서 기관차가 제 크기를 지킨다.
+                         */
+                        val miniH = with(LocalDensity.current) {
+                            maxOf(MINI_MIN_H, ETA_LINE.toDp() + DEST_LINE.toDp())
+                        }
+                        CommuteMiniLine(s, pos, Modifier.weight(1f).height(miniH))
                         Spacer(Modifier.width(8.dp))
+                        /*
+                         * ⚠ **칸 높이를 정하는 것은 [MINI_H] 가 아니라 이 두 줄이다**(v1.7.13 ③ 실측).
+                         * 글꼴 기본 줄높이는 글자 크기의 1.4배쯤이라 `15sp + 10sp` 두 줄이 48dp 를
+                         * 먹어 40dp 짜리 미니 노선을 이기고 있었다 — [MINI_H] 만 40 → 32 로 내렸을 때
+                         * 카드가 152 → 148px 로 **4px 밖에 안 준** 이유다. 그래서 줄높이를 **박아 준다**
+                         * (18sp / 12sp = 글자의 1.2배). 두 줄 합이 30dp 라 이제 [MINI_H] 가 다시
+                         * 키를 정한다. **되돌리면 ③ 이 통째로 되돌아간다.**
+                         */
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                if (at != null) atStationText(at.arvlCd) else etaText(lead.etaSec),
-                                fontSize = 15.sp, fontWeight = FontWeight.ExtraBold,
+                                // 남은 초도 **1초 눈금**을 탄다(v1.7.13 ①) — 종전엔 폴링마다
+                                // 15초씩 뭉텅이로 줄어 기관차가 멈춰 보이는 것과 짝을 이뤘다.
+                                if (at != null) atStationText(at.arvlCd)
+                                else etaText(lead.etaSec - ((tickMs - fetchedAt) / 1000L).toInt()),
+                                fontSize = 15.sp, lineHeight = ETA_LINE,
+                                fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                             Text(
                                 "${lead.destName}행",
-                                fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                fontSize = 10.sp, lineHeight = DEST_LINE,
+                                maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                         }
                     }
@@ -188,15 +274,48 @@ internal fun CommuteBar(
 /**
  * 펼친 칸 높이. 세로로 쌓던 글자 목록(약 131dp)을 **한 줄**로 접은 값이다 —
  * 카스: *"세로칸은 최소화 해서 일자로 보여주면 좋지"*.
+ *
+ * v1.7.12 는 **40dp** 였고 v1.7.13 ③ 에서 **32dp** 로 내렸다(카스: *"그리고 조금 더 줄여주고"*).
+ * ⚠ **여기가 하한이다.** 밑에 눕는 라벨(10sp ≈ 12dp)과 2dp 틈을 빼면 기관차가 설 높이가
+ * `32 − 12 − 2 = 18dp` = [LOCO_TOP_ROOM] 정확히 그 값이라 배율 1.0 에서 `k` 가 **1.0** 이다.
+ * 더 내리면 `k` 가 1 밑으로 떨어져 **기관차부터 작아진다**(라벨은 안 준다).
  */
-private val MINI_H = 40.dp
+private val MINI_MIN_H = 32.dp
+
+/**
+ * 오른쪽 두 줄의 **줄높이**(v1.7.13 ③). 글꼴 기본 줄높이는 글자의 1.4배쯤이라 `15sp + 10sp`
+ * 두 줄이 48dp 를 먹어 미니 노선을 이기고 있었다 — 여기를 1.2배로 박아 30sp 로 만든다.
+ * 이 두 값이 곧 [MINI_MIN_H] 와 견주는 **칸의 키**다 — 한쪽만 고치면 세로가 도로 는다.
+ */
+private val ETA_LINE = 18.sp
+private val DEST_LINE = 12.sp
+
+/**
+ * 칩 줄이 **부모에게 말하는 높이**(v1.7.13 ③). `FilterChip` 은 머티리얼의
+ * `minimumInteractiveComponentSize` 때문에 **48dp** 로 재는데 보이는 알약은 32dp 뿐이라
+ * 위아래로 8dp 씩 빈 띠가 남는다 — 지선 카드가 v1.7.12 ② 에서 헤더·칩 줄에 쓴 그 처방
+ * ([shrinkHeight])을 그대로 쓴다. **터치 영역은 48dp 그대로다**(노드가 제 크기를 그대로
+ * 보고하므로 손끝에 걸리는 넓이가 안 준다).
+ */
+private val CHIP_ROW_H = 34.dp
 
 /** 기관차 한 대가 선 위로 차지하는 높이(굴뚝 끝 ~ 바퀴 바닥). 배율 1 일 때의 값이다. */
 private val LOCO_TOP_ROOM = 18.dp
 
 /**
+ * 기관차가 **역 점을 덮는** 거리(칸 단위). 이보다 가까우면 그 점을 안 찍는다 —
+ * 점의 흰 속이 바퀴 사이로 삐져나와 **턱수염처럼** 보였다(v1.7.12 실측 크롭 둘).
+ * 몸통 반폭 11dp + 점 3.2dp = 14.2dp 이고 칸 간격이 접힘에서 ≈52dp 라 0.27 칸이 실측 경계다.
+ */
+private const val LOCO_COVERS = 0.35f
+
+/**
  * **가로 미니 노선 한 줄** — 왼쪽 끝이 `5번째 전역+`, 오른쪽 끝이 **등록한 그 역**(큰 점)이고
- * 그 위에 다가오는 열차가 기관차로 선다. 칸 좌표는 순수 함수 [commuteSlot] 이 낸다.
+ * 그 위에 다가오는 열차가 기관차로 선다.
+ *
+ * ⚠ [pos] 는 **정수 칸이 아니라 연속 좌표**다(v1.7.13 ①). [commuteSlot] 이 낸 칸을
+ * [commuteAdvance] 가 남은 초로 흘린 값이라 1초마다 조금씩 커진다 — 그래서 기관차가
+ * 칸을 뛰지 않고 **미끄러져** 다가온다.
  *
  * 색은 **호선 색**([lineArgb])이다 — 카스: *"아이콘을 좀 더 귀엽게 각호선 색상에 맞게"*.
  * 다만 **글자는 테마 색**을 쓴다(`onSurfaceVariant`) — 1호선 남색(`#0052A4`)·7호선
@@ -204,7 +323,7 @@ private val LOCO_TOP_ROOM = 18.dp
  * 호선 색이고 읽어야 하는 글자는 테마가 보장하는 대비를 쓴다.
  */
 @Composable
-private fun CommuteMiniLine(station: CommuteStation, slots: List<Int>, modifier: Modifier) {
+private fun CommuteMiniLine(station: CommuteStation, pos: List<Float>, modifier: Modifier) {
     val line = Color(lineArgb(station.subwayId))
     val ink = MaterialTheme.colorScheme.onSurfaceVariant
     val tm = rememberTextMeasurer()
@@ -230,7 +349,10 @@ private fun CommuteMiniLine(station: CommuteStation, slots: List<Int>, modifier:
         val padR = maxOf(nameL.size.width / 2f, 6.dp.toPx())
         val x0 = padL
         val step = (size.width - padL - padR) / (COMMUTE_SLOTS - 1)
-        fun xOf(slot: Int) = x0 + step * slot.coerceIn(0, COMMUTE_SLOTS - 1)
+        fun xOf(slot: Float) = x0 + step * slot.coerceIn(0f, (COMMUTE_SLOTS - 1).toFloat())
+        // 기관차가 **덮은** 점은 안 찍는다 — v1.7.12 는 칸이 정수라 `i in slots` 였는데
+        // 이제 자리가 연속이라([commuteAdvance]) **거리로** 판정한다([LOCO_COVERS]).
+        fun covered(i: Int) = pos.any { kotlin.math.abs(it - i) < LOCO_COVERS }
 
         drawLine(line.copy(alpha = 0.32f), Offset(x0, y), Offset(x0 + step * (COMMUTE_SLOTS - 1), y),
             strokeWidth = 3.5.dp.toPx(), cap = StrokeCap.Round)
@@ -238,23 +360,23 @@ private fun CommuteMiniLine(station: CommuteStation, slots: List<Int>, modifier:
         // ⚠ 기관차가 선 칸엔 점을 안 찍는다 — 점이 바퀴 사이로 삐져나와 **턱수염처럼** 보였다
         //   (실측 크롭 둘 다). 그 칸은 기관차가 표시를 대신하고, 어느 역인지는 밑 라벨이 말한다.
         for (i in 0 until COMMUTE_SLOTS - 1) {
-            if (i in slots) continue
-            drawCircle(Color.White, 3.2.dp.toPx(), Offset(xOf(i), y))
-            drawCircle(line, 3.2.dp.toPx(), Offset(xOf(i), y), style = Stroke(1.8.dp.toPx()))
+            if (covered(i)) continue
+            drawCircle(Color.White, 3.2.dp.toPx(), Offset(xOf(i.toFloat()), y))
+            drawCircle(line, 3.2.dp.toPx(), Offset(xOf(i.toFloat()), y), style = Stroke(1.8.dp.toPx()))
         }
-        if (COMMUTE_SLOTS - 1 !in slots)
-            drawCircle(line, 5.4.dp.toPx(), Offset(xOf(COMMUTE_SLOTS - 1), y))
+        val lastX = xOf((COMMUTE_SLOTS - 1).toFloat())
+        if (!covered(COMMUTE_SLOTS - 1)) drawCircle(line, 5.4.dp.toPx(), Offset(lastX, y))
 
         drawText(farL, topLeft = Offset(x0 - farL.size.width / 2f, y + 2.dp.toPx()))
         drawText(nameL, topLeft = Offset(
-            (xOf(COMMUTE_SLOTS - 1) - nameL.size.width / 2f)
+            (lastX - nameL.size.width / 2f)
                 .coerceIn(0f, (size.width - nameL.size.width).coerceAtLeast(0f)),
             y + 2.dp.toPx()))
 
         // 기관차 키 — 선 위에 남은 자리에 맞춘다. 글자배율을 키우면 라벨이 두꺼워져 선이
         // 올라오는데, 그때 아이콘을 안 줄이면 굴뚝이 카드 위로 삐져나간다(배율 1.5 실측 자리).
         val k = (y / LOCO_TOP_ROOM.toPx()).coerceIn(0.55f, 1f)
-        slots.forEach { drawCommuteLoco(xOf(it), y, line, ink, k) }
+        pos.forEach { drawCommuteLoco(xOf(it), y, line, ink, k) }
     }
 }
 

@@ -73,9 +73,17 @@ internal object MapArgb {
     val ClayStationEdge = 0xFFD9D1C2L
     val ClayStationRed = 0xFFE4573FL
     val ClayLabel = 0xFF4E463BL
-    /** **신도림 초록** — 클레이에서만 신도림·성수가 다른 색이다(CAB 는 둘 다 주황) */
-    val ClayKeyA = 0xFF2E9A5EL
-    /** **성수 빨강** */
+    /**
+     * 핵심역 색 — **신도림·양천구청**. v1.7.0 시안은 여기만 **초록 `#2E9A5E`** 이라
+     * 클레이에서 신도림(초록)과 성수(빨강)가 갈렸다.
+     *
+     * ⚠ **v1.7.13 ⑥ 에서 [ClayKeyB] 와 같은 빨강으로 합쳤다.** 카스: *"지금 **성수는 빨간색**
+     * 인데.. **신도림역도 같은 색**으로해줘!"* — 확정 표의 원래 규칙(*"신도림·성수 주황 크게"*)이
+     * **두 역 한 색**이고 남색(CAB)은 [MapArgb.CabKey] 주황 하나로 그렇게 돌고 있었다.
+     * 갈라져 있던 것은 클레이 하나뿐이라 그쪽을 되돌린 셈이다. **초록으로 되돌리지 말 것.**
+     */
+    val ClayKeyA = 0xFFE4573FL
+    /** **성수 빨강** — [ClayKeyA] 와 같은 값이다(v1.7.13 ⑥). 칩 글자 초록은 [ClayChipInk] 다. */
     val ClayKeyB = 0xFFE4573FL
     val ClayOp = 0xFF3F87C9L
     val ClayOtherBody = 0xFFFFFFFFL
@@ -130,9 +138,9 @@ internal data class MapPalette(
     val stationRed: Color,
     /** 역 이름 기본 */
     val label: Color,
-    /** 핵심역 — 신도림(지선은 양천구청도). 클레이 초록 */
+    /** 핵심역 — 신도림(지선은 양천구청도). CAB 주황 · 클레이 빨강(v1.7.13 ⑥ 전엔 초록) */
     val keyA: Color,
-    /** 핵심역 — **성수**. 클레이 빨강. CAB 은 [keyA] 와 같은 주황이다. */
+    /** 핵심역 — **성수**. **v1.7.13 ⑥ 부터 [keyA] 와 늘 같은 색이다**(두 스타일 모두). */
     val keyB: Color,
     /** 운전취급역 6곳 */
     val op: Color,
@@ -183,7 +191,13 @@ internal data class MapPalette(
     /** 툴팁·헤더에서 내 열차를 가리키는 글자색. 크림 바탕에서는 노랑이 안 보인다. */
     val mineText: Color get() = if (clay) mineInk else mineBody
 
-    /** 역 이름 색 — 신도림/양천구청은 [keyA], **성수만** [keyB](CAB 은 둘이 같다). */
+    /**
+     * 역 이름 색 — 신도림/양천구청은 [keyA], **성수만** [keyB].
+     *
+     * ⚠ **v1.7.13 ⑥ 부터 두 값이 같아** 어느 스타일에서도 신도림·성수가 한 색이다
+     * (카스: *"성수는 빨간색인데.. 신도림역도 같은 색으로해줘!"*). 갈래는 **남겨 둔다** —
+     * 팔레트가 다시 갈리면 그때 이 한 줄만 고치면 되고, 지우면 어디를 고쳐야 하는지가 사라진다.
+     */
     fun keyInk(name: String): Color = if (name == "성수") keyB else keyA
 }
 
