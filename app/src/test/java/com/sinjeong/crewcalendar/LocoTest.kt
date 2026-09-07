@@ -11,6 +11,7 @@ import com.sinjeong.crewcalendar.presentation.live.locoFlip
 import com.sinjeong.crewcalendar.presentation.live.locoHalf
 import com.sinjeong.crewcalendar.presentation.live.locoTextDeg
 import com.sinjeong.crewcalendar.presentation.live.mainTrainSide
+import com.sinjeong.crewcalendar.presentation.live.mapCenterNudgePx
 // ⚠ `mainTrainSide` 는 MainLineMap 이 아니라 **Loco** 에 산다 — MainLineMap 최상위의
 // `Color(...)` 가 이 하네스(Compose 미포함)에서 클래스 초기화를 터뜨리기 때문이다.
 import org.junit.Assert.assertEquals
@@ -450,5 +451,28 @@ class LocoTest {
             assertFalse("$h", locoFlip(h, bx, by))
             assertTrue("$h", locoFlip(h, -bx, -by))
         }
+    }
+
+    /**
+     * **접힘 세로 지도 가운데 맞추기**(v1.7.14 ⑩) — 카스: *"노선도가 전체적으로 약간 오른쪽으로
+     * 위치해있는거 같은데? … 약간 왼쪽으로 밀면 될꺼같은데?"*
+     *
+     * 실측(접힘 1080×2400 · density 420): 왼쪽 띠 289px(상태바 142 + namePad 147) ·
+     * 오른쪽 띠 188px(헤더 96 + trainPad 91) → 치우침 **50px**. 한도(31px) 안에서만 민다 —
+     * 캔버스를 **줄이지 않고 옮기는** 값이라 루프 안이 안 좁아진다.
+     */
+    @Test
+    fun `접힘 세로에서만 한도 안에서 지도를 왼쪽으로 민다`() {
+        // 실측 두 띠 → 치우침 50px, 한도 31px 에 걸린다.
+        assertEquals(31, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 188, maxPx = 31))
+        // 한도가 넉넉하면 치우침의 절반을 그대로 민다.
+        assertEquals(50, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 188, maxPx = 99))
+        // 가로(펼침·기기 회전)는 v1.7.9·v1.7.13 확정 화면 — 한 픽셀도 안 민다.
+        assertEquals(0, mapCenterNudgePx(false, leftBandPx = 289, rightBandPx = 188, maxPx = 31))
+        // 헤더 쪽이 더 두꺼우면 **거꾸로 밀지 않는다**.
+        assertEquals(0, mapCenterNudgePx(true, leftBandPx = 188, rightBandPx = 289, maxPx = 31))
+        // 아직 안 잰 줄(첫 프레임)은 손대지 않는다 — 지도가 튀면 안 된다.
+        assertEquals(0, mapCenterNudgePx(true, leftBandPx = 0, rightBandPx = 188, maxPx = 31))
+        assertEquals(0, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 0, maxPx = 31))
     }
 }

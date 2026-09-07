@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
@@ -66,6 +67,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -277,8 +279,26 @@ private const val LABEL_STEP = 1.5f
 /** 보통 역 이름이 내려가는 단수(v1.6.97 — v1.6.96 의 1단에서 한 단 더). */
 private const val LABEL_DROP = 2
 
-/** [LONG_NAME_LEN] 이상 긴 역 이름이 내려가는 단수 — 보통 역보다 한 단 더(v1.6.97). */
-private const val LABEL_DROP_LONG = 3
+/**
+ * [LONG_NAME_LEN] 이상 긴 역 이름이 내려가는 단수 — 보통 역보다 **두 단** 더(v1.7.14 ⑧⑩).
+ *
+ * v1.6.97~v1.7.13 은 3단이었다. 카스: *"텍스트를 조금더 줄여서라도 최적화 시켜줘"* —
+ * 확정 표가 허용하는 길(*"더 줄이려면 **긴 역명만** 줄이고 보통 역은 두지 말 것"*)이 이것뿐이다.
+ * 한 단(1.5sp) 더 내리면 아랫변 최장 `구로디지털단지` 가 선로 중심에서 나가는 깊이가
+ * **182 → 166px**(실측 계산)로 줄어 [namePad] 안쪽으로 들어오고, 그만큼 지도를 왼쪽으로
+ * 옮길 자리가 생긴다([mapCenterNudgePx] ⑩).
+ *
+ * ⚠ **판독 하한 [LABEL_MIN_SP] 7.0sp 는 [labelStyle] 이 지킨다** — 전체 보기(기준 11.5sp)는
+ * 이미 7.0sp 라 **한 픽셀도 안 바뀐다**(11.5 − 1.5×4 = 5.5 → 7.0 으로 되올린다).
+ * 작아지는 것은 **단독 보기(13.5 → 7.5sp)와 펼침**뿐이다.
+ */
+private const val LABEL_DROP_LONG = 4
+
+/**
+ * 역 이름 **판독 하한**(sp) — 확정 표: *"판독 하한은 전체 보기의 7.0sp"*.
+ * [LABEL_DROP_LONG] 을 한 단 내리면서 전체 보기가 그 밑으로 떨어지지 않게 여기서 막는다.
+ */
+private const val LABEL_MIN_SP = 7.0f
 
 /**
  * **긴 역 이름** 잣대 — 글자 수로만 판정한다(사용자 원문 *"긴 5자 넘어가는 긴 역사"*).
@@ -300,6 +320,16 @@ private const val TAG = "BranchLive"
  * 프레임도 먹는다(시안 "구려질 자리" 첫째). 방향 필터를 켜면 대개 이 아래로 떨어진다.
  */
 private const val CLAY_SHADOW_MAX = 15
+
+/**
+ * 접힘 세로에서 지도를 왼쪽으로 옮길 수 있는 **한도**(v1.7.14 ⑩ · [mapCenterNudgePx]).
+ * 아랫변 역명이 상태바 칩에 닿기 전까지다 — 실측 여유 14px 에 [STATUS_HUG] 21px 을 더한 35px
+ * 안쪽으로 잡았다. **보정 손잡이**: 실화면에서 역명이 칩에 닿으면 여기만 줄인다.
+ */
+private val MAP_NUDGE_MAX = 8.dp
+
+/** 상태바 칩 줄을 화면 끝 쪽으로 붙이는 몫(v1.7.14 ⑩) — 터치 최소 48dp 가 남긴 죽은 여백. */
+private val STATUS_HUG = 4.dp
 
 /**
  * 지도 캔버스 **세로 상한 = 가로 × 이 값**(v1.7.13 ⑥가).
@@ -819,9 +849,37 @@ private fun CabScreen(
     /** 내 열차가 **필터에 가려** 지도에 없나 — 헤더가 그 한 토막을 말한다. */
     val mineHidden = mineMark != null && drawn.none { it.trainNo == mineMark.trainNo }
 
+    /*
+     * ── 접힘 세로에서 루프를 **화면 가운데로** (v1.7.14 ⑩) ─────────
+     *
+     * 카스: *"폴더를 접었을때 보면 노선도가 전체적으로 **약간 오른쪽으로 위치**해있는거 같은데?
+     * … 약간 왼쪽으로 밀면 될꺼같은데?"*
+     *
+     * ⚠ **[inset] 탓이 아니다.** 세로에서 지도는 `rotationZ = 90f` 로 도는데, 그러면 이 [Column]
+     * 의 **세로축(자식 쌓이는 방향)이 화면 가로**가 된다. [inset] 의 `start`/`end`(= [safeTop] ·
+     * [safeBottom])는 Column 의 **가로축**이라 화면에서는 **위아래** 여백이다 — 좌우와 무관하다.
+     * 화면 좌우를 정하는 것은 **양 끝 띠 두 벌**이고, 그 산수·한도·왜 줄이지 않고 미는지는
+     * [mapCenterNudgePx] KDoc 에 실측과 함께 적어 두었다.
+     *
+     * 줄 높이는 **재서** 쓴다(상수로 박지 말 것) — 글자배율이 커지면 칩 줄도 같이 커진다.
+     */
+    var headPx by remember { mutableStateOf(0) }
+    var statPx by remember { mutableStateOf(0) }
+    val dens = LocalDensity.current
+    val nudge = with(dens) {
+        mapCenterNudgePx(
+            rotated = mapDeg == 90f,
+            leftBandPx = if (statPx == 0) 0 else statPx + namePad(big).roundToPx(),
+            rightBandPx = if (headPx == 0) 0 else headPx + trainPad(big).roundToPx(),
+            maxPx = MAP_NUDGE_MAX.roundToPx(),
+        ).toDp()
+    }
+
     Column(Modifier.fillMaxSize().padding(inset)) {
-        CabHeader(nowMillis, mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
-            delay, nextSec, mineHidden, big, pal, onRefresh, onDismiss)
+        Box(Modifier.onSizeChanged { headPx = it.height }) {
+            CabHeader(nowMillis, mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
+                delay, nextSec, mineHidden, big, pal, onRefresh, onDismiss)
+        }
         /*
          * ── 루프가 정사각형이 되는 것을 막는다 (v1.7.13 ⑥가) ─────────
          *
@@ -912,7 +970,9 @@ private fun CabScreen(
                 Canvas(
                     // ⚠ 세로는 [mapH](= 가로 × [LOOP_MAX_H] 상한)다 — `fillMaxSize` 로 되돌리면
                     //   펼침에서 루프가 다시 정사각형이 된다(v1.7.13 ⑥가).
-                    Modifier.fillMaxWidth().height(mapH).pointerInput(Unit) {
+                    // ⚠ [nudge] 는 **옮기기**다(크기를 안 줄인다 — [mapCenterNudgePx] ⑩).
+                    //   `padding` 으로 바꾸면 루프 안이 좁아져 배율 1.5 에서 라벨이 겹친다.
+                    Modifier.fillMaxWidth().height(mapH).offset(y = nudge).pointerInput(Unit) {
                         detectTapGestures { tap ->
                             fun dist(o: Offset) =
                                 hypot((o.x - tap.x).toDouble(), (o.y - tap.y).toDouble())
@@ -941,8 +1001,14 @@ private fun CabScreen(
                 }
             }
         }
-        CabStatusBar(mine, mineMark, candidates, emptyMsg, error != null && trains.isEmpty(),
-            big, pal, eff, onFilter)
+        // ⚠ `offset` 은 **신고 높이를 안 바꾼다** — 칩 알약만 화면 끝 쪽으로 8dp 붙여
+        //   아랫변 역명이 다가올 자리를 벌어 준다(⑩ · [mapCenterNudgePx] KDoc).
+        //   세로에서 Column 의 아래쪽이 곧 화면 **왼쪽 끝**이다.
+        Box(Modifier.onSizeChanged { statPx = it.height }
+            .offset(y = if (mapDeg == 90f) STATUS_HUG else 0.dp)) {
+            CabStatusBar(mine, mineMark, candidates, emptyMsg, error != null && trains.isEmpty(),
+                big, pal, eff, onFilter)
+        }
     }
 }
 
@@ -1415,8 +1481,10 @@ private fun labelStyle(name: String, sizeSp: Float, pal: MapPalette): TextStyle 
     return TextStyle(
         fontSize = (
             if (key) sizeSp + 2f
-            else sizeSp - LABEL_STEP *
-                (if (name.length >= LONG_NAME_LEN) LABEL_DROP_LONG else LABEL_DROP)
+            else (sizeSp - LABEL_STEP *
+                (if (name.length >= LONG_NAME_LEN) LABEL_DROP_LONG else LABEL_DROP))
+                // ⚠ 판독 하한 — 전체 보기 긴 역명이 5.5sp 로 떨어지는 것을 막는다(v1.7.14).
+                .coerceAtLeast(LABEL_MIN_SP)
             ).sp,
         fontWeight = if (key) FontWeight.ExtraBold else FontWeight.Medium,
         color = when {
