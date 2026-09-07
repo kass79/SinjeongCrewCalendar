@@ -6,40 +6,51 @@ import com.sinjeong.crewcalendar.presentation.live.COMMUTE_HERE
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_LINE_FALLBACK_ARGB
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_NEAR
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_SLOTS
+import com.sinjeong.crewcalendar.presentation.live.CommuteStation
 import com.sinjeong.crewcalendar.presentation.live.LINE_ARGB
 import com.sinjeong.crewcalendar.presentation.live.LINE_NAMES
 import com.sinjeong.crewcalendar.presentation.live.LINE_NUMS
+import com.sinjeong.crewcalendar.presentation.live.PositionRow
 import com.sinjeong.crewcalendar.presentation.live.StationRow
 import com.sinjeong.crewcalendar.presentation.live.WHITE_ARGB
 import com.sinjeong.crewcalendar.presentation.live.approachFromHigher
 import com.sinjeong.crewcalendar.presentation.live.chipInkArgb
-import com.sinjeong.crewcalendar.presentation.live.commuteAdvance
-import com.sinjeong.crewcalendar.presentation.live.commuteNeighbors
-import com.sinjeong.crewcalendar.presentation.live.commuteSlot
+import com.sinjeong.crewcalendar.presentation.live.commuteLead
+import com.sinjeong.crewcalendar.presentation.live.commuteOffset
+import com.sinjeong.crewcalendar.presentation.live.commuteStops
+import com.sinjeong.crewcalendar.presentation.live.commuteTrains
 import com.sinjeong.crewcalendar.presentation.live.contrastRatio
+import com.sinjeong.crewcalendar.presentation.live.destText
 import com.sinjeong.crewcalendar.presentation.live.frKey
 import com.sinjeong.crewcalendar.presentation.live.lineArgb
 import com.sinjeong.crewcalendar.presentation.live.lineNumOf
+import com.sinjeong.crewcalendar.presentation.live.normStop
+import com.sinjeong.crewcalendar.presentation.live.posDirMatches
+import com.sinjeong.crewcalendar.presentation.live.sttusText
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 출퇴근 역 **미니 노선**(v1.7.12 ①)의 칸 좌표·호선 색·앞뒤 2역 차례를 잠근다.
+ * 출퇴근 역 **미니 노선**의 열차 자리·호선 색·역 차례를 잠근다.
  *
- * ⚠ **v1.7.14 ⑤ 에서 자가 통째로 바뀌었다** — 칸이 6개(왼쪽 끝 `5번째 전역+` … 오른쪽 끝
- * 등록역)에서 **5개**가 되고 **등록역이 한가운데**([COMMUTE_HERE] = 2)로 왔다. 그래서 열차는
- * `0..2` 에만 서고 오른쪽 두 칸은 **열차가 이 다음에 갈 역**이다.
+ * ## ⚠ v1.7.15 ① 에서 자료가 통째로 바뀌었다 — **도착 예보 → 실시간 위치**
  *
- * `arvlMsg2` 는 승강장 전광판 문장이라 꼴이 여러 가지고, **모르는 꼴이 와도 절대 예외가 나면
- * 안 된다** — 상세시트가 통째로 죽는다.
+ * 카스: *"출근역 살펴보니까 **실시간 지하철위치가 아닌거 같은데?**"* → *"난 실시간 위치를 원하지"*.
+ * v1.7.14 까지는 전광판 문장(`arvlMsg2` = `"3번째 전역"`·`"8분 후"`)을 정규식으로 읽어 칸을
+ * **추정**했고 모르면 맨 왼쪽에 놓았다. 그래서 5역 밖 열차가 두 역 앞처럼 보였다.
+ * 이제 `realtimePosition` 의 `statnNm` 을 다섯 칸 이름과 **글자로 견주고**, 어느 칸에도
+ * 없으면 **아예 안 그린다.** 그 판정을 여기서 잠근다.
+ *
+ * 위치 추정 함수 다섯(`commuteSlot`·`commuteAdvance`·`commuteApproaching`·`commuteAtStation`·
+ * `positionText`)과 그 테스트는 **지웠다** — 남겨 두면 다시 쓴다.
  */
 class CommuteMiniTest {
 
-    /** 열차가 설 수 있는 마지막 칸 = 등록한 역 칸. v1.7.13 까지는 `COMMUTE_SLOTS - 1` 이었다. */
-    private val last = COMMUTE_HERE
+    /* ── 칸 ──────────────────────────────────────────────────── */
 
     @Test
     fun `칸은 다섯이고 등록역이 한가운데다`() {
@@ -50,87 +61,230 @@ class CommuteMiniTest {
         assertEquals(COMMUTE_SLOTS, COMMUTE_NEAR * 2 + 1)
     }
 
-    /* ── arvlCd 우선 ─────────────────────────────────────────── */
+    /* ── ① 방향: 위치 API 의 숫자 ↔ 도착 API 의 낱말 ──────────
+     *
+     * 2026-09-07 20:27~28 실호출로 **같은 순간 두 API 를 나란히** 불러 열번으로 맞대 봤다:
+     *   5호선 `5656` 도착 `상행` ↔ 위치 `"0"`   ·  5호선 `5703` 도착 `하행` ↔ 위치 `"1"`
+     *   2호선 `8414`·`6416` 도착 `내선` ↔ 위치 `"0"` · 2호선 `4439`·`7443` 도착 `외선` ↔ `"1"`
+     * **여섯 대에 예외 0건**이다.
+     */
 
     @Test
-    fun `진입 0 도착 1 은 글자와 무관하게 역 점 위`() {
-        assertEquals(last, commuteSlot("3번째 전역", "0"))
-        assertEquals(last, commuteSlot("6분 후", "1"))
-        assertEquals(last, commuteSlot("", "0"))
+    fun `위치 0 은 상행 내선 이고 1 은 하행 외선 이다`() {
+        assertTrue(posDirMatches("0", "상행"))
+        assertTrue(posDirMatches("0", "내선"))
+        assertTrue(posDirMatches("1", "하행"))
+        assertTrue(posDirMatches("1", "외선"))
+        assertFalse(posDirMatches("1", "상행"))
+        assertFalse(posDirMatches("1", "내선"))
+        assertFalse(posDirMatches("0", "하행"))
+        assertFalse(posDirMatches("0", "외선"))
+        // 공백이 섞여도 같은 판정
+        assertTrue(posDirMatches(" 0 ", " 내선 "))
+    }
+
+    /**
+     * ⚠ **모르면 안 그린다.** 방향을 모르는 채로 그리느니 비우는 쪽이 맞다 —
+     * 이번 회차가 고치는 것이 바로 "모르면 아무 데나 놓기"다.
+     */
+    @Test
+    fun `모르는 방향 낱말과 빈 값은 아무것도 안 맞는다`() {
+        assertFalse(posDirMatches("0", ""))
+        assertFalse(posDirMatches("", "상행"))
+        assertFalse(posDirMatches("", ""))
+        assertFalse(posDirMatches("0", "위쪽"))
+        assertFalse(posDirMatches("9", "상행"))
+    }
+
+    /* ── ① 역 이름 대조 ──────────────────────────────────────── */
+
+    /**
+     * 위치 응답은 괄호 별칭을 달고 오는데(`굽은다리(강동구민회관앞)`·`신정(은행정)`)
+     * 역 목록 API 의 `STATION_NM` 은 **괄호 없이** 온다 — 2026-09-07 `05호선` 56행 전수에
+     * 괄호가 든 이름이 **0개**였다.
+     */
+    @Test
+    fun `괄호 별칭은 떼고 역 은 안 뗀다`() {
+        assertEquals("굽은다리", normStop("굽은다리(강동구민회관앞)"))
+        assertEquals("신정", normStop("신정(은행정)"))
+        assertEquals("오목교", normStop("오목교(목동운동장앞)"))
+        assertEquals("마곡", normStop(" 마곡 "))
+        // ⚠ `서울역` 을 `서울`(GTX-A 의 다른 역)로 바꾸지 않는다
+        assertEquals("서울역", normStop("서울역"))
+        assertEquals("", normStop(""))
     }
 
     @Test
-    fun `출발 2 도 좌표는 나온다 - 화면이 거를 뿐 함수는 안 죽는다`() {
-        // `commuteApproaching` 이 2 를 빼지만 함수 자체는 어떤 값이 와도 0..last 를 돌려준다.
-        assertTrue(commuteSlot("당역 출발", "2") in 0..last)
-        assertTrue(commuteSlot("", "2") in 0..last)
-    }
-
-    /* ── arvlMsg2 글자꼴 ─────────────────────────────────────── */
-
-    @Test
-    fun `N번째 전역 은 2 빼기 N`() {
-        // v1.7.14 ⑤ — 칸이 여섯에서 **다섯**이 되고 등록역이 가운데(2)로 왔다.
-        // 카스: *"그냥 전후 두단계로 하자."* 그래서 2역보다 먼 열차는 **다 맨 왼쪽**이다.
-        assertEquals(2, commuteSlot("0번째 전역", "99"))
-        assertEquals(1, commuteSlot("1번째 전역", "99"))
-        assertEquals(0, commuteSlot("2번째 전역", "99"))
-        assertEquals(0, commuteSlot("3번째 전역", "99"))
-        assertEquals(0, commuteSlot("5번째 전역", "99"))
-        assertEquals(1, commuteSlot("[1]번째 전역 (오목교(목동운동장앞))", "99"))
-        assertEquals(1, commuteSlot("1 번째  전역", "99")) // 사이 공백이 섞여도 같은 칸
+    fun `종착역명은 꼬리를 떼고 행 을 붙인다`() {
+        assertEquals("성수행", destText("성수종착"))
+        assertEquals("신도림행", destText("신도림지선"))
+        assertEquals("방화행", destText("방화"))
+        assertEquals("까치산행", destText("까치산행"))     // 이미 `행` 이면 두 번 안 붙인다
+        assertEquals("신정행", destText("신정(은행정)"))
+        assertEquals("", destText(""))
+        assertEquals("", destText("   "))
     }
 
     @Test
-    fun `칸을 넘는 숫자는 가장 먼 칸으로 떨어진다`() {
-        assertEquals(0, commuteSlot("12번째 전역", "99"))
-        assertEquals(0, commuteSlot("99999999999999번째 전역", "99")) // Int 범위 밖 — 안 죽는다
+    fun `상태 낱말은 본선 지도와 같은 표다`() {
+        assertEquals("진입", sttusText("0"))
+        assertEquals("도착", sttusText("1"))
+        assertEquals("출발", sttusText("2"))
+        assertEquals("접근 중", sttusText("3"))
+        assertEquals("운행 중", sttusText("99"))
+        assertEquals("운행 중", sttusText(""))
+        assertEquals("운행 중", sttusText("abc"))
     }
 
-    @Test
-    fun `숫자 없는 전역 은 한 정거장 전`() {
-        assertEquals(last - 1, commuteSlot("전역 도착", "5"))
-        assertEquals(last - 1, commuteSlot("전역 진입", "4"))
-        assertEquals(last - 1, commuteSlot("까치산 전역출발", "3"))
-    }
+    /* ── ② 미세 위치는 **진행 방향**으로 붙는다 ─────────────── */
 
     @Test
-    fun `전전역 은 두 정거장 전 - 2026-09-07 5호선 마곡 실화면 꼴`() {
-        // v1.7.9 설계 때 못 본 꼴. `전역` 만 보면 두 정거장 전 열차를 한 정거장 전에 세운다.
-        assertEquals(last - 2, commuteSlot("전전역 출발", "3"))
-        assertEquals(last - 2, commuteSlot("전전역 도착", "5"))
-        // 세 정거장 전은 칸 밖이라 맨 왼쪽(0)에 모인다.
-        assertEquals(0, commuteSlot("전전전역 출발", "3"))
-        // 역 이름에 붙어 있으면 안 집는다 — arvlCd 로 떨어진다.
-        assertEquals(last - 1, commuteSlot("무슨전역 출발", "3"))
+    fun `진입은 진행 방향 앞 출발은 뒤다`() {
+        // 왼쪽 → 오른쪽(forward)
+        assertEquals(-0.15f, commuteOffset("0", true), 1e-6f)
+        assertEquals(0f, commuteOffset("1", true), 1e-6f)
+        assertEquals(0.15f, commuteOffset("2", true), 1e-6f)
+        assertEquals(-0.6f, commuteOffset("3", true), 1e-6f)
+        // 오른쪽 → 왼쪽이면 **부호가 통째로 뒤집힌다**
+        assertEquals(0.15f, commuteOffset("0", false), 1e-6f)
+        assertEquals(0f, commuteOffset("1", false), 1e-6f)
+        assertEquals(-0.15f, commuteOffset("2", false), 1e-6f)
+        assertEquals(0.6f, commuteOffset("3", false), 1e-6f)
+        // 모르는 코드는 역 위(0) — 예외 없음
+        assertEquals(0f, commuteOffset("99", true), 1e-6f)
+        assertEquals(0f, commuteOffset("", false), 1e-6f)
     }
 
-    @Test
-    fun `당역 은 역 점 위`() {
-        assertEquals(last, commuteSlot("당역 도착", "99"))
-        assertEquals(last, commuteSlot("당역 진입", "99"))
-    }
+    /* ── ① 열차 고르기 ──────────────────────────────────────── */
+
+    /** 마곡(5호선) 다섯 칸 — 지리 오름차순 고정. `상행` 은 오른쪽에서 온다(`fromHigher`). */
+    private val magokUp = CommuteStation(
+        "마곡", "1005", "상행",
+        listOf("김포공항", "송정", "마곡", "발산", "우장산"), fromHigher = true,
+    )
+    private val magokDown = magokUp.copy(updnLine = "하행", fromHigher = false)
+
+    private fun pos(
+        no: String, statn: String, updn: String, sttus: String = "1",
+        line: String = "1005", dest: String = "방화",
+    ) = PositionRow(line, statn, no, updn, dest, sttus)
+
+    /**
+     * 2026-09-07 20:27:49 `realtimePosition/5호선` 실응답에서 마곡 부근 세 대를 그대로 옮겼다
+     * (+ 다섯 칸 밖 한 대). `5656` 은 같은 순간 마곡 도착 응답에도 `상행` 으로 떠 있었다.
+     */
+    private val line5rows = listOf(
+        pos("5656", "발산", "0", "1"),                       // 상행 · 발산 도착
+        pos("5177", "발산", "1", "1", dest = "하남검단산"),    // 하행 · 발산 도착
+        pos("5703", "김포공항", "1", "1", dest = "마천"),      // 하행 · 김포공항 도착
+        pos("5190", "굽은다리(강동구민회관앞)", "0", "3"),      // **다섯 칸 밖** — 안 그린다
+        pos("2340", "발산", "0", "1", line = "1002"),         // 다른 호선 — 안 그린다
+    )
 
     @Test
-    fun `남은 시간 문장이면 상태코드가 위치를 말한다`() {
-        // "5분 30초 후" 에는 위치가 없다 — arvlCd 3·4·5 가 전역임을 알려 준다.
-        assertEquals(last - 1, commuteSlot("5분 30초 후", "5"))
-        assertEquals(last - 1, commuteSlot("6분 후 (오목교(목동운동장앞))", "3"))
-        // 99(운행중)는 아직 멀다 — 맨 왼쪽
-        assertEquals(0, commuteSlot("8분 후", "99"))
-        assertEquals(0, commuteSlot("8분 후 (마곡)", "99"))
+    fun `같은 호선 같은 방향 그리고 다섯 칸 안 인 열차만 그린다`() {
+        val up = commuteTrains(line5rows, magokUp)
+        assertEquals(listOf("5656"), up.map { it.trainNo })
+        assertEquals(3, up[0].slot)                          // 발산 = 오른쪽 첫 칸
+        assertEquals("도착", up[0].status)
+        assertEquals("방화행", up[0].dest)
+
+        val down = commuteTrains(line5rows, magokDown)
+        assertEquals(listOf("5177", "5703"), down.map { it.trainNo })
+        assertEquals(listOf(3, 0), down.map { it.slot })
     }
 
+    /**
+     * ⚠ **이번 회차가 고치는 거짓말** — v1.7.14 는 `commuteSlot` 이 `coerceIn(0, here)` 라
+     * 다섯 칸 밖 열차를 **맨 왼쪽 칸에 밀어 넣었다**(5역 밖이 두 역 앞처럼 보였다).
+     */
     @Test
-    fun `예상 밖 글자와 빈 값에도 0부터 등록역 칸 안이고 예외가 없다`() {
-        val weird = listOf(
-            "", "   ", "???", "전 역", "번째", "0번째 전역", "-3번째 전역",
-            "출발", "🚃", "3번째전역이 아님", "N번째 전역",
+    fun `다섯 칸 밖 열차는 맨 왼쪽이 아니라 아예 안 그려진다`() {
+        val far = listOf(
+            pos("5190", "굽은다리(강동구민회관앞)", "0"),
+            pos("5192", "여의도", "0"),
+            pos("5194", "군자", "0"),
         )
-        val codes = listOf("", "0", "1", "2", "3", "4", "5", "99", "7", "abc")
-        weird.forEach { m -> codes.forEach { c ->
-            assertTrue("$m / $c", commuteSlot(m, c) in 0..last)
-        } }
+        assertEquals(emptyList<String>(), commuteTrains(far, magokUp).map { it.trainNo })
+        // 한 대만 칸 안에 있으면 **그 한 대만** 나온다
+        assertEquals(
+            listOf("5656"),
+            commuteTrains(far + pos("5656", "송정", "0"), magokUp).map { it.trainNo },
+        )
+    }
+
+    /** 괄호 별칭이 붙은 위치 이름도 칸 이름과 만난다(`신정(은행정)` ↔ `신정`). */
+    @Test
+    fun `괄호 별칭 이름도 칸을 찾는다`() {
+        val s = CommuteStation(
+            "목동", "1005", "상행",
+            listOf("까치산", "신정", "목동", "오목교", "양평"), fromHigher = true,
+        )
+        val got = commuteTrains(listOf(pos("5601", "신정(은행정)", "0")), s)
+        assertEquals(listOf("5601"), got.map { it.trainNo })
+        assertEquals(1, got[0].slot)
+    }
+
+    /**
+     * ⚠ **이름을 못 얻은 등록값은 빈 목록**이다(옛 저장값) — 견줄 상대가 없다.
+     * 화면은 그때 *"역을 다시 등록해 주세요"* 라고 말한다.
+     */
+    @Test
+    fun `다섯 칸 이름이 없으면 아무것도 안 그린다`() {
+        val old = CommuteStation("마곡", "1005", "상행")
+        assertEquals(emptyList<String>(), commuteTrains(line5rows, old).map { it.trainNo })
+        val short = old.copy(stops = listOf("김포공항", "송정", "마곡", "발산"))
+        assertEquals(emptyList<String>(), commuteTrains(line5rows, short).map { it.trainNo })
+    }
+
+    @Test
+    fun `자리는 늘 0 과 마지막 칸 사이고 예외가 없다`() {
+        val last = (COMMUTE_SLOTS - 1).toFloat()
+        val sttuses = listOf("", "0", "1", "2", "3", "9", "99", "abc")
+        for (name in magokUp.stops) for (c in sttuses) for (s in listOf(magokUp, magokDown)) {
+            val got = commuteTrains(listOf(pos("t", name, if (s.fromHigher) "0" else "1", c)), s)
+            got.forEach {
+                assertTrue("$name/$c → ${it.pos}", it.pos in 0f..last && !it.pos.isNaN())
+            }
+        }
+        // 끝 칸에서 **진행 방향 밖으로** 나가려 해도 눌러 앉힌다(하행 = 왼→오른, 우장산 출발).
+        val edge = commuteTrains(listOf(pos("t", "우장산", "1", "2")), magokDown)
+        assertEquals(4f, edge[0].pos, 1e-6f)
+        // 반대 방향은 그 자리에서 **뒤로** 벌어진다(상행 = 오른→왼, 우장산 출발 → 4 − 0.15).
+        val back = commuteTrains(listOf(pos("t", "우장산", "0", "2")), magokUp)
+        assertEquals(3.85f, back[0].pos, 1e-6f)
+    }
+
+    @Test
+    fun `같은 열번이 두 줄로 와도 한 대만 그린다`() {
+        val dup = listOf(pos("5656", "발산", "0"), pos("5656", "송정", "0"))
+        assertEquals(1, commuteTrains(dup, magokUp).size)
+    }
+
+    /* ── 오른쪽 두 줄이 말할 한 대 ──────────────────────────── */
+
+    /**
+     * 지나간 열차는 안 고른다 — `상행`(오른쪽에서 옴)이면 **등록역 칸 오른쪽**이 다가오는 쪽이다.
+     */
+    @Test
+    fun `오른쪽 줄은 다가오는 쪽에서 가장 가까운 열차다`() {
+        val up = commuteTrains(
+            listOf(pos("far", "우장산", "0"), pos("near", "발산", "0"), pos("gone", "송정", "0")),
+            magokUp,
+        )
+        assertEquals("near", commuteLead(up, fromHigher = true)?.trainNo)
+        val down = commuteTrains(
+            listOf(pos("far", "김포공항", "1"), pos("near", "송정", "1"), pos("gone", "발산", "1")),
+            magokDown,
+        )
+        assertEquals("near", commuteLead(down, fromHigher = false)?.trainNo)
+        // 등록역 칸에 선 열차가 있으면 그것이 가장 가깝다
+        val here = commuteTrains(listOf(pos("here", "마곡", "0"), pos("far", "우장산", "0")), magokUp)
+        assertEquals("here", commuteLead(here, fromHigher = true)?.trainNo)
+        // 지나간 쪽에만 있으면 고를 것이 없다(빈 상태 문구로 떨어진다)
+        val passed = commuteTrains(listOf(pos("gone", "송정", "0")), magokUp)
+        assertNull(commuteLead(passed, fromHigher = true))
+        assertNull(commuteLead(emptyList(), fromHigher = false))
     }
 
     /* ── 호선 색 ─────────────────────────────────────────────── */
@@ -180,7 +334,7 @@ class CommuteMiniTest {
     fun `대비비 산수가 WCAG 값과 맞는다`() {
         assertEquals(21.0, contrastRatio(WHITE_ARGB, BLACK_ARGB), 1e-6)
         assertEquals(1.0, contrastRatio(0xFF123456L, 0xFF123456L), 1e-9)
-        // 5호선 보라 위 흰 글자가 **4.5:1 에 못 미친다** — 이번 ④ 의 출발점이다.
+        // 5호선 보라 위 흰 글자가 **4.5:1 에 못 미친다** — v1.7.14 ④ 의 출발점이다.
         assertEquals(4.12, contrastRatio(0xFF996CACL, WHITE_ARGB), 0.01)
         assertEquals(5.10, contrastRatio(0xFF996CACL, BLACK_ARGB), 0.01)
     }
@@ -207,7 +361,7 @@ class CommuteMiniTest {
         assertEquals(4.71, contrastRatio(0xFFE6186CL, chipInkArgb(0xFFE6186CL)), 0.01)
     }
 
-    /* ── ⑤ 앞뒤 2역 (v1.7.14) ───────────────────────────────── */
+    /* ── ② 다섯 칸 이름 — 지리 순서 고정 ────────────────────── */
 
     /** 2026-09-07 `SearchSTNBySubwayLineInfo/05호선` 실응답에서 뽑은 앞머리 아홉 역 */
     private val line5 = listOf(
@@ -228,40 +382,24 @@ class CommuteMiniTest {
 
     /**
      * 카스의 예 그대로: *"마곡역이면 **김포공항-송정-마곡-발산-우장산**"*.
-     * 그가 등록한 것은 `마곡 · 하행`(발산 방면 = 큰 번호 쪽으로 간다)이라 열차가 **작은 번호
-     * 쪽에서** 온다 → `fromHigher = false` → 오름차순.
+     *
+     * ⚠ **v1.7.14 의 `approachFromHigher` 인자가 없어졌다** — 카스가 물렸다:
+     * *"상행을 고르면 **열차가 반대방향으로 가면 되지**"*. 차례는 `FR_CODE` 오름차순 하나다.
      */
     @Test
-    fun `마곡의 앞뒤 2역은 김포공항 송정 발산 우장산`() {
+    fun `마곡의 다섯 칸은 김포공항 송정 마곡 발산 우장산`() {
         assertEquals(
-            listOf("김포공항", "송정", "발산", "우장산"),
-            commuteNeighbors(line5, "마곡", approachFromHigher = false),
+            listOf("김포공항", "송정", "마곡", "발산", "우장산"),
+            commuteStops(line5, "마곡"),
         )
+        // `역` 을 붙여 쳐도 같은 줄을 찾는다
+        assertEquals(commuteStops(line5, "마곡"), commuteStops(line5, "마곡역"))
     }
 
     @Test
-    fun `역 을 붙여 쳐도 같은 줄을 찾는다`() {
-        assertEquals(
-            listOf("김포공항", "송정", "발산", "우장산"),
-            commuteNeighbors(line5, "마곡역", approachFromHigher = false),
-        )
-    }
-
-    /** 반대 방향이면 **열차가 늘 왼쪽에서 오도록** 차례를 뒤집는다. */
-    @Test
-    fun `상행이면 차례가 뒤집힌다`() {
-        assertEquals(
-            listOf("우장산", "발산", "송정", "김포공항"),
-            commuteNeighbors(line5, "마곡", approachFromHigher = true),
-        )
-    }
-
-    @Test
-    fun `끝 역은 모자라는 자리가 빈칸이다`() {
-        assertEquals(
-            listOf("", "", "개화산", "김포공항"),
-            commuteNeighbors(line5, "방화", approachFromHigher = false),
-        )
+    fun `끝 역은 모자라는 자리가 빈칸이고 개수는 늘 다섯이다`() {
+        assertEquals(listOf("", "", "방화", "개화산", "김포공항"), commuteStops(line5, "방화"))
+        assertEquals(COMMUTE_SLOTS, commuteStops(line5, "방화").size)
     }
 
     /**
@@ -271,8 +409,8 @@ class CommuteMiniTest {
     @Test
     fun `본선 역은 지선 줄을 건너뛴다`() {
         assertEquals(
-            listOf("구로디지털단지", "대림", "문래", "영등포구청"),
-            commuteNeighbors(line2, "신도림", approachFromHigher = false),
+            listOf("구로디지털단지", "대림", "신도림", "문래", "영등포구청"),
+            commuteStops(line2, "신도림"),
         )
     }
 
@@ -280,12 +418,12 @@ class CommuteMiniTest {
     @Test
     fun `지선 역은 제 갈래만 보고 종점 뒤는 빈칸이다`() {
         assertEquals(
-            listOf("양천구청", "신정네거리", "", ""),
-            commuteNeighbors(line2, "까치산", approachFromHigher = false),
+            listOf("양천구청", "신정네거리", "까치산", "", ""),
+            commuteStops(line2, "까치산"),
         )
         assertEquals(
-            listOf("", "신도림", "양천구청", "신정네거리"),
-            commuteNeighbors(line2, "도림천", approachFromHigher = false),
+            listOf("", "신도림", "도림천", "양천구청", "신정네거리"),
+            commuteStops(line2, "도림천"),
         )
     }
 
@@ -293,16 +431,16 @@ class CommuteMiniTest {
     fun `접두가 다르면 다른 갈래다`() {
         // 5호선 까치산(518) 뒤는 마천지선 `P549` 가 아니다 — 이 표본에는 519가 없어 빈칸이다.
         assertEquals(
-            listOf("우장산", "화곡", "", ""),
-            commuteNeighbors(line5, "까치산", approachFromHigher = false),
+            listOf("우장산", "화곡", "까치산", "", ""),
+            commuteStops(line5, "까치산"),
         )
     }
 
     @Test
     fun `모르는 역이면 빈 목록이고 예외가 없다`() {
-        assertEquals(emptyList<String>(), commuteNeighbors(line5, "없는역", false))
-        assertEquals(emptyList<String>(), commuteNeighbors(emptyList(), "마곡", false))
-        assertEquals(emptyList<String>(), commuteNeighbors(line5, "", false))
+        assertEquals(emptyList<String>(), commuteStops(line5, "없는역"))
+        assertEquals(emptyList<String>(), commuteStops(emptyList(), "마곡"))
+        assertEquals(emptyList<String>(), commuteStops(line5, ""))
     }
 
     @Test
@@ -319,16 +457,27 @@ class CommuteMiniTest {
     /**
      * 어느 쪽에서 오나 — 응답의 `statnFid`(이전역)와 `statnId`(이 역) 비교 하나다.
      * 2026-09-07 마곡 실호출: `statnId=1005000514` · `statnFid=1005000515`(발산) = **상행**.
+     *
+     * ⚠ v1.7.15 ② 부터 이 값은 **역 차례가 아니라 기관차 진행 방향**을 정한다.
+     * ⚠ **낱말에서 유도하면 안 된다** — 5호선 `상행` 은 내림차순인데 2호선 `내선` 은 오름차순이다
+     *   (신도림 내선 실응답 `statnFid=1002000233 < statnId=1002000234` → false).
      */
     @Test
     fun `statnFid 가 크면 큰 번호 쪽에서 온다`() {
         val up = ArrivalRow(
-            "5120", "방화", 420, "99", "1005", "상행",
+            "5656", "방화", 120, "5", "1005", "상행",
             statnId = "1005000514", statnFid = "1005000515",
         )
         assertTrue(approachFromHigher(up))
         val down = up.copy(statnFid = "1005000513")
         assertEquals(false, approachFromHigher(down))
+        // 2호선 내선은 **오름차순**이다 — 같은 `"0"` 인데 5호선 상행과 지리 방향이 반대다.
+        val inner = ArrivalRow(
+            "8414", "성수", 10, "0", "1002", "내선",
+            statnId = "1002000234", statnFid = "1002000233",
+        )
+        assertEquals(false, approachFromHigher(inner))
+        assertTrue(approachFromHigher(inner.copy(updnLine = "외선", statnFid = "1002000235")))
         // 값이 없거나 숫자가 아니면 오름차순(false) — 카스가 든 예의 차례다.
         assertEquals(false, approachFromHigher(null))
         assertEquals(false, approachFromHigher(ArrivalRow("x", "방화", 1, "99")))
@@ -346,84 +495,5 @@ class CommuteMiniTest {
         // 이름 표에 있는 id 는 **동북선 하나만** 빠진다(개통 전이라 응답에 없다).
         assertEquals(setOf("1095"), LINE_NAMES.keys - LINE_NUMS.keys)
         assertEquals(emptySet<String>(), LINE_NUMS.keys - LINE_NAMES.keys)
-    }
-
-    /* ── 칸 사이 보간 (v1.7.13 ①) ────────────────────────────
-     *
-     * 카스: *"역으로 다가오는 열차아이콘이 안움직이는데?"* — [commuteAdvance] 가 남은 초로
-     * 칸 사이를 메운다. 확정 표 "열차 이동 = 시간 기반 등속 전진"의 세 조항을 잠근다.
-     */
-
-    @Test
-    fun `처음 본 열차는 그 칸에서 시작한다`() {
-        assertEquals(0f, commuteAdvance(null, 0, 300, 0f), 1e-4f)
-        assertEquals(1f, commuteAdvance(null, 1, 120, 9f), 1e-4f)  // dt 가 있어도 튀지 않는다
-    }
-
-    @Test
-    fun `시간이 흐르면 등속으로 앞으로 간다`() {
-        // 칸 0 · 남은 200초 → 남은 칸 2개를 200초에 = **한 칸에 100초**.
-        assertEquals(0.01f, commuteAdvance(0f, 0, 200, 1f), 1e-4f)
-        assertEquals(0.10f, commuteAdvance(0f, 0, 200, 10f), 1e-4f)
-        // 1초 눈금을 열 번 밟아도 같은 자리에 온다(누적).
-        var p = 0f
-        repeat(10) { p = commuteAdvance(p, 0, 200, 1f) }
-        assertEquals(0.10f, p, 1e-3f)
-    }
-
-    /**
-     * ⚠ **v1.7.13 ① 을 처음 만들 때 낸 버그를 잠근다.** 자리를 "칸 + 흐른 초"로 매번 다시
-     * 계산했더니 15초 폴링마다 계산값이 칸으로 되감겨, 뒷걸음은 안 하지만 **13초를 붙박여**
-     * 있었다(에뮬 실측 2026-09-07 03:58, 5호선 마곡). 걸음을 더하는 지금 꼴은 안 멎는다.
-     */
-    @Test
-    fun `폴링이 와도 자리가 안 멎는다`() {
-        var p = commuteAdvance(null, 0, 300, 0f)                   // 조회 ① 눈금 300초
-        repeat(15) { p = commuteAdvance(p, 0, 300, 1f) }           // 15초 흐름
-        assertEquals(0.10f, p, 1e-3f)                              // 한 칸 150초 → 0.10칸
-        val after = commuteAdvance(p, 0, 285, 1f)                  // 조회 ② 같은 칸·줄어든 눈금
-        assertTrue("폴링 뒤에도 이어 가야 한다 ($p → $after)", after > p)
-    }
-
-    @Test
-    fun `다음 칸을 절대 안 넘는다`() {
-        // 응답이 늦어 걸음이 커져도 예측은 한 칸에서 선다 — 있지도 않은 도착을 안 그린다.
-        assertEquals(1f, commuteAdvance(0f, 0, 300, 99_999f), 1e-4f)
-        assertEquals(1f, commuteAdvance(0.5f, 0, 60, 600f), 1e-4f)
-        // 남은 초가 0 이하로 와도 마찬가지(0 나눗셈 없음).
-        assertEquals(1f, commuteAdvance(0f, 0, 0, 5f), 1e-4f)
-        assertEquals(1f, commuteAdvance(0f, 0, -5, 3f), 1e-4f)
-        // 등록역 칸([COMMUTE_HERE])은 절대 못 넘는다 — 지나간 열차를 그릴 자리가 없다.
-        assertEquals(last.toFloat(), commuteAdvance(1.5f, 1, 10, 99_999f), 1e-4f)
-    }
-
-    @Test
-    fun `앞으로만 간다 - 뒤로는 한 픽셀도 안 물러난다`() {
-        // 흐른 시간이 0 이거나 음수(시계 되돌림)면 제자리.
-        assertEquals(1.15f, commuteAdvance(1.15f, 1, 285, 0f), 1e-4f)
-        assertEquals(1.15f, commuteAdvance(1.15f, 1, 285, -9f), 1e-4f)
-        // 칸 자체가 뒤로 온 이상한 응답에도 끌어내리지 않는다(그 자리에 선다).
-        assertEquals(1.4f, commuteAdvance(1.4f, 0, 400, 0f), 1e-4f)
-        assertEquals(1.4f, commuteAdvance(1.4f, 0, 400, 30f), 1e-4f)
-    }
-
-    @Test
-    fun `도착 진입이면 역 점 위에 선다`() {
-        // arvlCd 0·1 은 commuteSlot 이 이미 등록역 칸을 준다 — 거기서는 더 안 움직인다.
-        assertEquals(last.toFloat(), commuteAdvance(null, last, 0, 0f), 1e-4f)
-        assertEquals(last.toFloat(), commuteAdvance(null, last, 30, 999f), 1e-4f)
-        assertEquals(last.toFloat(), commuteAdvance(1.5f, last, 30, 0f), 1e-4f)
-    }
-
-    @Test
-    fun `자리는 늘 0 과 등록역 칸 사이다 - 예외 0`() {
-        val etas = listOf(-10, 0, 1, 37, 300, 4000, Int.MAX_VALUE)
-        val dts = listOf(-5f, 0f, 0.5f, 15f, 600f, 1e9f)
-        val prevs = listOf<Float?>(null, 0f, 1.4f, last.toFloat())
-        for (s in -2..COMMUTE_SLOTS + 1) for (e in etas) for (t in dts) for (p in prevs) {
-            val v = commuteAdvance(p, s, e, t)
-            assertTrue("prev=$p slot=$s eta=$e dt=$t → $v", v >= 0f && v <= last.toFloat())
-            assertTrue("prev=$p slot=$s eta=$e dt=$t → $v", !v.isNaN())
-        }
     }
 }

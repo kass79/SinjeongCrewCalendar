@@ -119,49 +119,38 @@ internal fun CommuteBar(
     if (stations.isEmpty()) return
     val pal = paletteOf(style)
     var open by remember { mutableStateOf<CommuteStation?>(null) }
-    var rows by remember { mutableStateOf(emptyList<ArrivalRow>()) }
+    var rows by remember { mutableStateOf(emptyList<PositionRow>()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
-    /** 마지막 조회 시각(ms) — 오른쪽 `N분 M초` 를 1초씩 줄이는 원점이다. */
-    var fetchedAt by remember { mutableStateOf(0L) }
-    /** **1초 눈금** — 이 값이 바뀌는 것이 곧 리컴포지션이고 [commuteAdvance] 의 한 걸음이다. */
-    var tickMs by remember { mutableStateOf(System.currentTimeMillis()) }
 
     /*
+     * ① **실시간 위치 폴링**(v1.7.15) — `realtimePosition/{호선명}` 을 15초에 한 번.
+     *
+     * ⚠ **키가 호선(`subwayId`)이지 역이 아니다.** 위치 응답은 그 호선 전체를 주므로 같은
+     * 호선의 다른 역 칩으로 옮겨도 **다시 부르지 않는다**(카스 지시: *"호출은 호선마다 한 번"*).
+     * 칩은 한 번에 하나만 펼쳐지므로 **한 순간에 도는 폴링은 늘 하나**다.
+     * 접으면(null) 조기 반환 후 루프가 아예 안 돌고, 시트를 닫으면 [LaunchedEffect] 가 취소된다.
+     *
      * 눈금은 **절대 시각**으로 놓는다 — `delay(15_000)` 로 재우면 네트워크에 쓴 시간과 delay
      * 오버슈트가 누적돼 주기가 밀린다(근거는 [BranchLiveMap] 폴링 KDoc, v1.6.72 실측).
-     * 키가 [open] 이라 ① 접으면(null) 조기 반환 후 루프가 아예 안 돌고 ② 다른 칩으로 옮기면
-     * 옛 루프가 취소되고 새 루프가 선다 — **두 역을 동시에 조회하는 일이 없다.**
+     *
+     * ⚠ **1초 눈금은 없앴다**(v1.7.13 ① 폐기). 위치 API 에는 남은 초가 없어 칸 사이를 메울
+     * 재료가 없다 — 없는 값으로 미끄러뜨리면 그것이 또 다른 추정이다. 대신 [commuteOffset] 이
+     * `trainSttus`(진입·도착·출발·전역출발)로 역 점 앞뒤를 **응답이 말한 만큼만** 벌린다.
      */
-    LaunchedEffect(open) {
+    LaunchedEffect(open?.subwayId) {
         val s = open ?: return@LaunchedEffect
         rows = emptyList(); error = null; loading = true
         var next = System.currentTimeMillis()
         while (isActive) {
-            BranchLive.arrivalsAt(s.name)
-                .onSuccess { rows = it; error = null; fetchedAt = System.currentTimeMillis() }
+            BranchLive.positionsOfLine(lineName(s.subwayId))
+                .onSuccess { rows = it; error = null }
                 .onFailure { error = BranchLive.humanError(it) }
             loading = false
             next += 15_000
             val now = System.currentTimeMillis()
             if (next < now) next = now + 15_000
             delay(next - now)
-        }
-    }
-
-    /*
-     * **1초 눈금**(v1.7.13 ①) — 호출은 한 번도 안 한다. 조회 뒤 흐른 초만 세어 [commuteAdvance]
-     * 가 칸 사이를 메우게 하고, 오른쪽 `N분 M초` 도 같이 준다. 키가 [open] 이라 **접거나 시트를
-     * 닫으면 이 루프도 취소돼 멎는다**(폴링과 같은 수명).
-     */
-    LaunchedEffect(open) {
-        if (open == null) return@LaunchedEffect
-        // ⚠ **열 때 눈금을 다시 맞춘다.** 안 그러면 [tickMs] 가 시트를 연 시각에 멈춰 있다가
-        // 첫 눈금에서 `dt` 가 그만큼(실측 69초) 뛰어 기관차가 한 칸을 순간이동한다.
-        tickMs = System.currentTimeMillis()
-        while (isActive) {
-            delay(1_000)
-            tickMs = System.currentTimeMillis()
         }
     }
 
@@ -206,30 +195,13 @@ internal fun CommuteBar(
             }
         }
         open?.let { s ->
-            val at = commuteAtStation(rows, s)
-            val next = commuteApproaching(rows, s)
-            // 가까운 순 — [commuteAtStation] 은 지금 역에 든 열차(`arvlCd` 0·1), [commuteApproaching]
-            // 은 그 뒤로 다가오는 열차다. 맨 앞이 **가장 가까운 한 대**이고 오른쪽 글자가 그것을 말한다.
-            val near = listOfNotNull(at) + next
-            val lead = near.firstOrNull()
             /*
-             * 아이콘 자리(v1.7.13 ①) — **연속 좌표**다. 같은 칸이 겹치면 종전대로 **가까운 것만**
-             * 남기고([distinctBy] 는 앞엣것을 남긴다 = 가까운 쪽), 그 한 대를 [commuteAdvance] 가
-             * 한 걸음씩 앞으로 옮긴다.
-             *
-             * 장부는 `열번 → (자리, 그 걸음의 시각)` 이고 **[open] 이 바뀌면 통째로 버린다**
-             * (칩을 옮기면 다른 역 이야기라 이어 달릴 것이 없다).
-             *
-             * ⚠ 걸음의 크기는 **[tickMs] 차이**로 잰다 — 그래서 한 눈금 안에 리컴포지션이
-             * 몇 번 돌아도(응답 도착·테마 변경 …) `dt = 0` 이라 **두 번 걷지 않는다.**
+             * ① **응답이 말한 자리에만 세운다**(v1.7.15). [commuteTrains] 가 ⓐ 같은 호선
+             * ⓑ 같은 방향 ⓒ `statnNm` 이 **다섯 칸 이름 중 하나**인 열차만 남긴다.
+             * 다섯 칸 밖 열차는 목록에 아예 없다 — **맨 왼쪽에 밀어 넣지 않는다.**
              */
-            val ledger = remember(s) { mutableMapOf<String, Pair<Float, Long>>() }
-            val pos = near.distinctBy { commuteSlot(it.arvlMsg2, it.arvlCd) }.map { r ->
-                val was = ledger[r.trainNo]
-                val dt = if (was == null) 0f else (tickMs - was.second) / 1000f
-                commuteAdvance(was?.first, commuteSlot(r.arvlMsg2, r.arvlCd), r.etaSec, dt)
-                    .also { ledger[r.trainNo] = it to tickMs }
-            }
+            val trains = commuteTrains(rows, s)
+            val lead = commuteLead(trains, s.fromHigher)
             Surface(
                 // ⑥ 지도 스타일을 따라간다 — 남색이면 운전실, 클레이면 크림(v1.7.14).
                 color = pal.bg,
@@ -243,8 +215,13 @@ internal fun CommuteBar(
                 ) {
                     if (lead == null) {
                         // 빈 상태·오류는 **한 줄로만** 말한다(확정 표 — 문구는 v1.7.9 그대로).
+                        // ⚠ `역 정보 없음` 은 v1.7.15 ② 에서 늘었다 — 옛 저장값(칸 셋·넷)은
+                        //   다섯 칸 이름이 없어 위치 응답과 견줄 상대가 없다. 조용히 비우지 않고
+                        //   **다시 등록하라고 말한다**([decodeCommute] KDoc).
                         Text(
                             when {
+                                s.stops.size != COMMUTE_SLOTS ->
+                                    "역을 다시 등록해 주세요 (앞뒤 역 정보 없음)"
                                 error != null -> error!!
                                 loading -> "실시간 조회 중…"
                                 !inService() -> "운행 시간이 아닙니다"
@@ -267,14 +244,21 @@ internal fun CommuteBar(
                              * 글자를 줄이지 이름을 줄이지 않는다. 두 줄로 접는 것은 허용"*.
                              * 그때 칸을 안 키우면 라벨이 먹은 만큼 **기관차만 작아진다**
                              * (v1.7.13 ③ 과 똑같은 함정 · 실측으로 `동대문역사문화공원` 에서 났다).
-                             * 그래서 한 줄 값을 미리 얹는다. 글자 수는 **어림**이고 실제 접기는
-                             * 캔버스가 폭을 재서 정한다 — 어림이 빗나가면 칸이 조금 클 뿐이다.
+                             * 글자 수는 **어림**이고 실제 접기는 캔버스가 폭을 재서 정한다 —
+                             * 어림이 빗나가면 칸이 조금 클 뿐이다.
+                             *
+                             * ⚠ **라벨 자리는 sp, 기관차 자리는 dp** 다(v1.7.15 ③). 종전처럼
+                             * 통째로 dp 상수([MINI_MIN_H])로 잡으면 배율 1.5 에서 라벨만
+                             * 두꺼워져 기관차가 `k = 0.446` 까지 눌리고(실측), 몸통이 20.5dp 로
+                             * 줄어 **열번 네 자리가 몸통 밖으로 넘친다**(확정 표 *"열번은 아이콘
+                             * 안에"* 위반). 그래서 **라벨(sp) + 기관차(dp)** 로 나눠 더한다 —
+                             * 어느 배율에서도 기관차는 [LOCO_MAX_K] 를 지킨다.
                              */
-                            val long = (s.neighbors + s.name).any { it.length >= LONG_NAME_LEN }
-                            val extra = if (long) NAME_SP.sp.toDp() * 1.35f else 0.dp
-                            maxOf(MINI_MIN_H + extra, ETA_LINE.toDp() + DEST_LINE.toDp())
+                            val long = (s.stops + s.name).any { it.length >= LONG_NAME_LEN }
+                            val label = NAME_SP.sp.toDp() * (if (long) 2.7f else 1.35f)
+                            maxOf(label + 2.dp + LOCO_MIN_H, ETA_LINE.toDp() + DEST_LINE.toDp())
                         }
-                        CommuteMiniLine(s, pos, pal, Modifier.weight(1f).height(miniH))
+                        CommuteMiniLine(s, trains, pal, Modifier.weight(1f).height(miniH))
                         Spacer(Modifier.width(6.dp))
                         /*
                          * ⚠ **칸 높이를 정하는 것은 미니 노선이 아니라 이 두 줄이다**(v1.7.13 ③ 실측).
@@ -285,10 +269,15 @@ internal fun CommuteBar(
                          */
                         Column(horizontalAlignment = Alignment.End) {
                             Text(
-                                // 남은 초도 **1초 눈금**을 탄다(v1.7.13 ①) — 종전엔 폴링마다
-                                // 15초씩 뭉텅이로 줄어 기관차가 멈춰 보이는 것과 짝을 이뤘다.
-                                if (at != null) atStationText(at.arvlCd)
-                                else etaText(lead.etaSec - ((tickMs - fetchedAt) / 1000L).toInt()),
+                                /*
+                                 * ① **`몇 분 후` 가 사라진 자리**(v1.7.15). 위치 API 에는 남은
+                                 * 초가 없다 — 카스가 알고 고른 맞바꿈이다. 대신 응답이 실제로
+                                 * 주는 `trainSttus` 를 낱말 하나로 적는다([sttusText] — 본선
+                                 * 지도가 쓰는 것과 **같은 표**). 앞에 역 이름을 붙이지 않는
+                                 * 이유는 **미니 노선이 이미 그 역 위에 기관차를 세워** 같은 말을
+                                 * 두 번 하게 되기 때문이다(확정 표 *"빈 상태·오류 자리"* 의 취지).
+                                 */
+                                lead.status,
                                 fontSize = 14.sp, lineHeight = ETA_LINE,
                                 fontWeight = FontWeight.ExtraBold,
                                 // ⚠ 글자색은 **팔레트의 기본 잉크**다 — `pal.clock`(클레이 주황
@@ -297,7 +286,7 @@ internal fun CommuteBar(
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                "${lead.destName}행",
+                                lead.dest,
                                 fontSize = 9.sp, lineHeight = DEST_LINE, color = pal.label,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
@@ -313,22 +302,28 @@ internal fun CommuteBar(
 /* ── 미니 노선 한 줄 (v1.7.12 ① · v1.7.14 ⑤ 에서 앞뒤 2역 + 역명) ── */
 
 /**
- * 펼친 칸 높이. 세로로 쌓던 글자 목록(약 131dp)을 **한 줄**로 접은 값이다 —
- * 카스: *"세로칸은 최소화 해서 일자로 보여주면 좋지"*.
+ * 기관차 한 대가 **선 위로 꼭 가져야 하는 높이**(dp) — 굴뚝 갓 꼭대기에서 바퀴 아랫날까지를
+ * [LOCO_MAX_K] 배율로 잰 값이다. `28.7 × 0.62 = 17.8dp`.
  *
- * 40dp(v1.7.12) → 32dp(v1.7.13 ③) → **28dp**(v1.7.14 ③ — 카스 *"세로크기도 한단계더 작게"*).
- * ⚠ 이 안에 **역명 줄이 새로 들어왔다**(⑤). 그래도 더 낮아진 것은 기관차 배율 상한을
- * [LOCO_MAX_K] 로 **낮춰** 선 위 자리를 줄였기 때문이다 — 몸통 폭은 v1.7.13 의 꼬마 기관차
- * (22dp)와 거의 같은 **23dp** 라 가로는 안 는다.
- * ⚠ **여기가 하한이다.** 라벨(9sp ≈ 11dp) + 틈 2dp 를 빼면 선 위가 15dp 뿐이고
- * `28.7 × k ≤ 15` 라 `k ≤ 0.52` — 상한 0.5 를 겨우 넘긴다. 더 내리면 **기관차부터 작아진다.**
+ * 카스: *"세로칸은 최소화 해서 일자로 보여주면 좋지"* → 펼친 칸은 세로로 쌓던 글자 목록
+ * (약 131dp)을 **한 줄**로 접은 자리다. 40dp(v1.7.12) → 32dp(v1.7.13 ③) → 28dp(v1.7.14 ③)
+ * → **v1.7.15 ③ 부터는 상수가 아니라 `라벨(sp) + 2dp + 이 값(dp)`** 이다.
+ *
+ * ⚠ **여기가 하한이다.** 더 내리면 몸통이 줄어 **열번 네 자리가 안 든다**(확정 표
+ * *"열차 아이콘 = 열번 상자"*): 열번 띠 높이 `16 × k` 가 글자 높이(7.7dp × 1.25 ≈ 9.6dp)를
+ * 담으려면 `k ≥ 0.60` 이 필요하다. 카스가 또 줄이라 하면 이 맞바꿈을 먼저 물어라
+ * (지선 카드 `CARD_K` 와 같은 성격의 손잡이다).
+ * ⚠ **실측으로 카드는 한 픽셀도 안 컸다** — 칸 키를 정하는 것은 늘 오른쪽 두 줄
+ * ([ETA_LINE] + [DEST_LINE])이고 그쪽이 배율 1.0 에서 33.2dp · 1.5 에서 40.5dp 라
+ * 이 합(1.0 = 32.0dp · 1.5 = 38.0dp)을 늘 이긴다.
  */
-private val MINI_MIN_H = 28.dp
+private val LOCO_MIN_H = (LOCO_TOTAL_H * LOCO_MAX_K).dp
 
 /**
  * 오른쪽 두 줄의 **줄높이**(v1.7.13 ③ · v1.7.14 ③ 에서 한 단 더). 글꼴 기본 줄높이는 글자의
  * 1.4배쯤이라 그냥 두면 이 두 줄이 미니 노선을 이겨 칸 높이를 혼자 정한다.
- * 이 두 값의 합(27sp)이 곧 [MINI_MIN_H] 와 견주는 **칸의 키**다 — 한쪽만 고치면 세로가 도로 는다.
+ * 두 값의 합은 27sp 이고 [MINI_MIN_H](31dp)가 그보다 크므로 **칸의 키는 미니 노선이 정한다**
+ * (v1.7.14 까지는 반대였다 — 한쪽만 고치면 세로가 도로 는다).
  */
 private val ETA_LINE = 16.sp
 private val DEST_LINE = 11.sp
@@ -349,12 +344,30 @@ private val CHIP_GAP = 3.dp
 private val CARD_PAD = 3.dp
 
 /**
- * 기관차 배율 상한(v1.7.14 ⑦). 지도 기관차([drawLoco])는 몸통이 [LOCO_LEN] = 46 units 라
- * `0.5` 면 **23dp** — v1.7.13 까지 쓰던 꼬마 기관차(22dp)와 거의 같다. **가로가 안 늘도록**
- * 여기서 붙든다(칸 다섯이 이름을 이고 서 있어 가로가 빠듯하다).
- * ⚠ 본선 지도는 0.55 · 지선 카드는 0.70 이다 — **여기만 더 작다**(열번을 안 넣기 때문이다).
+ * 기관차 배율 상한. 0.5(v1.7.14 ⑦ · 몸통 23dp) → **0.62**(v1.7.15 ③ · 몸통 **28.5dp**).
+ *
+ * 카스: *"지금 열차 아이콘이 얼마나 이쁜데..그리고 **열번도 작게 넣어도 될텐데?**"* —
+ * 모양은 그대로 두고 **몸통 안에 열번**을 넣는다(확정 표 *"열차 아이콘 = 열번 상자"*).
+ * 0.5 에서는 열번 띠가 `39 × 8dp` 라 네 자리가 물리적으로 안 들어간다:
+ * 띠 높이 `16 × k` 가 글자 높이(7.7sp × 1.25 ≈ 9.6dp)를 담으려면 **`k ≥ 0.60`**,
+ * 띠 폭 `39 × k` 가 네 자리(≈19dp)를 담으려면 `k ≥ 0.49` — 세로가 하한을 정한다.
+ * ⚠ 본선 지도 0.55 · 지선 카드 0.70 사이 값이다. 가로는 칸 다섯이 이름을 이고 서 있어
+ *   빠듯하지만 몸통 28.5dp 는 접힘 실측 칸 폭(≈50dp)의 절반 남짓이라 든다.
  */
-private const val LOCO_MAX_K = 0.5f
+private const val LOCO_MAX_K = 0.62f
+
+/**
+ * 열번 **판독 하한** — 확정 표가 정한 값 그대로다: 본선 타 열차가 `11 × 0.7 = 7.7sp` 이고
+ * 지선 카드 `NUMBER_MIN_SP` 도 같은 7.7 이다. 여기 자연 크기는 `11 × 0.62 = 6.8sp` 라
+ * **하한이 먹는다** — [drawLoco] 의 `numberMinSp` 가 그 손잡이다(v1.7.10 에서 지선 카드를
+ * 위해 낸 인자를 그대로 쓴다. 본선 지도는 여전히 안 넘긴다).
+ *
+ * ⚠ **글자배율로 나눠서 넘긴다** — 이 숫자가 사는 곳은 **dp 로 크기가 정해진 몸통 안**이다
+ * (확정 표 *"열번은 아이콘 안에 있다"*). sp 그대로 넘기면 배율 1.5 에서 글자만 1.5배가 돼
+ * 네 자리가 몸통 밖으로 삐져나온다(실측). 나눠 넘기면 어느 배율에서도 **물리 크기가 7.7dp** —
+ * 판독 하한 그대로이고 몸통 안에 든다. 몸통은 dp 라 배율과 무관하게 28.5dp 를 지킨다.
+ */
+private const val NUMBER_MIN_SP = 7.7f
 
 /**
  * 기관차 한 대가 선 위로 차지하는 높이(그림 좌표) — 굴뚝 갓 꼭대기(−15.2)에서 바퀴
@@ -376,10 +389,20 @@ private fun coversSlots(bodyHalfPx: Float, dotPx: Float, stepPx: Float) =
  * 오른쪽 둘이 뒤 2역이다(v1.7.14 ⑤). 카스: *"마곡역이면 **김포공항-송정-마곡-발산-우장산**
  * 이렇게 표시해주고 **역명까지 표시**해주자!"*
  *
- * ⚠ [pos] 는 **정수 칸이 아니라 연속 좌표**다(v1.7.13 ①). [commuteSlot] 이 낸 칸을
- * [commuteAdvance] 가 남은 초로 흘린 값이라 1초마다 조금씩 커진다 — 그래서 기관차가
- * 칸을 뛰지 않고 **미끄러져** 다가온다. 열차는 늘 **왼쪽에서** 온다(차례를 등록할 때
- * [CommuteOption.fromHigher] 로 맞춰 두었다).
+ * ## ② 차례는 고정 · 방향은 **기관차가 말한다** (v1.7.15)
+ *
+ * 카스: *"상행을 고르면 **열차가 반대방향으로 가면 되지**"* · *"마곡역 **송정방면**으로
+ * 지정했을때 **열차가 반대방향으로 움직여야지**?"*
+ *
+ * 칸 차례는 [CommuteStation.stops] 가 준 **지리 순서 고정**(`FR_CODE` 오름차순)이고,
+ * [CommuteStation.fromHigher] 가 true 면 기관차 머리가 [Heading.LEFT] 로 돌아
+ * **오른쪽에서 왼쪽으로** 달린다. 뒤집는 곳은 지도와 같은 순수 함수 두 개
+ * ([headingFor] · [locoFlip])뿐이고, `trainSttus` 미세 오프셋([commuteOffset])도 같은
+ * 방향 부호를 탄다 — 진입은 늘 **진행 방향 앞쪽**이다.
+ *
+ * ⚠ **바퀴는 늘 선로 쪽**(확정 표) — `railTowards = (0, +1)` 이라 [locoFlip] 이 좌우 어느
+ *   머리에서도 false 다(배 벡터가 둘 다 `(0, +1)`). **열번은 가로 좌→우**([locoTextDeg] 가
+ *   `mapDeg = 0` 에서 RIGHT·LEFT 둘 다 0° 를 준다).
  *
  * 색은 **선·점·기관차 몸통이 호선 색**([lineArgb])이다 — 카스: *"아이콘을 좀 더 귀엽게 각호선
  * 색상에 맞게"*. **글자는 팔레트 잉크**([MapPalette.label])다 — 1호선 남색(`#0052A4`)·7호선
@@ -388,7 +411,7 @@ private fun coversSlots(bodyHalfPx: Float, dotPx: Float, stepPx: Float) =
 @Composable
 private fun CommuteMiniLine(
     station: CommuteStation,
-    pos: List<Float>,
+    trains: List<CommuteTrain>,
     pal: MapPalette,
     modifier: Modifier,
 ) {
@@ -396,18 +419,15 @@ private fun CommuteMiniLine(
     val ink = pal.label
     val tm = rememberTextMeasurer()
     /*
-     * 다섯 칸의 이름 — 가운데가 등록역이고 나머지 넷이 [CommuteStation.neighbors] 다.
-     * **이웃을 못 얻었으면**(옛 저장값·조회 실패) 가운데만 적고 나머지는 빈칸이다.
+     * 다섯 칸의 이름 — [CommuteStation.stops] 그대로다(v1.7.15 ② — 지리 순서 고정이라
+     * 화면에서 다시 뒤집을 것이 없다). 못 얻은 등록값이면 카드가 이 줄까지 안 오고
+     * *"역을 다시 등록해 주세요"* 로 떨어진다([CommuteBar]).
      */
     val names = remember(station) {
-        List(COMMUTE_SLOTS) { i ->
-            when {
-                i == COMMUTE_HERE -> station.name
-                station.neighbors.size != COMMUTE_NEAR * 2 -> ""
-                else -> station.neighbors[if (i < COMMUTE_HERE) i else i - 1]
-            }
-        }
+        List(COMMUTE_SLOTS) { i -> station.stops.getOrNull(i).orEmpty() }
     }
+    /** ② **화면에서의 진행 방향** — `false` 면 오른쪽에서 왼쪽으로 달린다. */
+    val forward = !station.fromHigher
     Canvas(modifier) {
         val step0 = size.width / COMMUTE_SLOTS          // 이름 한 칸이 쓸 수 있는 폭(어림)
         /*
@@ -427,12 +447,12 @@ private fun CommuteMiniLine(
         val nameSp = (if (wide <= room) NAME_SP else NAME_SP * room / wide * 0.97f)
             .coerceAtLeast(NAME_MIN_SP)
         val twoLines = names.any { width(nameSp, it) > room }
-        val labels = names.map { s ->
+        val labels = names.mapIndexed { i, s ->
             if (s.isBlank()) null else tm.measure(
                 s,
                 TextStyle(
                     fontSize = nameSp.sp, color = ink,
-                    fontWeight = if (s == station.name) FontWeight.ExtraBold else FontWeight.Medium,
+                    fontWeight = if (i == COMMUTE_HERE) FontWeight.ExtraBold else FontWeight.Medium,
                     textAlign = TextAlign.Center,
                 ),
                 maxLines = if (twoLines) 2 else 1,
@@ -453,7 +473,7 @@ private fun CommuteMiniLine(
         // 삐져나간다(v1.7.13 ③ 배율 1.5 실측 자리).
         val k = (y / (LOCO_TOTAL_H * 1.dp.toPx())).coerceIn(0.28f, LOCO_MAX_K)
         val covers = coversSlots(LOCO_BOX_W / 2f * k * 1.dp.toPx(), 3.2.dp.toPx(), step)
-        fun covered(i: Int) = pos.any { kotlin.math.abs(it - i) < covers }
+        fun covered(i: Int) = trains.any { kotlin.math.abs(it.pos - i) < covers }
 
         // ⚠ 크림 바탕(클레이)에서는 옅은 호선색이 묻힌다 — 2호선 초록 `#00A84D` 이 크림 위에서
         //   2.78:1 뿐이라 0.32 알파로는 선이 안 보인다(실측). 남색은 4.66:1 이라 종전 값 그대로.
@@ -481,36 +501,39 @@ private fun CommuteMiniLine(
         }
 
         /*
-         * ⑦ 기관차 — **본선 지도·지선 카드와 같은 [drawLoco]** 다(v1.7.14).
+         * 기관차 — **본선 지도·지선 카드와 같은 [drawLoco]** 다(v1.7.14 ⑦).
          * 카스: *"**신정지선과 본선 열차 아이콘과 같은 열차 아이콘 모양**으로 해줘."*
+         * v1.7.15 에서도 **모양은 한 줄도 안 건드렸다** — 카스: *"지금 열차 아이콘이 얼마나
+         * 이쁜데.."*. 바뀐 것은 몸통 배율([LOCO_MAX_K])과 **몸통 안 열번**뿐이다.
          *
-         * ⚠ **v1.7.12 ① 의 전용 꼬마 기관차(둥근 몸통 + 흰 창 둘 + 눈웃음)를 버리는 것이고
-         *   카스의 결정이다.** 그때 이유는 *"아이콘을 좀 더 귀엽게"* 였는데, 확정 표의
-         *   *"아이콘 일관성 — 같은 종류(열차)를 두 모양으로 그리지 않는다"* 가 이겼다.
-         *   호선 색은 그대로 남으므로 *"각호선 색상에 맞게"* 는 지켜진다.
-         *
-         * ⚠ **열번은 빈 문자열**이다 — 도착 API 에 `btrainNo` 가 오긴 해도 이 칸이 말하는 것은
-         *   *"내가 탈 열차가 몇 정거장 앞"* 이라 열번이 정보가 아니고, 몸통 23dp 에 4자리가
-         *   물리적으로 안 든다([commuteSlot] KDoc). [drawLoco] 는 빈 열번을 그대로 견딘다
-         *   (`textMeasurer.measure("")` 는 폭 0 짜리 한 줄이라 아무것도 안 그린다).
+         * ③ ⚠ **열번은 위치 응답의 `trainNo`** 다(v1.7.15). 확정 표 *"열차 아이콘 = 열번
+         *   상자 · 열번을 아이콘 밖 배지로 빼지 말 것"* 그대로 몸통 가운데에 든다. 크기는
+         *   `11 × k = 6.8sp` 지만 [NUMBER_MIN_SP] 7.7sp 가 받친다 — 지선 카드가 v1.7.10 에
+         *   낸 `numberMinSp` 손잡이를 그대로 쓴다(**본선 지도는 여전히 안 넘긴다**).
+         * ② ⚠ **머리가 진행 방향**이다 — [forward] 가 false 면 [Heading.LEFT] 라 오른쪽에서
+         *   왼쪽으로 달린다. [locoFlip] 은 두 머리 모두 false(배 벡터가 `(0, +1)` 로 같다)라
+         *   **바퀴는 어느 쪽이든 선로 쪽**이고, [locoTextDeg] 도 둘 다 0° 라 **열번은 가로
+         *   좌→우**다(확정 표 두 줄을 다 지킨다).
          * ⚠ **연기·물결은 끈다** — 지도에서도 내 열차만 내는 장식이고, 여기서는 굴뚝 위로
          *   12dp 를 더 먹어 카드 밖으로 나간다.
-         * ⚠ 확정 표 유지 — **바퀴는 늘 선로 쪽**([railTowards] 아래) · **머리는 진행 방향**
-         *   (늘 오른쪽으로 다가온다) · **떠 있는 열차 금지**(바퀴 아랫날을 선 위에 앉힌다).
+         * ⚠ **떠 있는 열차 금지** — 중심을 `y − LOCO_WHEEL_BOTTOM × k` 에 놓아 바퀴 아랫날이
+         *   선 위에 앉는다.
          */
-        pos.forEach { p ->
+        trains.forEach { t ->
             drawLoco(
-                center = Offset(xOf(p), y - LOCO_WHEEL_BOTTOM * k * 1.dp.toPx()),
-                heading = headingFor(1f, 0f, true),   // 왼쪽에서 오른쪽 = RIGHT
+                center = Offset(xOf(t.pos), y - LOCO_WHEEL_BOTTOM * k * 1.dp.toPx()),
+                heading = headingFor(1f, 0f, forward),
                 scale = k,
                 body = line,
                 wheel = pal.wheel,
-                number = "",
+                number = t.trainNo,
                 numberColor = pal.otherInk,
                 textMeasurer = tm,
                 smoke = false,
                 wake = false,
                 railTowards = Offset(0f, 1f),         // 선로는 늘 밑에 있다
+                // ⚠ 배율로 나눈다 — 위 [NUMBER_MIN_SP] KDoc. 몸통이 dp 라 글자도 dp 로 붙든다.
+                numberMinSp = NUMBER_MIN_SP / fontScale.coerceAtLeast(1f),
                 shadowColor = pal.shadow,
                 clayShadow = if (pal.clay) 2 else 0,
             )
@@ -545,11 +568,16 @@ private const val LONG_NAME_LEN = 8
  * 저장하면 화면이 영영 빈다. ⚠ **이름을 줄이는 것이 아니다**(확정 표) — `구로디지털단지` 는
  * 통째로 남고, `서울역` 은 원문이 먼저라 첫 번에 걸린다.
  *
- * ## ⑤ 이웃 4역은 **고를 때 딱 한 번** 부른다 (v1.7.14)
+ * ## ⑤ 다섯 칸 이름은 **고를 때 딱 한 번** 부른다 (v1.7.14 · v1.7.15 ②)
  *
- * 방향 칩을 누르는 순간 역 목록 API 를 **1회**([BranchLive.stationsOfLine]) 불러 앞뒤 2역
- * 이름을 저장값에 담는다. 보는 화면은 그 값을 읽기만 하므로 **볼 때마다 부르지 않는다.**
- * 못 얻으면 이름 없이 저장한다 — 화면은 살고 점만 뜬다.
+ * 방향 칩을 누르는 순간 역 목록 API 를 **1회**([BranchLive.stationsOfLine]) 불러 앞뒤 2역과
+ * 등록역까지 **다섯 이름**을 저장값에 담는다. 보는 화면은 그 값을 읽기만 하므로 **볼 때마다
+ * 부르지 않는다.**
+ *
+ * ⚠ **여기는 도착 API 를 그대로 쓴다** — v1.7.15 ① 이 실시간 위치로 바꾼 것은 **보는 화면**
+ * 이다. (호선 × 방향) 조합을 주는 것은 도착 응답뿐이고, 열차가 **어느 쪽에서 오나**
+ * ([approachFromHigher])도 여기서만 알 수 있다(위치 응답에는 그 역 기준의 이전역이 없다).
+ * 못 얻으면 이름 없이 저장하고, 그때 보는 화면은 *"역을 다시 등록해 주세요"* 라고 말한다.
  *
  * ⚠ 운행 종료 시간엔 `INFO-200`(빈 목록)이라 조합을 못 뽑는다 — **오류가 아니라 안내**다.
  */
@@ -575,7 +603,7 @@ internal fun CommuteSettingDialog(
                 Text("출퇴근 역", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp)
                 Text(
                     "등록한 역은 달력 상세시트 행로표 위에 뜹니다. 칩을 누르면 그 역 앞뒤 " +
-                        "${COMMUTE_NEAR}역과 다가오는 열차가 보입니다 (최대 ${COMMUTE_MAX}개).",
+                        "${COMMUTE_NEAR}역과 그 사이 열차의 실시간 위치가 보입니다 (최대 ${COMMUTE_MAX}개).",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -653,13 +681,15 @@ internal fun CommuteSettingDialog(
                                     if (busy) return@Surface
                                     busy = true
                                     scope.launch {
-                                        // ⑤ **이웃 4역 — 여기서 딱 한 번.**
-                                        val near = lineNumOf(o.subwayId)?.let { ln ->
+                                        // ⑤ **다섯 칸 이름 — 여기서 딱 한 번.** v1.7.15 ② 부터
+                                        //   등록역까지 다섯을 다 담는다(차례는 지리 오름차순
+                                        //   고정이고 방향은 기관차가 말한다).
+                                        val stops = lineNumOf(o.subwayId)?.let { ln ->
                                             BranchLive.stationsOfLine(ln).getOrNull()
-                                                ?.let { commuteNeighbors(it, asked, o.fromHigher) }
+                                                ?.let { commuteStops(it, asked) }
                                         }.orEmpty()
                                         busy = false
-                                        onSave((stations + o.toStation(asked, near)).distinct())
+                                        onSave((stations + o.toStation(asked, stops)).distinct())
                                     }
                                 },
                                 color = MaterialTheme.colorScheme.secondaryContainer,

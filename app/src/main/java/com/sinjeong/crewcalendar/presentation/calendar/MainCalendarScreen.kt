@@ -1495,10 +1495,21 @@ private fun DayDetailContent(
                 // v1.6.42 ③ — 오른쪽 정렬(Alignment.End)에서 왼쪽으로. 사용자: *"전반알람 아이콘을
                 // 왼쪽으로 위치를 변경해"*. 칩 안에서 아이콘은 이미 글자 왼쪽이었고, 오른쪽에 붙어
                 // 있던 건 칩 줄 자체였다.
-                FlowRow(
-                    Modifier.fillMaxWidth(),
+                //
+                // ⚠ **`FlowRow` 로 되돌리지 말 것**(v1.7.15 ④). 카스: *"오늘 37다이아 보니까
+                // 신정지선밑에 **알람 전반,후반,기상있는칸이 왜 두줄로** 되어있지?"* — 야간
+                // 다이아는 칩이 셋(전반·후반·침실)이라 폭이 모자라면 `FlowRow` 가 침실 칩을
+                // 둘째 줄로 접었다. `FlowRow` 를 쓴 원래 이유는 **잘림 방지**(v1.6.79)였는데,
+                // 가로 스크롤이 그것을 **접지 않고** 해결한다 — 넘치면 옆으로 밀어 본다.
+                // 출퇴근 역 칩 줄·아래 빠른 입력 칩 줄과 **같은 처방**이다(카스 확정:
+                // *"칩은 한 줄로 두고 넘치면 옆으로 민다 · 두 줄 접기 금지"*).
+                // 글자·여백은 한 자도 안 줄였다 — v1.6.79 가 이미 두 단계 줄여 놓은 값이고
+                // (9sp · 패딩 7/4dp) `전반`·`후반` 낱말은 색각 이상을 위한 유일한 비색상
+                // 신호다([DeadheadAlarmChip] 주석). 배율 1.0 에서는 셋이 그대로 한 줄에 든다.
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
                     DeadheadAlarmChip(effDate, effDuty, second = false)
                     if (hasSecond) DeadheadAlarmChip(effDate, effDuty, second = true)

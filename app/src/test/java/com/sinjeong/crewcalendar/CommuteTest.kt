@@ -4,20 +4,17 @@ import com.sinjeong.crewcalendar.presentation.live.ArrivalRow
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
 import com.sinjeong.crewcalendar.presentation.live.CommuteStation
-import com.sinjeong.crewcalendar.presentation.live.atStationText
+import com.sinjeong.crewcalendar.presentation.live.StationRow
 import com.sinjeong.crewcalendar.presentation.live.bareStation
 import com.sinjeong.crewcalendar.presentation.live.boundOf
-import com.sinjeong.crewcalendar.presentation.live.commuteApproaching
-import com.sinjeong.crewcalendar.presentation.live.commuteAtStation
 import com.sinjeong.crewcalendar.presentation.live.commuteChipLabel
 import com.sinjeong.crewcalendar.presentation.live.commuteLabel
 import com.sinjeong.crewcalendar.presentation.live.commuteOnOf
 import com.sinjeong.crewcalendar.presentation.live.commuteOptions
+import com.sinjeong.crewcalendar.presentation.live.commuteStops
 import com.sinjeong.crewcalendar.presentation.live.decodeCommute
 import com.sinjeong.crewcalendar.presentation.live.encodeCommute
-import com.sinjeong.crewcalendar.presentation.live.etaText
 import com.sinjeong.crewcalendar.presentation.live.lineName
-import com.sinjeong.crewcalendar.presentation.live.positionText
 import com.sinjeong.crewcalendar.presentation.live.stationQueries
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -121,93 +118,6 @@ class CommuteTest {
         assertEquals("2호선", lineName("1002"))
         assertEquals("5호선", lineName("1005"))
         assertEquals("9999", lineName("9999"))
-    }
-
-    /* ── 보는 화면: 호선·방향 필터 ──────────────────────────── */
-
-    @Test
-    fun `같은 이름 다른 노선은 등록한 호선만 남는다`() {
-        val line2 = commuteApproaching(rows(), CommuteStation("까치산", "1002", "내선"))
-        assertEquals(listOf("5670"), line2.map { it.trainNo })
-
-        val line5up = commuteApproaching(rows(), CommuteStation("까치산", "1005", "상행"))
-        assertEquals(listOf("5622", "5134"), line5up.map { it.trainNo })   // 가까운 순
-
-        val line5dn = commuteApproaching(rows(), CommuteStation("까치산", "1005", "하행"))
-        assertEquals(listOf("5645", "5139"), line5dn.map { it.trainNo })
-    }
-
-    @Test
-    fun `다가오는 열차는 최대 세 대이고 가까운 순이다`() {
-        val many = (1..6).map {
-            ArrivalRow("t$it", "방화", it * 100, "99", "1005", "상행")
-        }.reversed()
-        val got = commuteApproaching(many, CommuteStation("까치산", "1005", "상행"))
-        assertEquals(listOf("t1", "t2", "t3"), got.map { it.trainNo })
-    }
-
-    /* ── 이미 지난 열차(arvlCd 0·1·2) ───────────────────────── */
-
-    @Test
-    fun `진입 도착 출발은 다가오는 목록에서 빠진다`() {
-        val s = CommuteStation("까치산", "1005", "상행")
-        val mixed = listOf(
-            ArrivalRow("enter", "방화", 0, "0", "1005", "상행"),
-            ArrivalRow("arrive", "방화", 0, "1", "1005", "상행"),
-            ArrivalRow("leave", "방화", 0, "2", "1005", "상행"),
-            ArrivalRow("coming", "방화", 200, "99", "1005", "상행"),
-        )
-        assertEquals(listOf("coming"), commuteApproaching(mixed, s).map { it.trainNo })
-    }
-
-    @Test
-    fun `진입 도착은 맨 위 한 줄로 남고 출발은 아예 안 센다`() {
-        val s = CommuteStation("까치산", "1005", "상행")
-        assertEquals(
-            "enter",
-            commuteAtStation(listOf(ArrivalRow("enter", "방화", 0, "0", "1005", "상행")), s)?.trainNo,
-        )
-        assertEquals(
-            "arrive",
-            commuteAtStation(listOf(ArrivalRow("arrive", "방화", 0, "1", "1005", "상행")), s)?.trainNo,
-        )
-        // 출발(2)은 이미 떠난 열차 — 위 줄에도 안 뜬다
-        assertNull(commuteAtStation(listOf(ArrivalRow("leave", "방화", 0, "2", "1005", "상행")), s))
-        // 다른 호선의 진입 열차를 끌어오지 않는다
-        assertNull(commuteAtStation(listOf(ArrivalRow("x", "까치산", 0, "0", "1002", "내선")), s))
-        assertEquals("지금 진입", atStationText("0"))
-        assertEquals("지금 도착", atStationText("1"))
-    }
-
-    /* ── 표기 ───────────────────────────────────────────────── */
-
-    @Test
-    fun `남은 시간 표기`() {
-        assertEquals("곧 도착", etaText(0))
-        assertEquals("곧 도착", etaText(-30))
-        assertEquals("45초", etaText(45))
-        assertEquals("1분 0초", etaText(60))
-        assertEquals("6분 0초", etaText(360))
-        assertEquals("8분 5초", etaText(485))
-    }
-
-    @Test
-    fun `위치 글은 arvlMsg2 를 쓰되 남은 시간 문장이면 지금 있는 역으로 바꾼다`() {
-        // 위치를 말하는 문장은 그대로
-        assertEquals("까치산 전역출발", positionText(rows()[0]))
-        assertEquals("전역 도착", positionText(rows()[2]))
-        // 남은 시간을 되풀이하는 문장은 arvlMsg3(지금 있는 역)로 — 아랫줄 etaText 와 겹친다
-        assertEquals("오목교(목동운동장앞)", positionText(rows()[1]))   // "6분 후 (오목교…)"
-        assertEquals("도림천", positionText(rows()[3]))                // "8분 후"
-        assertEquals("마곡", positionText(rows()[4]))                  // "8분 후 (마곡)"
-        assertEquals(                                                  // 에뮬 실측 문구
-            "도림천",
-            positionText(ArrivalRow("x", "까치산", 330, "99", arvlMsg2 = "5분 30초 후", arvlMsg3 = "도림천")),
-        )
-        // arvlMsg3 가 비면 되돌아가지 않는다 — 있는 글이라도 보여 준다
-        assertEquals("8분 후", positionText(ArrivalRow("x", "까치산", 480, "99", arvlMsg2 = "8분 후")))
-        assertEquals("도림천", positionText(ArrivalRow("x", "까치산", 0, "99", arvlMsg3 = "도림천")))
-        assertEquals("위치 확인 중", positionText(ArrivalRow("x", "까치산", 0, "99")))
     }
 
     /* ── 저장 문자열 왕복 ───────────────────────────────────── */
@@ -406,59 +316,123 @@ class CommuteTest {
         assertEquals("9999 어딘가", commuteChipLabel(CommuteStation("어딘가", "9999", "상행")))
     }
 
-    /* ── v1.7.14 ⑤ 저장 형식 — 이웃 넷이 붙는다 ─────────────── */
+    /* ── v1.7.15 ② 저장 형식 — 다섯 칸 이름 + 진행 방향 ─────── */
 
     /**
-     * 카스: *"마곡역이면 **김포공항-송정-마곡-발산-우장산** 이렇게 표시해주고 역명까지"*.
-     * 이웃 넷은 **등록할 때 한 번** 얻어 저장값에 담는다(볼 때마다 안 부른다).
+     * 카스: *"마곡역이면 **김포공항-송정-마곡-발산-우장산** 이렇게 표시해주고 역명까지"* ·
+     * *"상행을 고르면 **열차가 반대방향으로 가면 되지**"*.
+     *
+     * 다섯 이름은 **등록할 때 한 번** 얻어 저장값에 담고(볼 때마다 안 부른다), 차례는
+     * **지리 오름차순 고정**이라 방향이 무엇이든 글자가 같다. 뒤집는 것은 마지막 칸
+     * (`fromHigher`)이 정하는 **기관차 머리**다.
      */
     @Test
-    fun `이웃 넷이 붙은 저장 문자열 왕복`() {
+    fun `다섯 칸 이름과 방향이 붙은 저장 문자열 왕복`() {
         val list = listOf(
-            CommuteStation("마곡", "1005", "하행", listOf("김포공항", "송정", "발산", "우장산")),
-            CommuteStation("까치산", "1002", "내선", listOf("양천구청", "신정네거리", "", "")),
+            CommuteStation(
+                "마곡", "1005", "상행",
+                listOf("김포공항", "송정", "마곡", "발산", "우장산"), fromHigher = true,
+            ),
+            CommuteStation(
+                "까치산", "1002", "내선",
+                listOf("양천구청", "신정네거리", "까치산", "", ""), fromHigher = false,
+            ),
         )
         val s = encodeCommute(list)
         assertEquals(
-            "마곡|1005|하행|김포공항,송정,발산,우장산;까치산|1002|내선|양천구청,신정네거리,,",
+            "마곡|1005|상행|김포공항,송정,마곡,발산,우장산|1;" +
+                "까치산|1002|내선|양천구청,신정네거리,까치산,,|0",
             s,
         )
         assertEquals(list, decodeCommute(s))
     }
 
+    /** 같은 역·같은 이름인데 **방향만 반대**면 마지막 칸 하나만 다르다. */
+    @Test
+    fun `차례는 방향이 달라도 같고 마지막 칸만 갈린다`() {
+        val stops = listOf("김포공항", "송정", "마곡", "발산", "우장산")
+        val up = encodeCommute(listOf(CommuteStation("마곡", "1005", "상행", stops, true)))
+        val down = encodeCommute(listOf(CommuteStation("마곡", "1005", "하행", stops, false)))
+        assertEquals("마곡|1005|상행|김포공항,송정,마곡,발산,우장산|1", up)
+        assertEquals("마곡|1005|하행|김포공항,송정,마곡,발산,우장산|0", down)
+        // 이름 다섯 칸은 **글자 그대로 같다** — 화면에서 뒤집지 않는다는 뜻이다.
+        assertEquals(up.split("|")[3], down.split("|")[3])
+    }
+
     /**
-     * ⚠ **옛 저장값이 그대로 읽혀야 한다** — 카스 기기에 이미 v1.7.9~v1.7.13 꼴이 들어 있다.
-     * 셋째 칸까지만 있는 줄은 **이웃 없음**으로 떨어지고 화면은 이름 없이 점만 찍는다.
+     * ⚠ **옛 저장값에 화면이 안 죽는다 — 다만 이름은 안 받는다.**
+     *
+     * v1.7.14 의 넷째 칸은 **방향에 따라 뒤집힌 이웃 넷**이라 지금 규칙(지리 오름차순 고정)으로
+     * 읽으면 상행 역이 거꾸로 그려진다. 조용히 틀리느니 **다시 등록하게** 두는 쪽을 골랐다
+     * (화면은 *"역을 다시 등록해 주세요"* 라고 말한다).
      */
     @Test
-    fun `옛 저장값도 그대로 읽힌다`() {
-        // v1.7.9~v1.7.13 꼴(방향 있음 · 이웃 없음)
+    fun `옛 저장값은 역만 살고 이름은 안 받는다`() {
+        // v1.7.9~v1.7.13 꼴(방향 있음 · 이름 없음)
         val old = "마곡|1005|하행;까치산|1002|내선;까치산|1005|상행;신도림|1002|외선"
         val back = decodeCommute(old)
         assertEquals(4, back.size)
         assertEquals(listOf("마곡", "까치산", "까치산", "신도림"), back.map { it.name })
         assertEquals(listOf("하행", "내선", "상행", "외선"), back.map { it.updnLine })
-        back.forEach { assertEquals(emptyList<String>(), it.neighbors) }
-        // 이웃이 없으면 다시 저장해도 **글자가 그대로** — 형식이 조용히 늘지 않는다
+        back.forEach { assertEquals(emptyList<String>(), it.stops) }
+        // 이름이 없으면 다시 저장해도 **글자가 그대로** — 형식이 조용히 늘지 않는다
         assertEquals(old, encodeCommute(back))
+        // v1.7.14 꼴(이웃 넷)도 이름 없음으로 떨어진다 — 칸이 넷이라 다섯 규칙을 못 넘는다
+        val v1714 = "마곡|1005|하행|김포공항,송정,발산,우장산"
+        assertEquals(1, decodeCommute(v1714).size)
+        assertEquals(emptyList<String>(), decodeCommute(v1714).first().stops)
+        assertEquals(false, decodeCommute(v1714).first().fromHigher)
         // 옛 꼴과 새 꼴이 한 줄에 섞여 있어도 각자 제대로 읽힌다
-        val mixed = "마곡|1005|하행|김포공항,송정,발산,우장산;신도림|1002|외선"
+        val mixed = "마곡|1005|하행|김포공항,송정,마곡,발산,우장산|0;신도림|1002|외선"
         assertEquals(
-            listOf(listOf("김포공항", "송정", "발산", "우장산"), emptyList()),
-            decodeCommute(mixed).map { it.neighbors },
+            listOf(listOf("김포공항", "송정", "마곡", "발산", "우장산"), emptyList()),
+            decodeCommute(mixed).map { it.stops },
         )
     }
 
     @Test
-    fun `이웃 칸이 넷이 아니면 버린다 - 잘린 값에 화면이 안 죽는다`() {
-        // 셋·다섯은 통째로 버리고 역만 살린다(칸 수가 어긋나면 어느 자리인지 알 수 없다)
-        assertEquals(emptyList<String>(), decodeCommute("마곡|1005|하행|가,나,다").first().neighbors)
-        assertEquals(emptyList<String>(), decodeCommute("마곡|1005|하행|가,나,다,라,마").first().neighbors)
-        // 칸이 다섯 이상인 줄(구분자가 더 있는 손댄 값)은 통째로 버린다
-        assertEquals(emptyList<CommuteStation>(), decodeCommute("마곡|1005|하행|가,나,다,라|덤"))
+    fun `이름 칸이 다섯이 아니면 버린다 - 잘린 값에 화면이 안 죽는다`() {
+        // 넷·여섯은 통째로 버리고 역만 살린다(칸 수가 어긋나면 어느 자리인지 알 수 없다)
+        assertEquals(emptyList<String>(), decodeCommute("마곡|1005|하행|가,나,다,라|0").first().stops)
+        assertEquals(emptyList<String>(), decodeCommute("마곡|1005|하행|가,나,다,라,마,바|0").first().stops)
+        // 모르는 방향 글자는 오름차순(false)으로 떨어진다 — 예외를 안 던진다
+        assertEquals(false, decodeCommute("마곡|1005|하행|가,나,다,라,마|ㅁ").first().fromHigher)
+        // 칸이 여섯 이상인 손댄 값도 앞 다섯만 읽고 산다
+        assertEquals(1, decodeCommute("마곡|1005|하행|가,나,다,라,마|1|덤").size)
+        assertEquals(true, decodeCommute("마곡|1005|하행|가,나,다,라,마|1|덤").first().fromHigher)
         // 역명에 쉼표가 있어도 줄이 안 깨진다(저장할 때 지운다)
-        val s = encodeCommute(listOf(CommuteStation("가,나", "1002", "내선", listOf("다,라", "", "", ""))))
-        assertEquals("가나|1002|내선|다라,,,", s)
-        assertEquals(listOf("다라", "", "", ""), decodeCommute(s).first().neighbors)
+        val s = encodeCommute(
+            listOf(CommuteStation("가,나", "1002", "내선", listOf("다,라", "", "가,나", "", ""))),
+        )
+        assertEquals("가나|1002|내선|다라,,가나,,|0", s)
+        assertEquals(listOf("다라", "", "가나", "", ""), decodeCommute(s).first().stops)
+    }
+
+    /* ── v1.7.15 ② 차례는 지리 순서 하나로 고정 ──────────────── */
+
+    /** 2026-09-07 `SearchSTNBySubwayLineInfo/05호선` 실응답에서 뽑은 앞머리(차례가 섞여 온다) */
+    private val line5 = listOf(
+        StationRow("515", "발산"), StationRow("510", "방화"), StationRow("513", "송정"),
+        StationRow("511", "개화산"), StationRow("516", "우장산"), StationRow("512", "김포공항"),
+        StationRow("514", "마곡"),
+    )
+
+    /**
+     * 카스의 예 그대로: *"마곡역이면 **김포공항-송정-마곡-발산-우장산**"*.
+     * ⚠ **방향 인자가 없다** — v1.7.14 의 `commuteNeighbors(rows, name, approachFromHigher)` 가
+     * 상행에서 차례를 뒤집던 것을 카스가 물렸다. 이제 `FR_CODE` 오름차순 하나뿐이다.
+     */
+    @Test
+    fun `다섯 칸은 늘 FR_CODE 오름차순이고 가운데가 등록역이다`() {
+        val got = commuteStops(line5, "마곡")
+        assertEquals(listOf("김포공항", "송정", "마곡", "발산", "우장산"), got)
+        assertEquals("마곡", got[2])                       // COMMUTE_HERE
+        // `역` 을 붙여 쳐도 같은 줄을 찾는다
+        assertEquals(got, commuteStops(line5, "마곡역"))
+        // 끝 역은 모자라는 자리가 빈칸이고 **개수는 늘 다섯**이다
+        assertEquals(listOf("", "", "방화", "개화산", "김포공항"), commuteStops(line5, "방화"))
+        // 모르는 역·빈 목록은 빈 목록(예외 없음)
+        assertEquals(emptyList<String>(), commuteStops(line5, "없는역"))
+        assertEquals(emptyList<String>(), commuteStops(emptyList(), "마곡"))
     }
 }

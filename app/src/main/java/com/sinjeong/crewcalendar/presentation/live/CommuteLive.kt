@@ -25,16 +25,13 @@ package com.sinjeong.crewcalendar.presentation.live
  */
 internal const val COMMUTE_MAX = 5
 
-/** 한 번에 보여 주는 다가오는 열차 수 */
-internal const val COMMUTE_ROWS = 3
-
 /**
  * 등록한 출퇴근 역 하나 = **역 × 호선 × 방향**.
  *
  * ⚠ **[updnLine] 은 `"0"`/`"1"` 이 아니라 낱말이다.** 실시간 **위치**(`realtimePosition`)는
  * 숫자를 주지만 실시간 **도착**(`realtimeStationArrival`)은 `상행`·`하행`(직선 노선) ·
  * `내선`·`외선`(2호선 순환)을 준다 — 2026-09-06 19:51 까치산 실호출로 확인했다.
- * 저장값이므로 낱말을 그대로 담는다(응답과 글자 그대로 견줘야 필터가 맞다).
+ * 저장값이므로 **낱말을 그대로** 담고, 위치 응답과 견줄 때 [posDirMatches] 가 번역한다.
  *
  * 같은 이름 다른 노선을 [subwayId] 가 가른다 — **까치산은 2호선(1002)·5호선(1005) 둘**이고
  * 이 설계의 핵심 사례다.
@@ -44,29 +41,48 @@ internal data class CommuteStation(
     val subwayId: String,
     val updnLine: String,
     /**
-     * **앞 2역 · 뒤 2역**의 이름 — 미니 노선에 그대로 적는다(v1.7.14 ⑤).
-     * 차례는 **화면에 놓이는 차례**(왼쪽부터)이고 등록역은 빠져 있다:
-     * `[왼왼, 왼, (등록역), 오른, 오른오른]` 에서 괄호를 뺀 **넷**이다.
-     * 마곡(5호선 하행)이면 `["김포공항", "송정", "발산", "우장산"]`.
+     * 미니 노선 **다섯 칸의 역 이름** — 앞 2역 · **등록역** · 뒤 2역(v1.7.15 ②).
+     * 차례는 **지리 순서 하나로 고정**(`FR_CODE` 오름차순)이고 [COMMUTE_HERE] 가 등록역이다.
+     * 마곡이면 방향과 무관하게 늘 `["김포공항","송정","마곡","발산","우장산"]` 이다.
      *
-     * ⚠ **등록할 때 딱 한 번** 채운다([commuteNeighbors]) — 볼 때마다 부르지 않는다.
-     * 못 얻었으면 **빈 목록**이고 그때는 미니 노선이 v1.7.13 처럼 이름 없이 점만 찍는다
-     * (옛 저장값도 여기로 떨어진다 — 아래 [decodeCommute] 참고).
-     * 끝 역이라 이웃이 모자라면 그 자리는 **빈 문자열**이다(칸은 남기고 글자만 안 적는다).
+     * ⚠ **v1.7.14 는 이웃 넷만 담고 방향에 따라 차례를 뒤집었다.** 카스가 그것을 물렸다 —
+     * *"상행을 고르면 **열차가 반대방향으로 가면 되지**"*. 차례는 고정이고 뒤집는 것은
+     * **기관차 머리**([fromHigher])다.
+     *
+     * ⚠ **등록할 때 딱 한 번** 채운다([commuteStops]) — 볼 때마다 부르지 않는다.
+     * 못 얻었으면 **빈 목록**이고 그때는 화면이 *"역을 다시 등록해 주세요"* 라고 말한다:
+     * 이름이 없으면 위치 응답의 `statnNm` 을 견줄 상대가 없어 **열차를 아예 못 그린다.**
+     * 끝 역이라 칸이 모자라면 그 자리는 **빈 문자열**이다(칸은 남기고 글자만 안 적는다).
      */
-    val neighbors: List<String> = emptyList(),
+    val stops: List<String> = emptyList(),
+    /**
+     * 이 방향 열차가 **큰 `FR_CODE` 쪽에서 오나**(v1.7.15 ②) — 등록할 때
+     * [approachFromHigher] 가 도착 응답의 `statnFid`/`statnId` 로 정한다.
+     *
+     * [stops] 가 오름차순 고정이므로 이 값이 곧 **화면에서의 진행 방향**이다:
+     * `true` = 오른쪽 → 왼쪽(마곡 · 송정방면), `false` = 왼쪽 → 오른쪽(마곡 · 발산방면).
+     *
+     * ⚠ **방향 낱말에서 유도하면 안 된다** — 실호출로 확인했다(2026-09-07 20:27~28):
+     * 5호선 `상행`(방화행)은 `FR_CODE` **내림차순**인데 2호선 `내선`은 **오름차순**이다
+     * (신도림 내선 `statnFid=…233 → statnTid=…235`). 낱말과 지리 방향의 관계는 노선마다
+     * 다르므로 **응답의 코드**로만 정한다.
+     */
+    val fromHigher: Boolean = false,
 )
 
 /* ── 저장 문자열 ─────────────────────────────────────────────────
  *
- * `역명|subwayId|updnLine|이웃4개(쉼표)` 를 `;` 로 이은 **한 줄**. JSON 라이브러리를 새로
- * 넣지 않는다(이 저장소 관례 — `Weather.kt` KDoc). 역명에 `|`·`;`·`,` 가 들어간 실례는
+ * `역명|subwayId|updnLine|역5개(쉼표)|fromHigher` 를 `;` 로 이은 **한 줄**. JSON 라이브러리를
+ * 새로 넣지 않는다(이 저장소 관례 — `Weather.kt` KDoc). 역명에 `|`·`;`·`,` 가 들어간 실례는
  * 없지만 넣어 두면 줄이 통째로 깨지므로 저장할 때 지운다. 읽기는 **깨진 칸을 조용히 버린다** —
  * 옛 값·손댄 값이 있어도 화면이 안 죽는다.
  *
- * ⚠ **넷째 칸은 v1.7.14 ⑤ 에서 늘었다.** 옛 저장값은 셋뿐이라 그 꼴도 그대로 읽는다:
- *  · v1.7.9~v1.7.13 꼴 `마곡|1005|하행` → 이웃 없음(미니 노선이 이름 없이 뜬다)
- *  · v1.7.14 꼴 `마곡|1005|하행|김포공항,송정,발산,우장산`
+ * ⚠ **v1.7.15 ② 에서 칸이 다섯으로 늘었다. 옛 네 칸 값은 이름을 안 받는다** — 그 꼴의 넷째
+ * 칸은 **방향에 따라 뒤집힌 이웃 넷**이라 지금 규칙(지리 오름차순 고정)으로 읽으면 상행 역이
+ * 거꾸로 그려진다. 조용히 틀리느니 **다시 등록하게** 두는 쪽을 골랐다:
+ *  · v1.7.9~v1.7.13 꼴 `마곡|1005|하행`                         → 이름 없음
+ *  · v1.7.14 꼴 `마곡|1005|하행|김포공항,송정,발산,우장산`        → 이름 없음(넷이라 안 받는다)
+ *  · v1.7.15 꼴 `마곡|1005|상행|김포공항,송정,마곡,발산,우장산|1` → 그대로 읽는다
  * 셋째 칸(방향)이 빈 **더 옛 꼴**은 v1.7.9 부터 버려 왔고 그대로 둔다.
  */
 
@@ -77,20 +93,22 @@ private fun cleanName(s: String) = clean(s).replace(",", "")
 internal fun encodeCommute(list: List<CommuteStation>): String =
     list.take(COMMUTE_MAX).joinToString(";") { s ->
         val head = "${cleanName(s.name)}|${clean(s.subwayId)}|${clean(s.updnLine)}"
-        // 이웃이 없으면 **셋째 칸까지만** 적는다 — 옛 저장값과 글자가 같아 형식이 안 늘어난다.
-        if (s.neighbors.isEmpty()) head
-        else head + "|" + s.neighbors.joinToString(",") { cleanName(it) }
+        // 이름을 못 얻었으면 **셋째 칸까지만** 적는다 — 옛 저장값과 글자가 같아 형식이 안 는다.
+        if (s.stops.size != COMMUTE_SLOTS) head
+        else head + "|" + s.stops.joinToString(",") { cleanName(it) } +
+            "|" + if (s.fromHigher) "1" else "0"
     }
 
 internal fun decodeCommute(saved: String?): List<CommuteStation> =
     saved.orEmpty().split(";").mapNotNull { part ->
         val f = part.split("|")
-        if (f.size !in 3..4) return@mapNotNull null
+        if (f.size < 3) return@mapNotNull null
         val n = f[0].trim(); val id = f[1].trim(); val up = f[2].trim()
         if (n.isBlank() || id.isBlank() || up.isBlank()) return@mapNotNull null
-        // 이웃은 **정확히 넷**일 때만 받는다 — 세 칸짜리 옛 값·잘린 값은 빈 목록으로 떨어진다.
-        val near = f.getOrNull(3)?.split(",")?.map { it.trim() }?.takeIf { it.size == COMMUTE_NEAR * 2 }
-        CommuteStation(n, id, up, near.orEmpty())
+        // 이름은 **다섯 칸 꼴일 때만** 받는다 — 옛 세 칸·네 칸 값은 빈 목록으로 떨어진다.
+        val stops = if (f.size < 5) null
+        else f[3].split(",").map { it.trim() }.takeIf { it.size == COMMUTE_SLOTS }
+        CommuteStation(n, id, up, stops.orEmpty(), fromHigher = f.getOrNull(4)?.trim() == "1")
     }.distinct().take(COMMUTE_MAX)
 
 /* ── ① 역 이름에 `역` 을 붙여 쳐도 찾아진다 (v1.7.14) ─────────────
@@ -211,14 +229,15 @@ internal data class CommuteOption(
     val updnLine: String,
     val bound: String,
     /**
-     * 이 방향 열차가 **큰 `FR_CODE` 쪽에서 오나**(v1.7.14 ⑤) — 응답의 `statnFid`/`statnId` 가
-     * 말한다([approachFromHigher]). 미니 노선의 **역 차례**를 정하는 데만 쓴다.
+     * 이 방향 열차가 **큰 `FR_CODE` 쪽에서 오나** — 응답의 `statnFid`/`statnId` 가 말한다
+     * ([approachFromHigher]). v1.7.14 는 이 값으로 **역 차례를 뒤집었고**, v1.7.15 ② 부터는
+     * 차례를 고정한 채 **기관차 진행 방향**을 정한다([CommuteStation.fromHigher]).
      */
     val fromHigher: Boolean = false,
 ) {
     val label: String get() = "${lineName(subwayId)} · $bound"
-    fun toStation(name: String, neighbors: List<String> = emptyList()) =
-        CommuteStation(name.trim(), subwayId, updnLine, neighbors)
+    fun toStation(name: String, stops: List<String> = emptyList()) =
+        CommuteStation(name.trim(), subwayId, updnLine, stops, fromHigher)
 }
 
 /** `"방화행 - 화곡방면"` → `"화곡방면"`. `-` 가 없으면 통째로, 그것도 비면 방향 낱말. */
@@ -242,72 +261,10 @@ internal fun commuteOptions(rows: List<ArrivalRow>): List<CommuteOption> =
         }
         .sortedWith(compareBy({ it.subwayId }, { it.updnLine }))
 
-/* ── 보는 화면: 다가오는 열차 고르기 ────────────────────────── */
-
-/**
- * **이미 그 역에 닿았거나 지나간** 상태코드. `0` 진입 · `1` 도착 · `2` 출발.
- * 나머지(`3` 전역출발 · `4` 전역진입 · `5` 전역도착 · `99` 운행중)가 다가오는 열차다.
- */
-private val PASSED = setOf("0", "1", "2")
-
-private fun ArrivalRow.matches(s: CommuteStation) =
-    subwayId == s.subwayId && updnLine == s.updnLine
-
-/** 그 역·그 호선·그 방향으로 **다가오는** 열차 (가까운 순, 최대 [COMMUTE_ROWS] 대) */
-internal fun commuteApproaching(
-    rows: List<ArrivalRow>, s: CommuteStation, max: Int = COMMUTE_ROWS,
-): List<ArrivalRow> =
-    rows.filter { it.matches(s) && it.arvlCd !in PASSED }.sortedBy { it.etaSec }.take(max)
-
-/**
- * 지금 그 역에 **진입(0)·도착(1)** 중인 열차 한 대(없으면 null).
- *
- * 다가오는 목록에서는 뺐지만 맨 위 한 줄로는 보여 준다 — 승강장에 서 있거나 개찰구 앞인
- * 승무원에게 *"지금 들어오고 있다"* 는 가장 실행 가능한 정보다. **출발(2)은 안 센다** —
- * 이미 떠난 열차라 알려 줄 값이 없다.
- */
-internal fun commuteAtStation(rows: List<ArrivalRow>, s: CommuteStation): ArrivalRow? =
-    rows.firstOrNull { it.matches(s) && (it.arvlCd == "0" || it.arvlCd == "1") }
-
-internal fun atStationText(arvlCd: String) = if (arvlCd == "0") "지금 진입" else "지금 도착"
-
-/** 남은 초 → 사람 말. 0 이하면 `곧 도착`, 1분 미만이면 초만(`0분 30초`는 안 읽힌다). */
-internal fun etaText(sec: Int): String = when {
-    sec <= 0 -> "곧 도착"
-    sec < 60 -> "${sec}초"
-    else -> "${sec / 60}분 ${sec % 60}초"
-}
-
-/** `"6분 후 (오목교…)"` · `"5분 30초 후"` — 남은 시간을 되풀이하는 문장인가 */
-private val TIME_MSG = Regex("(분|초)\\s*후")
-
-/**
- * 열차 한 줄의 **위치** 글.
- *
- * ⚠ **v1.7.12 ① 부터 화면은 이 글을 안 쓴다** — 위치를 글자 대신 [commuteSlot] 이 낸 칸에
- * 기관차를 세워서 말한다. 함수는 `CommuteTest` 가 잠근 `arvlMsg2` 두 종류(위치 문장 / 남은
- * 시간 문장)의 **판독 규칙**이라 남겨 둔다 — [commuteSlot] 이 같은 글을 다르게 읽으므로
- * 지우면 그 규칙의 근거가 사라진다.
- *
- * `arvlMsg2` 는 승강장 전광판 문장인데 두 종류가 섞여 온다:
- *  · **위치**를 말하는 것 — `"까치산 전역출발"` · `"전역 도착"` · `"3번째 전역"` → 그대로 쓴다.
- *  · **남은 시간**을 말하는 것 — `"6분 후 (오목교(목동운동장앞))"` · `"5분 30초 후"`.
- *    이건 아랫줄 [etaText] 와 같은 말이라 **`arvlMsg3`(그 열차가 지금 있는 역)** 으로 바꾼다.
- *    에뮬 실측에서 `"5분 30초 후"` / `"5분 30초 · 까치산행"` 두 줄이 나란히 떴다 —
- *    한 줄을 통째로 버리는 셈이라 그 자리에 **지금 어디인지**를 넣는 게 맞다.
- */
-internal fun positionText(r: ArrivalRow): String {
-    val msg = r.arvlMsg2.trim()
-    val here = r.arvlMsg3.trim()
-    if (here.isNotBlank() && TIME_MSG.containsMatchIn(msg)) return here
-    return msg.ifBlank { here }.ifBlank { "위치 확인 중" }
-}
-
 /* ── 미니 노선 한 줄 (v1.7.12 ①) ─────────────────────────────
  *
  * 카스: *"세로칸은 최소화 해서 일자로 보여주면 좋지"* → 다가오는 열차를 글자 목록으로 쌓지 않고
- * **가로 미니 노선 한 줄** 위에 기관차를 세운다(시안 "제안 A"). 왼쪽 끝이 [COMMUTE_SLOTS]−1
- * 번째 전역, 오른쪽 끝이 **등록한 그 역**이다.
+ * **가로 미니 노선 한 줄** 위에 기관차를 세운다(시안 "제안 A").
  */
 
 /**
@@ -323,124 +280,168 @@ internal const val COMMUTE_NEAR = 2
  *
  * · v1.7.12 ① : 4칸(`3번째 전역`~등록역). 오른쪽 끝이 등록역이었다.
  * · v1.7.12 ③ : 6칸(`5번째 전역+`~등록역) — *"5칸 전해도 될꺼같은데?"*
- * · **v1.7.14 ⑤ : 5칸 · 등록역이 가운데 · 역명을 적는다.** 여섯 칸에는 이름이 없어
- *   *"몇 번째 전역"* 밖에 못 말했다. 카스가 **전후 2역씩**을 원했으므로 오른쪽 두 칸은
- *   **열차가 가고 나서 지날 역**이다 — 그래서 열차는 0..[COMMUTE_HERE] 에만 선다.
+ * · **v1.7.14 ⑤ : 5칸 · 등록역이 가운데 · 역명을 적는다.**
+ * · **v1.7.15 ① : 다섯 칸 전부에 열차가 설 수 있다.** 도착 예보를 버리고 실시간 **위치**로
+ *   갔더니 등록역을 지나간 열차도 응답에 있다 — 오른쪽 두 칸이 이제 빈 자리가 아니다.
  *
  * ⚠ **여기가 가로 하한이다** — 이름 다섯이 나란히 눕는다. 7 로 올리면 이름이 겹친다
  *   (`CommuteBar` 가 글자를 줄여 막지만 하한 7sp 아래로는 못 간다).
  */
 internal const val COMMUTE_SLOTS = COMMUTE_NEAR * 2 + 1
 
-/** 등록한 역이 앉는 칸 = 한가운데. 열차는 이 칸을 **못 넘는다**(넘으면 이미 지나간 열차다). */
+/** 등록한 역이 앉는 칸 = 한가운데. [CommuteStation.stops] 의 이 자리가 등록한 역이다. */
 internal const val COMMUTE_HERE = COMMUTE_NEAR
 
-/**
- * `"3번째 전역"` · `"[2]번째 전역 (오목교)"` · `"2 번째  전역"` — 숫자와 `번째` 사이에
- * **닫는 대괄호와 공백**이 끼는 꼴을 허용한다(전광판 문장이라 노선마다 꼴이 다르다).
+/* ── ① 보는 화면은 실시간 **위치** 다 (v1.7.15) ─────────────────
+ *
+ * 카스: *"출근역 살펴보니까 **실시간 지하철위치가 아닌거 같은데?**"* → 사실대로 설명하자
+ * *"난 실시간 위치를 원하지"*.
+ *
+ * ## v1.7.14 까지 무엇이 거짓이었나
+ *
+ * 도착 예보(`realtimeStationArrival`)에는 **위치 필드가 없다.** 승강장 전광판 문장
+ * (`arvlMsg2` = `"3번째 전역"`·`"8분 후"`)을 정규식으로 읽어 **추정**했고, 문장이 위치를
+ * 말하지 않으면 맨 왼쪽 칸에 놓았다. 게다가 칸이 앞뒤 2역으로 줄면서 `coerceIn(0, here)` 가
+ * **5역 밖 열차까지 맨 왼쪽 칸에 밀어 넣어** 두 역 앞처럼 보였다.
+ *
+ * ## 지금 — 지도와 **같은 자료**를 본다
+ *
+ * `realtimePosition/{호선명}`([BranchLive.positionsOfLine])이 주는 `statnNm`(지금 역)을
+ * 다섯 칸의 역 이름과 **글자로 견줘** 그 칸에 세운다. **어느 칸에도 없으면 안 그린다** —
+ * 그게 이번에 고치는 거짓말이다. `"몇 분 후"` 는 위치 API 에 없으므로 사라지고
+ * ([sttusText] 의 상태 낱말이 대신한다), 위치 추정 함수 다섯(`commuteSlot`·`commuteAdvance`·
+ * `commuteApproaching`·`commuteAtStation`·`positionText`)은 **지웠다** — 남겨 두면 다시 쓴다.
+ *
+ * ## 실호출 근거 (2026-09-07 20:27~28 · 같은 순간 두 API 를 나란히 불렀다)
+ *
+ * ```
+ * realtimeStationArrival/마곡  : updnLine "상행" · btrainNo 5656 · statnFid 1005000515(발산)
+ * realtimePosition/5호선       : trainNo  5656  · updnLine "0"   · statnNm 발산 · trainSttus 1
+ * realtimeStationArrival/마곡  : updnLine "하행" · btrainNo 5703 · statnFid 1005000513(송정)
+ * realtimePosition/5호선       : trainNo  5703  · updnLine "1"   · statnNm 김포공항 · trainSttus 1
+ * realtimeStationArrival/신도림: updnLine "내선" · btrainNo 8414 / 6416
+ * realtimePosition/2호선       : trainNo  8414 / 6416 · updnLine "0"
+ * realtimeStationArrival/신도림: updnLine "외선" · btrainNo 4439 / 7443
+ * realtimePosition/2호선       : trainNo  4439 / 7443 · updnLine "1"
+ * ```
+ *
+ * **같은 열번을 두 응답에서 맞대 본 여섯 대에 예외가 0건**이다 →
+ * **위치 `"0"` = 도착 `상행`·`내선` / 위치 `"1"` = 도착 `하행`·`외선`.**
  */
-private val NTH_BEFORE = Regex("(\\d+)\\s*\\]?\\s*번째\\s*전역")
 
 /**
- * `"전역 도착"`(한 정거장 전) · **`"전전역 출발"`(두 정거장 전)** — `전` 을 **세어서** 칸을 낸다.
+ * 위치 응답의 `updnLine`(**`"0"`/`"1"` 숫자**)이 저장된 **낱말**과 같은 방향인가.
  *
- * ⚠ `전전역` 은 2026-09-06 v1.7.9 설계 때 못 본 꼴이고 **v1.7.12 검증에서 5호선 마곡 실화면에
- * 떴다**(`전전역 출발`). `전역` 만 보면 두 정거장 전 열차를 한 정거장 전에 세운다.
- *
- * 앞의 `(?:^|[^가-힣])` 는 역 이름 꼬리가 `전` 으로 끝나는 경우(`…전역`)를 안 집으려는 것이다 —
- * `"까치산 전역출발"` 은 앞이 공백이라 걸리고, 붙어 있는 이름은 안 걸려 [arvlCd] 로 떨어진다.
+ * ⚠ 두 API 가 같은 필드 이름에 **다른 값 체계**를 쓴다 — 위 실호출 표가 근거다.
+ * ⚠ **모르는 낱말이면 false** 다(글자가 그대로 같을 때만 통과). 방향을 모르는 채로 그리느니
+ *   **안 그리는 쪽**이 맞다 — 이번 회차가 고치는 것이 바로 "모르면 아무 데나 놓기"다.
  */
-private val PREV_STATIONS = Regex("(?:^|[^가-힣])(전{1,3})역")
-
-/**
- * 열차 한 대의 **미니 노선 칸 좌표** `0..[COMMUTE_HERE]`.
- *
- * `2` = 등록한 역 위 · `1` = 전역 · `0` = **2번째 전역 또는 그보다 멀리**.
- *
- * 읽는 순서(먼저 맞는 것이 이긴다):
- *  1. **[arvlCd] `0`(진입)·`1`(도착) → 역 점 위**(v1.7.9 확정 — 이 둘만 `지금 도착`으로 따로 센다).
- *  2. `당역` 이 든 문장 → 역 점 위.
- *  3. `N번째 전역` → `2 − N`. **`7번째 전역` 처럼 칸을 넘으면 가장 먼 칸(0)으로 떨어뜨린다.**
- *  4. 숫자 없는 `전역` → `전` 을 센다: `"전역 도착"`·`"까치산 전역출발"` 한 정거장 전 ·
- *     **`"전전역 출발"` 두 정거장 전**(2026-09-07 5호선 마곡 실화면에서 확인한 꼴이다).
- *  5. [arvlCd] `3`(전역출발)·`4`(전역진입)·`5`(전역도착) → 한 정거장 전. 글자가
- *     `"5분 30초 후"` 처럼 남은 시간만 말할 때 상태코드가 대신 위치를 말해 준다.
- *  6. **그 밖에는 0** — `"8분 후"`·빈 문자열·모르는 글자꼴. 아직 멀리 있다는 뜻이라
- *     역 점 위에 세우는 것보다 안전하다. **절대 예외를 던지지 않는다.**
- *
- * ⚠ **0 은 "정확히 2번째 전역" 이 아니다** — `N ≥ 2` 와 위치를 아예 안 말하는 문장이 다 같이
- * 앉는 **바닥 칸**이다(v1.7.14 ⑤ 지시: *"2역 밖이면 맨 끝 칸"*). v1.7.12~13 은 칸이 여섯이라
- * 왼쪽 끝 라벨에 `+` 를 달아 그 뭉침을 말했는데, 이제 그 자리에 **진짜 역 이름**이 서므로
- * `+` 를 못 붙인다 — 대신 **2역 밖 열차는 그 역 점 위에 선 것이 아니라 그 칸에 모인 것**이다.
- *
- * ⚠ **[COMMUTE_HERE] 오른쪽 칸(뒤 2역)에는 열차가 서지 않는다** — 도착 API 는 *"이 역으로
- * 다가오는 열차"* 만 주기 때문이다. 그 두 칸은 **내가 탈 열차가 이 다음에 갈 역**을 알려 주는
- * 자리다(카스가 원한 *"전후 두단계"*).
- *
- * ⚠ 여기 기관차엔 **열번을 넣지 않는다.** 확정 표의 *"열차 아이콘 = 열번 상자"* 는 실시간
- * **지도**(본선·지선) 규칙인데, 도착 API 응답에는 열번(`btrainNo`)이 오긴 해도 이 칸이 말하는
- * 것은 *"내가 탈 열차가 몇 정거장 앞"* 이라 열번이 정보가 아니다(지도처럼 내 열번을 찾는
- * 화면이 아니다). 넣을 자리도 없다 — 몸통이 25dp 라 4자리가 안 든다.
- */
-internal fun commuteSlot(arvlMsg2: String, arvlCd: String): Int {
-    val here = COMMUTE_HERE
-    if (arvlCd == "0" || arvlCd == "1") return here
-    val msg = arvlMsg2.trim()
-    if (msg.contains("당역")) return here
-    NTH_BEFORE.find(msg)?.let { m ->
-        val n = m.groupValues[1].toIntOrNull() ?: return 0
-        return (here - n).coerceIn(0, here)
+internal fun posDirMatches(posUpdnLine: String, savedWord: String): Boolean {
+    val p = posUpdnLine.trim()
+    return when (savedWord.trim()) {
+        "상행", "내선" -> p == "0"
+        "하행", "외선" -> p == "1"
+        else -> p.isNotEmpty() && p == savedWord.trim()
     }
-    PREV_STATIONS.find(msg)?.let { return (here - it.groupValues[1].length).coerceIn(0, here) }
-    if (arvlCd == "3" || arvlCd == "4" || arvlCd == "5") return here - 1
-    return 0
 }
 
 /**
- * 열차 한 대를 **한 걸음** 앞으로 옮긴다 — 미니 노선 연속 좌표 `0f..[COMMUTE_HERE]f`(v1.7.13 ①).
+ * 역 이름 대조용 **꼬리표 뗀 꼴**. 위치 응답은 괄호 별칭을 달고 오는데
+ * (`굽은다리(강동구민회관앞)`·`오목교(목동운동장앞)`·`신정(은행정)`) 역 목록 API 의
+ * `STATION_NM` 은 **괄호 없이** 온다(2026-09-07 `SearchSTNBySubwayLineInfo/05호선` 56행 전수).
  *
- * 카스: *"역으로 다가오는 **열차아이콘이 안움직이는데?**"* — v1.7.12 는 15초 폴링 때마다
- * 칸을 뛰고 그 사이엔 멈춰 있었다. 재료는 이미 응답에 있다: **남은 초**([etaSec] = `barvlDt`,
- * 화면 오른쪽의 `N분 M초`)가 1초씩 준다. 그 값으로 칸 사이를 메우면 **API 를 더 안 부른다.**
- *
- * ## 규칙 — 확정 표 *"열차 이동 = 시간 기반 등속 전진"*(v1.7.5)을 그대로 따른다
- *
- *  ⓐ **앞으로만 간다.** [dtSec] 이 음수면 0 이고, 새 응답이 뒤를 가리켜도 [prev] 를 들고 버틴다.
- *  ⓑ **다음 칸을 안 넘는다.** 예측이 실측을 앞질러 있지도 않은 도착을 그리지 않는다
- *     (`CREEP_MARGIN` 과 같은 취지 · 여기는 **한 칸이 상한**이고 등록역 칸([COMMUTE_HERE])을 못 넘는다).
- *  ⓒ **도착·진입이면 역 점 위에 선다** — [commuteSlot] 이 이미 마지막 칸을 주므로 그대로 멈춘다.
- *
- * ## ⚠ **자리를 눈금에서 다시 계산하지 말 것** — 그러면 폴링마다 멎는다
- *
- * 처음엔 `칸 + 남은칸 × 조회뒤흐른초 ÷ 눈금` 으로 **매번 다시 계산**했다. 에뮬 실측(2026-09-07
- * 03:58:41~54, 5호선 마곡)에서 15초 동안 `0.075 → 0.232` 로 잘 흐르다가 **다음 폴링에서
- * 계산값이 0 으로 되감겼고**, ⓐ 가 뒷걸음은 막았지만 자리가 `0.232` 에 **13초를 붙박여** 있었다.
- * 15초 중 2초만 움직이는 셈이라 카스가 말한 그 "안 움직인다"가 그대로 돌아온다.
- *
- * 그래서 [prev] 에 **걸음을 더한다**(v1.7.5 `stepMotion` 과 같은 꼴). 속도만 폴링마다 새로
- * 잡는다 — `남은 초 ÷ 남은 칸` = **한 칸에 몇 초**. 칸이 정수로 되감겨도 자리는 안 되감긴다.
- *
- * ⚠ **`TrainMotion.stepMotion` 을 그대로는 못 쓴다.** 그쪽은 43역 **순환** 좌표라 `unfold` 가
- * 반 바퀴(여기선 3칸)를 넘는 차이를 "뒤로"로 접는다 — 0번 칸 열차가 5번 칸을 목표로 받으면
- * **−1 칸(뒤)** 이 된다(실산: `d = 5 → 5 > 3 → d − 6 = −1`). 순환이 아닌 6칸 자에는 안 맞아
- * 여기 순수 함수를 따로 두고 `CommuteMiniTest` 가 잠근다.
- *
- * @param prev 직전 걸음의 자리(처음 본 열차면 `null` — 그때는 [slot] 에서 시작한다).
- * @param slot [commuteSlot] 이 낸 칸.
- * @param etaSec 지금 응답의 남은 초(`barvlDt`) — **속도만** 여기서 나온다.
- * @param dtSec 직전 걸음 뒤로 흐른 초(1초 눈금이면 1). 음수는 0 으로 본다.
+ * ⚠ **`역` 은 안 뗀다** — 두 응답이 같은 표기 세계라 뗄 이유가 없고, 떼면 `서울역` 이
+ * `서울`(GTX-A 의 다른 역)로 샌다([stationQueries] KDoc 의 그 함정이다).
  */
-internal fun commuteAdvance(prev: Float?, slot: Int, etaSec: Int, dtSec: Float): Float {
-    val last = COMMUTE_HERE.toFloat()                               // 등록역 칸이 상한이다
-    if (slot >= COMMUTE_HERE) return last                           // ⓒ 도착 — 역 점 위
-    if (prev == null) return slot.toFloat().coerceIn(0f, last)      // 처음 본 열차
-    /** 한 칸에 몇 초 — 남은 칸을 남은 초에 간다고 본 **등속** 하나. 하한 1초(0 나눗셈 방지). */
-    val secPerSlot = (etaSec.toFloat() / (COMMUTE_HERE - slot)).coerceAtLeast(1f)
-    // ⓑ 상한은 다음 칸. 다만 [prev] 가 이미 그보다 앞이면(칸이 뒤로 온 이상한 응답)
-    // 끌어내리지 않고 **그 자리에 선다** — ⓐ.
-    val stop = maxOf(minOf(slot + 1f, last), prev)
-    return (prev + dtSec.coerceAtLeast(0f) / secPerSlot).coerceIn(0f, stop)
+internal fun normStop(name: String) = name.substringBefore("(").trim()
+
+/** 종착역명(`성수종착`·`신도림지선`·`방화`) → 화면에 적는 `방화행`. 빈 값이면 빈 문자열. */
+internal fun destText(statnTnm: String): String {
+    var s = normStop(statnTnm)
+    for (tail in listOf("종착", "지선", "행")) if (s.length > tail.length && s.endsWith(tail)) {
+        s = s.dropLast(tail.length)
+    }
+    return if (s.isBlank()) "" else "${s}행"
 }
+
+/**
+ * `trainSttus` → **짧은 상태 낱말**. 값은 본선 지도([BranchLive.mainTrains])와 **같은 표**다 —
+ * 같은 자료를 두 화면이 다른 말로 부르면 안 된다.
+ * `0` 진입 · `1` 도착 · `2` 출발 · `3` 전역출발(= 두 역 사이) · 그 밖은 모름.
+ */
+internal fun sttusText(sttus: String) = when (sttus.trim()) {
+    "0" -> "진입"; "1" -> "도착"; "2" -> "출발"; "3" -> "접근 중"; else -> "운행 중"
+}
+
+/**
+ * 역 점 **주변의 미세 위치**(칸 단위) — 값은 `BranchLive.posOf` 와 **같은 표**다.
+ * 부호는 **진행 방향**을 따라간다: 진입은 그 역 **앞**, 출발은 **뒤**, 전역출발은 두 역 사이.
+ *
+ * @param forward 화면에서 **왼쪽 → 오른쪽**으로 가면 true(= [CommuteStation.fromHigher] 의 반대).
+ */
+internal fun commuteOffset(sttus: String, forward: Boolean): Float {
+    val base = when (sttus.trim()) {
+        "0" -> -0.15f      // 진입 — 다음 역 바로 앞
+        "1" -> 0f          // 도착 — 역 위
+        "2" -> 0.15f       // 출발 — 역을 막 벗어남
+        "3" -> -0.6f       // 전역 출발 — 두 역 사이
+        else -> 0f
+    }
+    return base * (if (forward) 1f else -1f)
+}
+
+/** 미니 노선에 그릴 열차 한 대. [pos] 는 칸 좌표 `0f..COMMUTE_SLOTS-1f`. */
+internal data class CommuteTrain(
+    val trainNo: String,
+    val slot: Int,
+    val pos: Float,
+    val status: String,
+    val dest: String,
+)
+
+/**
+ * 위치 응답 → **다섯 칸 위에 세울 열차들**(v1.7.15 ①).
+ *
+ * 거르는 순서: ① 같은 호선 ② 같은 방향([posDirMatches]) ③ `statnNm` 이 **다섯 칸 이름 중
+ * 하나**([normStop] 로 견준다). ③ 을 못 넘으면 **그 열차는 아예 안 그린다** — 맨 왼쪽 칸에
+ * 밀어 넣지 않는다(v1.7.14 까지의 거짓 표시).
+ *
+ * 이름을 못 얻은 등록값([CommuteStation.stops] 이 비었거나 다섯이 아님)은 견줄 상대가 없어
+ * **빈 목록**이다 — 화면이 *"역을 다시 등록해 주세요"* 로 안내한다.
+ *
+ * 순수 함수 — `CommuteMiniTest` 가 잠근다.
+ */
+internal fun commuteTrains(rows: List<PositionRow>, s: CommuteStation): List<CommuteTrain> {
+    if (s.stops.size != COMMUTE_SLOTS) return emptyList()
+    val keys = s.stops.map { normStop(it) }
+    val forward = !s.fromHigher
+    val lastSlot = (COMMUTE_SLOTS - 1).toFloat()
+    return rows.asSequence()
+        .filter { it.subwayId.trim() == s.subwayId.trim() }
+        .filter { posDirMatches(it.updnLine, s.updnLine) }
+        .mapNotNull { r ->
+            val here = normStop(r.statnNm)
+            val slot = keys.indexOfFirst { it.isNotBlank() && it == here }
+            if (slot < 0) return@mapNotNull null
+            CommuteTrain(
+                trainNo = r.trainNo,
+                slot = slot,
+                pos = (slot + commuteOffset(r.trainSttus, forward)).coerceIn(0f, lastSlot),
+                status = sttusText(r.trainSttus),
+                dest = destText(r.statnTnm),
+            )
+        }
+        .distinctBy { it.trainNo }
+        .toList()
+}
+
+/**
+ * 오른쪽 두 줄이 말할 **한 대** — 등록역으로 **다가오는 쪽**에서 가장 가까운 열차.
+ * 지나간 열차(진행 방향 뒤쪽 칸)는 안 고른다. 없으면 `null` 이고 화면은 빈 상태 문구를 쓴다.
+ */
+internal fun commuteLead(trains: List<CommuteTrain>, fromHigher: Boolean): CommuteTrain? =
+    trains.filter { if (fromHigher) it.slot >= COMMUTE_HERE else it.slot <= COMMUTE_HERE }
+        .minByOrNull { kotlin.math.abs(it.slot - COMMUTE_HERE) }
 
 /* ── 호선 색 ─────────────────────────────────────────────────
  *
@@ -594,21 +595,30 @@ internal fun frKey(frCode: String): Triple<String, Int, Int> {
 }
 
 /**
- * 등록역의 **앞 2역 · 뒤 2역 이름 넷**(화면에 놓이는 차례). 못 찾으면 **빈 목록**이고,
+ * 미니 노선 **다섯 칸의 이름** — 앞 2역 · **등록역** · 뒤 2역. 못 찾으면 **빈 목록**이고,
  * 끝 역이라 모자라는 자리는 **빈 문자열**이다.
+ *
+ * ## ② 차례는 **지리 순서 하나로 고정**이다 (v1.7.15)
+ *
+ * 카스: *"왼쪽에서 오는게 편할듯"* → 그러나 같은 대화에서 *"상행을 고르면 **열차가 반대방향으로
+ * 가면 되지**"* · *"마곡역 **송정방면**으로 지정했을때 **열차가 반대방향으로 움직여야지**?"*.
+ *
+ * v1.7.14 는 `approachFromHigher` 로 **역 차례를 뒤집어** 열차가 늘 왼쪽에서 오게 했다.
+ * 그러면 같은 역이 방향에 따라 좌우가 뒤바뀌어 지도(늘 같은 지리 배치)와 읽는 법이 달라진다.
+ * 이제 차례는 **`FR_CODE` 오름차순 하나**이고, 뒤집는 것은 **기관차 머리와 몸**이다
+ * ([CommuteStation.fromHigher] → `headingFor`/`locoFlip`, 본선 지도가 이미 쓰는 방식).
+ *
+ * ⚠ **오름차순을 고른 근거**: `FR_CODE` 가 곧 노선 위 차례이고(510 방화 … 514 마곡 … 558
+ * 하남검단산), 카스가 든 예 `김포공항-송정-마곡-발산-우장산` 이 정확히 그 오름차순이다.
  *
  * @param rows 그 노선의 역 목록([StationRow]).
  * @param name 등록역 이름 — 사용자가 친 그대로 받고 [bareStation] 으로도 한 번 더 견준다
  *   (`마곡역` 으로 쳐도 `마곡` 줄을 찾는다). **정확일치가 먼저**라 `서울역` 이 `서울`(GTX-A)로
  *   새지 않는다.
- * @param approachFromHigher 열차가 **큰 `FR_CODE` 쪽에서** 온다면 true. 그러면 차례를 뒤집어
- *   **늘 왼쪽에서 열차가 다가오게** 한다(v1.7.5 확정 "앞으로만" 과 화면 방향을 맞춘다).
- *   카스가 든 예(`마곡` 5호선 **하행**)는 false 라 `김포공항-송정-마곡-발산-우장산` 그대로다.
  */
-internal fun commuteNeighbors(
+internal fun commuteStops(
     rows: List<StationRow>,
     name: String,
-    approachFromHigher: Boolean,
     near: Int = COMMUTE_NEAR,
 ): List<String> {
     val target = rows.firstOrNull { it.name.trim() == name.trim() }
@@ -620,11 +630,9 @@ internal fun commuteNeighbors(
         val k = frKey(it.frCode)
         k.first == tk.first && if (tk.third == 0) k.third == 0 else k.second == tk.second
     }.sortedWith(compareBy({ frKey(it.frCode).second }, { frKey(it.frCode).third }))
-    val ordered = if (approachFromHigher) group.asReversed() else group
-    val i = ordered.indexOfFirst { it.frCode.trim() == target.frCode.trim() }
+    val i = group.indexOfFirst { it.frCode.trim() == target.frCode.trim() }
     if (i < 0) return emptyList()
-    return ((i - near)..(i + near)).filter { it != i }
-        .map { ordered.getOrNull(it)?.name.orEmpty() }
+    return ((i - near)..(i + near)).map { group.getOrNull(it)?.name.orEmpty() }
 }
 
 /**

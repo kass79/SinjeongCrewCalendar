@@ -329,7 +329,7 @@ fun SettingsScreen(
                 title = "출퇴근 역",
                 sub = when {
                     commute.isEmpty() ->
-                        "등록하면 달력 상세시트 행로표 위에 실시간 도착이 뜹니다 (최대 ${COMMUTE_MAX}개)"
+                        "등록하면 달력 상세시트 행로표 위에 실시간 위치가 뜹니다 (최대 ${COMMUTE_MAX}개)"
                     !commuteOn -> "꺼짐 — 등록은 그대로입니다 (${commute.size}개). 스위치를 켜면 다시 보입니다"
                     else -> commute.joinToString(" · ") { commuteLabel(it) }
                 },

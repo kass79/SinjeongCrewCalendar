@@ -857,8 +857,28 @@ internal object BranchLive {
         Result.failure(Exception("모든 키 일일 한도 초과 (자정 리셋)"))
     }
 
-    private suspend fun fetchPositions() =
-        fetch("realtimePosition/0/100/${URLEncoder.encode("2호선", "UTF-8")}").map(::parsePositions)
+    private suspend fun fetchPositions(lineName: String = "2호선") =
+        fetch("realtimePosition/0/100/${URLEncoder.encode(lineName, "UTF-8")}").map(::parsePositions)
+
+    /**
+     * **한 호선의 실시간 위치 전부**(v1.7.15 ①) — 출퇴근 역 줄이 쓴다.
+     *
+     * 카스: *"출근역 살펴보니까 **실시간 지하철위치가 아닌거 같은데?**"* → *"난 실시간 위치를
+     * 원하지"*. v1.7.14 까지 출퇴근 역은 **도착 예보**([arrivalsAt])의 전광판 문장을 파싱해
+     * 위치를 **추정**했고, 문장에 위치가 없으면 맨 왼쪽 칸에 밀어 넣었다 — 5역 밖 열차가 두 역
+     * 앞처럼 보이는 **거짓 표시**였다. 이제 지도와 **같은 자료**(`realtimePosition`)를 본다.
+     *
+     * ⚠ **호선 이름만 다르고 나머지는 지선·본선 경로와 한 글자도 안 다르다** —
+     * [fetchPositions] 의 기본 인자가 `"2호선"` 이라 [loadSnapshot]·[locate] 는 그대로다
+     * (`BranchLiveTest` 가 그 경로를 잠근다).
+     *
+     * ⚠ 호출은 **호선마다 1회**다(역마다가 아니다). 부르는 쪽([CommuteBar])이 펼친 칩의
+     * **호선 하나**로 폴링을 묶어 두므로 같은 호선 역을 여럿 등록해도 호출이 안 는다.
+     *
+     * ⚠ `INFO-200`(운행 종료·0건)은 오류가 아니라 **빈 목록**이다([apiError]).
+     */
+    internal suspend fun positionsOfLine(lineName: String): Result<List<PositionRow>> =
+        fetchPositions(lineName)
 
     /**
      * 알람 발화 시 **1회**: 후보 열번 중 지금 API 에 살아 있는 첫 열차. 실패·없음 → null.
