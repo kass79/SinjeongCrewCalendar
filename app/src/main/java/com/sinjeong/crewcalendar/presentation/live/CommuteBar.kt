@@ -73,7 +73,8 @@ import kotlinx.coroutines.launch
  *
  * 카스: *"아이콘을 좀 더 귀엽게 각호선 색상에 맞게 … 세로칸은 최소화 해서 일자로"*.
  * 종전엔 다가오는 열차 최대 세 대를 **글자 목록**으로 세로로 쌓았다(약 131dp). 이제
- * [CommuteMiniLine] 이 한 줄로 접는다 — 왼쪽 끝이 `3번째 전역`, 오른쪽 끝이 등록한 역,
+ * [CommuteMiniLine] 이 한 줄로 접는다 — 왼쪽 끝이 `5번째 전역+`(v1.7.12 ③ 에서 4칸→6칸),
+ * 오른쪽 끝이 등록한 역,
  * 그 위에 **호선 색 꼬마 기관차**가 서고, 오른쪽에 **가장 가까운 한 대**의 남은 시간·종착이 붙는다.
  * 칩 줄은 v1.7.9 확정 그대로다(한 줄·옆으로 밀기·최대 4개) — 카스가 고른 것이 *"제안 A"* 다.
  */
@@ -194,7 +195,7 @@ private val MINI_H = 40.dp
 private val LOCO_TOP_ROOM = 18.dp
 
 /**
- * **가로 미니 노선 한 줄** — 왼쪽 끝이 `3번째 전역`, 오른쪽 끝이 **등록한 그 역**(큰 점)이고
+ * **가로 미니 노선 한 줄** — 왼쪽 끝이 `5번째 전역+`, 오른쪽 끝이 **등록한 그 역**(큰 점)이고
  * 그 위에 다가오는 열차가 기관차로 선다. 칸 좌표는 순수 함수 [commuteSlot] 이 낸다.
  *
  * 색은 **호선 색**([lineArgb])이다 — 카스: *"아이콘을 좀 더 귀엽게 각호선 색상에 맞게"*.
@@ -213,8 +214,11 @@ private fun CommuteMiniLine(station: CommuteStation, slots: List<Int>, modifier:
             TextStyle(fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ink),
             maxLines = 1, overflow = TextOverflow.Ellipsis,
         )
+        // 왼쪽 끝 라벨의 `+` 는 **"5번째 전역 이상"** 이다 — 이 칸은 `N ≥ 5` 와 위치를 아예
+        // 안 말하는 문장(`8분 후`)이 다 같이 앉는 **바닥 칸**이라([commuteSlot] 6절) 그냥
+        // `5번째 전역` 이라 적으면 뭉침이 조용해진다. 글자 하나라 왼쪽 여백도 거의 안 는다.
         val farL = tm.measure(
-            "${COMMUTE_SLOTS - 1}번째 전역",
+            "${COMMUTE_SLOTS - 1}번째 전역+",
             TextStyle(fontSize = 8.sp, color = ink.copy(alpha = 0.7f)),
             maxLines = 1,
         )

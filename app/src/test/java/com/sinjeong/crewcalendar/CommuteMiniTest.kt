@@ -2,6 +2,8 @@ package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_LINE_FALLBACK_ARGB
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_SLOTS
+import com.sinjeong.crewcalendar.presentation.live.LINE_ARGB
+import com.sinjeong.crewcalendar.presentation.live.LINE_NAMES
 import com.sinjeong.crewcalendar.presentation.live.commuteSlot
 import com.sinjeong.crewcalendar.presentation.live.lineArgb
 import org.junit.Assert.assertEquals
@@ -12,7 +14,7 @@ import org.junit.Test
 /**
  * 출퇴근 역 **미니 노선**(v1.7.12 ①)의 칸 좌표와 호선 색을 잠근다.
  *
- * 칸은 `0`(3번째 전역) … `3`(등록한 역)이다. `arvlMsg2` 는 승강장 전광판 문장이라 꼴이
+ * 칸은 `0`(5번째 전역 이상) … `5`(등록한 역)이다. `arvlMsg2` 는 승강장 전광판 문장이라 꼴이
  * 여러 가지고, **모르는 꼴이 와도 절대 예외가 나면 안 된다** — 상세시트가 통째로 죽는다.
  */
 class CommuteMiniTest {
@@ -30,7 +32,7 @@ class CommuteMiniTest {
 
     @Test
     fun `출발 2 도 좌표는 나온다 - 화면이 거를 뿐 함수는 안 죽는다`() {
-        // `commuteApproaching` 이 2 를 빼지만 함수 자체는 어떤 값이 와도 0..3 을 돌려준다.
+        // `commuteApproaching` 이 2 를 빼지만 함수 자체는 어떤 값이 와도 0..last 를 돌려준다.
         assertTrue(commuteSlot("당역 출발", "2") in 0..last)
         assertTrue(commuteSlot("", "2") in 0..last)
     }
@@ -38,12 +40,16 @@ class CommuteMiniTest {
     /* ── arvlMsg2 글자꼴 ─────────────────────────────────────── */
 
     @Test
-    fun `N번째 전역 은 3 빼기 N`() {
-        assertEquals(0, commuteSlot("3번째 전역", "99"))
-        assertEquals(1, commuteSlot("2번째 전역", "99"))
-        assertEquals(2, commuteSlot("1번째 전역", "99"))
-        assertEquals(1, commuteSlot("[2]번째 전역 (오목교(목동운동장앞))", "99"))
-        assertEquals(1, commuteSlot("2 번째  전역", "99")) // 사이 공백이 섞여도 같은 칸
+    fun `N번째 전역 은 5 빼기 N`() {
+        // v1.7.12 ③ — 칸이 4개(3번째 전역까지)에서 **6개(5번째 전역까지)** 로 넓어졌다.
+        // 카스: *"미니 노선이 3번째 전역까지 가 최선인거야? 5칸 전해도 될꺼같은데?"*
+        assertEquals(0, commuteSlot("5번째 전역", "99"))
+        assertEquals(1, commuteSlot("4번째 전역", "99"))
+        assertEquals(2, commuteSlot("3번째 전역", "99"))
+        assertEquals(3, commuteSlot("2번째 전역", "99"))
+        assertEquals(4, commuteSlot("1번째 전역", "99"))
+        assertEquals(3, commuteSlot("[2]번째 전역 (오목교(목동운동장앞))", "99"))
+        assertEquals(3, commuteSlot("2 번째  전역", "99")) // 사이 공백이 섞여도 같은 칸
     }
 
     @Test
@@ -99,7 +105,7 @@ class CommuteMiniTest {
     }
 
     @Test
-    fun `0번째 전역 은 역 점 위 - 3 빼기 0`() {
+    fun `0번째 전역 은 역 점 위 - 5 빼기 0`() {
         assertEquals(last, commuteSlot("0번째 전역", "99"))
     }
 
@@ -121,6 +127,15 @@ class CommuteMiniTest {
         assertEquals(COMMUTE_LINE_FALLBACK_ARGB, lineArgb(""))
         assertEquals(COMMUTE_LINE_FALLBACK_ARGB, lineArgb("1002 "))  // 공백 섞임 = 모르는 값
         assertNotEquals(COMMUTE_LINE_FALLBACK_ARGB, lineArgb("1002"))
+    }
+
+    @Test
+    fun `이름 표와 색 표의 키가 한 벌이다`() {
+        // v1.7.12 ① 은 여섯 id(1061·1069·1071·1078·1094·1095)에 **이름만 있고 색이 없어**
+        // 그 노선 기관차가 조용히 회색으로 떨어졌다 — 화면이 죽지 않아 눈으로만은 못 잡는다.
+        // LINE_NAMES·LINE_ARGB 가 `internal` 인 이유가 이 대조다(둘 다 KDoc 에 적혀 있다).
+        assertEquals("이름만 있고 색이 없는 id", emptySet<String>(), LINE_NAMES.keys - LINE_ARGB.keys)
+        assertEquals("색만 있고 이름이 없는 id", emptySet<String>(), LINE_ARGB.keys - LINE_NAMES.keys)
     }
 
     @Test
