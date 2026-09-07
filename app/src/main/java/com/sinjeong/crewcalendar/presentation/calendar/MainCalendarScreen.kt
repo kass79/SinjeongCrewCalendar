@@ -1302,7 +1302,9 @@ private fun DayDetailContent(
              * ⚠ **[day.date] 기준이지 [effDate] 가 아니다** — 비번 날 행로표는 전날 야간 것이지만
              *   출퇴근 열차는 **지금 이 순간**의 것이라 전날로 되돌릴 값이 없다.
              */
-            if (day.date == LocalDate.now()) CommuteBar(commuteStations)
+            // ⚠ v1.7.14 ⑥ — 색이 **지도 스타일**을 따라간다(카스: *"지도스타일도 같이 클레이로
+            //   바뀌면 바뀔수있게!"*). 바로 아래 지선 실시간 카드와 같은 팔레트다.
+            if (day.date == LocalDate.now()) CommuteBar(commuteStations, style = mapStyle)
 
             // 배치 확정: "전반사업 07:18~10:33 / └열번 xxxx" — 시각은 시각표, 열번은 행로표
             // ⚠ 아래는 전부 **[effDuty]·[effDate]** 기준이다 — 비번이면 전날 야간, 아니면 오늘 그대로.

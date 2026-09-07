@@ -5,9 +5,11 @@ import com.sinjeong.crewcalendar.presentation.live.BranchLive
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
 import com.sinjeong.crewcalendar.presentation.live.CommuteStation
 import com.sinjeong.crewcalendar.presentation.live.atStationText
+import com.sinjeong.crewcalendar.presentation.live.bareStation
 import com.sinjeong.crewcalendar.presentation.live.boundOf
 import com.sinjeong.crewcalendar.presentation.live.commuteApproaching
 import com.sinjeong.crewcalendar.presentation.live.commuteAtStation
+import com.sinjeong.crewcalendar.presentation.live.commuteChipLabel
 import com.sinjeong.crewcalendar.presentation.live.commuteLabel
 import com.sinjeong.crewcalendar.presentation.live.commuteOnOf
 import com.sinjeong.crewcalendar.presentation.live.commuteOptions
@@ -16,6 +18,7 @@ import com.sinjeong.crewcalendar.presentation.live.encodeCommute
 import com.sinjeong.crewcalendar.presentation.live.etaText
 import com.sinjeong.crewcalendar.presentation.live.lineName
 import com.sinjeong.crewcalendar.presentation.live.positionText
+import com.sinjeong.crewcalendar.presentation.live.stationQueries
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -325,5 +328,137 @@ class CommuteTest {
         assertEquals("가나다|1002|내선", s)
         assertNotNull(decodeCommute(s).firstOrNull())
         assertEquals(1, decodeCommute(s).size)
+    }
+
+    /* ── v1.7.14 ① 이름에 `역` 을 붙여도 찾아진다 ─────────────── */
+
+    /**
+     * 카스: *"출퇴근역 **검색에 마곡, 이면 마곡역으로까지 검색**되게 해줘!"*
+     *
+     * 도착 API 는 `마곡` 으로만 답한다 — 2026-09-07 실호출에서
+     * `realtimeStationArrival/마곡` 은 4건, **`.../마곡역` 은 `INFO-200`(0건)** 이었다.
+     * 그래서 **두 꼴을 차례로** 시도하고 **호출은 최대 2회**다.
+     */
+    @Test
+    fun `조회 후보는 원문 먼저 그다음 역 붙이거나 뗀 꼴 - 최대 둘`() {
+        assertEquals(listOf("마곡", "마곡역"), stationQueries("마곡"))
+        assertEquals(listOf("마곡역", "마곡"), stationQueries("마곡역"))
+        // 앞뒤 공백은 떼고, 이름은 **한 글자도 안 줄인다**(확정 표)
+        assertEquals(listOf("구로디지털단지", "구로디지털단지역"), stationQueries("  구로디지털단지 "))
+        // 빈 값이면 조회 자체를 안 한다
+        assertEquals(emptyList<String>(), stationQueries(""))
+        assertEquals(emptyList<String>(), stationQueries("   "))
+        // `역` 한 글자는 떼면 빈 이름이라 후보가 하나뿐이다
+        assertEquals(listOf("역"), stationQueries("역"))
+        // **어떤 입력이든 둘을 안 넘는다** — 과다 호출 금지
+        listOf("마곡", "마곡역", "역곡", "서울역", "동대문역사문화공원", "역", "a").forEach {
+            assertTrue(it, stationQueries(it).size <= 2)
+        }
+    }
+
+    /**
+     * ⚠ **`서울역` 은 이름이 `역` 으로 끝나는 진짜 역이다**(1·4호선·경의선·공항철도 —
+     * 2026-09-07 역 목록 799행 전수에서 `역` 으로 끝나는 이름은 이 하나뿐이었다).
+     * `서울` 은 **GTX-A 의 다른 역**이라 무턱대고 떼면 딴 역을 부른다.
+     * 그래서 [stationQueries] 는 **떼는 것이 아니라 원문을 먼저 시도**한다.
+     */
+    @Test
+    fun `서울역은 원문이 먼저라 다른 역으로 안 샌다`() {
+        assertEquals("서울역", stationQueries("서울역").first())
+        assertEquals(listOf("서울역", "서울"), stationQueries("서울역"))
+    }
+
+    @Test
+    fun `대조용 이름은 꼬리 역만 뗀다`() {
+        assertEquals("마곡", bareStation("마곡역"))
+        assertEquals("마곡", bareStation(" 마곡 "))
+        assertEquals("역곡", bareStation("역곡"))       // 앞의 `역` 은 안 건드린다
+        assertEquals("역", bareStation("역"))           // 한 글자는 그대로(빈 이름 방지)
+        assertEquals("", bareStation(""))
+    }
+
+    /* ── v1.7.14 ② 칩에서 방향 빼기 ─────────────────────────── */
+
+    /**
+     * 카스: *"출퇴근역 아이콘에 **하행,내선 이런 정보는 안해도** 될꺼같애..그래야 **가로 크기가
+     * 줄어들듯**"* — **v1.7.13 ⑧ 을 되무르는 것이고 카스의 결정이다.**
+     *
+     * ⚠ **설정 목록([commuteLabel])은 방향을 그대로 둔다** — 거기서는 같은 역 두 줄을 갈라
+     * **지워야** 하므로 글자가 같으면 무엇을 지우는지 알 수 없다.
+     */
+    @Test
+    fun `칩 글자에는 방향이 없고 설정 목록에는 있다`() {
+        val down = CommuteStation("마곡", "1005", "하행")
+        val up = CommuteStation("마곡", "1005", "상행")
+        assertEquals("5호선 마곡", commuteChipLabel(down))
+        assertEquals("5호선 마곡", commuteChipLabel(up))
+        // 칩 두 개의 글자는 이제 **같다** — 무엇을 고른 상태인지는 칩 색(v1.7.14 ④)이 말한다.
+        assertEquals(commuteChipLabel(down), commuteChipLabel(up))
+        // 설정 목록은 종전대로 갈린다
+        assertEquals("5호선 마곡 · 하행", commuteLabel(down))
+        assertEquals("5호선 마곡 · 상행", commuteLabel(up))
+        assertTrue(commuteLabel(down) != commuteLabel(up))
+        // 역 이름은 여전히 한 글자도 안 줄인다
+        assertEquals(
+            "2호선 구로디지털단지",
+            commuteChipLabel(CommuteStation("구로디지털단지", "1002", "내선")),
+        )
+        assertEquals("9999 어딘가", commuteChipLabel(CommuteStation("어딘가", "9999", "상행")))
+    }
+
+    /* ── v1.7.14 ⑤ 저장 형식 — 이웃 넷이 붙는다 ─────────────── */
+
+    /**
+     * 카스: *"마곡역이면 **김포공항-송정-마곡-발산-우장산** 이렇게 표시해주고 역명까지"*.
+     * 이웃 넷은 **등록할 때 한 번** 얻어 저장값에 담는다(볼 때마다 안 부른다).
+     */
+    @Test
+    fun `이웃 넷이 붙은 저장 문자열 왕복`() {
+        val list = listOf(
+            CommuteStation("마곡", "1005", "하행", listOf("김포공항", "송정", "발산", "우장산")),
+            CommuteStation("까치산", "1002", "내선", listOf("양천구청", "신정네거리", "", "")),
+        )
+        val s = encodeCommute(list)
+        assertEquals(
+            "마곡|1005|하행|김포공항,송정,발산,우장산;까치산|1002|내선|양천구청,신정네거리,,",
+            s,
+        )
+        assertEquals(list, decodeCommute(s))
+    }
+
+    /**
+     * ⚠ **옛 저장값이 그대로 읽혀야 한다** — 카스 기기에 이미 v1.7.9~v1.7.13 꼴이 들어 있다.
+     * 셋째 칸까지만 있는 줄은 **이웃 없음**으로 떨어지고 화면은 이름 없이 점만 찍는다.
+     */
+    @Test
+    fun `옛 저장값도 그대로 읽힌다`() {
+        // v1.7.9~v1.7.13 꼴(방향 있음 · 이웃 없음)
+        val old = "마곡|1005|하행;까치산|1002|내선;까치산|1005|상행;신도림|1002|외선"
+        val back = decodeCommute(old)
+        assertEquals(4, back.size)
+        assertEquals(listOf("마곡", "까치산", "까치산", "신도림"), back.map { it.name })
+        assertEquals(listOf("하행", "내선", "상행", "외선"), back.map { it.updnLine })
+        back.forEach { assertEquals(emptyList<String>(), it.neighbors) }
+        // 이웃이 없으면 다시 저장해도 **글자가 그대로** — 형식이 조용히 늘지 않는다
+        assertEquals(old, encodeCommute(back))
+        // 옛 꼴과 새 꼴이 한 줄에 섞여 있어도 각자 제대로 읽힌다
+        val mixed = "마곡|1005|하행|김포공항,송정,발산,우장산;신도림|1002|외선"
+        assertEquals(
+            listOf(listOf("김포공항", "송정", "발산", "우장산"), emptyList()),
+            decodeCommute(mixed).map { it.neighbors },
+        )
+    }
+
+    @Test
+    fun `이웃 칸이 넷이 아니면 버린다 - 잘린 값에 화면이 안 죽는다`() {
+        // 셋·다섯은 통째로 버리고 역만 살린다(칸 수가 어긋나면 어느 자리인지 알 수 없다)
+        assertEquals(emptyList<String>(), decodeCommute("마곡|1005|하행|가,나,다").first().neighbors)
+        assertEquals(emptyList<String>(), decodeCommute("마곡|1005|하행|가,나,다,라,마").first().neighbors)
+        // 칸이 다섯 이상인 줄(구분자가 더 있는 손댄 값)은 통째로 버린다
+        assertEquals(emptyList<CommuteStation>(), decodeCommute("마곡|1005|하행|가,나,다,라|덤"))
+        // 역명에 쉼표가 있어도 줄이 안 깨진다(저장할 때 지운다)
+        val s = encodeCommute(listOf(CommuteStation("가,나", "1002", "내선", listOf("다,라", "", "", ""))))
+        assertEquals("가나|1002|내선|다라,,,", s)
+        assertEquals(listOf("다라", "", "", ""), decodeCommute(s).first().neighbors)
     }
 }

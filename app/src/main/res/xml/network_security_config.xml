@@ -11,5 +11,11 @@
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">swopenapi.seoul.go.kr</domain>
+        <!--
+          v1.7.14 ⑤ — 역 목록(SearchSTNBySubwayLineInfo)은 같은 인증키를 쓰지만 호스트가 다르다.
+          여기도 HTTPS(443)를 안 연다(실측: https://openapi.seoul.go.kr:8088 은 빈 응답).
+          등록할 때 딱 1회 부르는 경로다(BranchLive.stationsOfLine).
+        -->
+        <domain includeSubdomains="false">openapi.seoul.go.kr</domain>
     </domain-config>
 </network-security-config>

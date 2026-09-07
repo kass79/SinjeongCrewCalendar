@@ -121,7 +121,28 @@ internal data class ArrivalRow(
     val arvlMsg2: String = "",
     /** 그 열차가 **지금 있는 역** 이름 */
     val arvlMsg3: String = "",
+    /* ── 아래 둘은 **앞뒤 2역 차례**(v1.7.14 ⑤)가 쓴다. 2026-09-07 마곡 실호출로 확인:
+     *    `statnId=1005000514`(마곡) · `statnFid=1005000515`(발산) · `statnTid=1005000513`(송정).
+     *    **±1 뿐이고 이름이 아니라 코드**라 이웃 이름은 역 목록 API 로 따로 얻는다
+     *    ([BranchLive.stationsOfLine]) — 여기서 쓰는 것은 **어느 쪽에서 오나** 하나뿐이다. */
+    /** 이 역의 코드 — 뒤 세 자리가 역 목록의 `FR_CODE` 와 같은 값이다(실측) */
+    val statnId: String = "",
+    /** 열차가 **오는 쪽**(이전역) 코드 */
+    val statnFid: String = "",
 )
+
+/**
+ * 열차가 **큰 `FR_CODE` 쪽에서 오나** — [commuteNeighbors] 의 차례를 정한다(v1.7.14 ⑤).
+ *
+ * 응답의 [ArrivalRow.statnFid](이전역)가 [ArrivalRow.statnId](이 역)보다 크면 위쪽 번호에서
+ * 내려오는 것이다. 코드가 없거나 숫자가 아니면 **false**(오름차순 = 카스가 든 예의 차례).
+ * 순수 함수 — `CommuteMiniTest` 가 잠근다.
+ */
+internal fun approachFromHigher(row: ArrivalRow?): Boolean {
+    val here = row?.statnId?.trim()?.toLongOrNull() ?: return false
+    val from = row.statnFid.trim().toLongOrNull() ?: return false
+    return from > here
+}
 
 /**
  * **본선(순환선) 열차** 한 대 (v1.6.84). 지선 [TrainMark] 와 좌표계가 달라 따로 둔다 —
@@ -195,6 +216,13 @@ internal object BranchLive {
 
     // ⚠ HTTPS(443)가 안 열려 있다 — 이 호스트만 cleartext 허용(res/xml/network_security_config.xml).
     private const val BASE = "http://swopenapi.seoul.go.kr/api/subway"
+
+    /**
+     * **역 목록 API** 호스트(v1.7.14 ⑤ — [stationsOfLine]). 실시간 API 와 **호스트만 다르고
+     * 인증키는 같다**(2026-09-07 실호출로 확인). 여기도 HTTPS 가 안 열려 cleartext 예외가
+     * `res/xml/network_security_config.xml` 에 한 줄 더 있다.
+     */
+    private const val STATION_BASE = "http://openapi.seoul.go.kr:8088"
 
     /**
      * 갱신 주기 — **적응형**(v1.6.70, 값은 v1.6.72에서 15/5 → **10/4초**).
@@ -287,9 +315,12 @@ internal object BranchLive {
      * 알아서 가른다 — 지도 쪽은 고칠 것이 없다. **호출자가 전부 여기를 지나므로 한 줄이 근본이다.**
      */
     internal fun apiError(json: String): String? {
-        val code = field(json, "code") ?: return null
+        // ⚠ 대문자 `CODE`/`MESSAGE` 는 **역 목록 API**(`openapi.seoul.go.kr`, v1.7.14 ⑤)의 꼴이다.
+        // 실시간 API 응답에는 대문자 키가 없어 종전 경로는 한 글자도 안 바뀐다 — 늘려 둔 이유는
+        // 그쪽 한도 초과("일별 트래픽 제한…")도 [isQuotaError] 를 태워 키 로테이션을 타게 하려는 것.
+        val code = field(json, "code") ?: field(json, "CODE") ?: return null
         if (code == "INFO-000" || code == "INFO-200") return null
-        return "${field(json, "message") ?: code} ($code)"
+        return "${field(json, "message") ?: field(json, "MESSAGE") ?: code} ($code)"
     }
 
     internal fun parsePositions(json: String): List<PositionRow> =
@@ -318,7 +349,21 @@ internal object BranchLive {
                 trainLineNm = field(o, "trainLineNm").orEmpty(),
                 arvlMsg2 = field(o, "arvlMsg2").orEmpty(),
                 arvlMsg3 = field(o, "arvlMsg3").orEmpty(),
+                statnId = field(o, "statnId").orEmpty(),
+                statnFid = field(o, "statnFid").orEmpty(),
             )
+        }.toList()
+
+    /**
+     * 역 목록 API 한 판 파싱(v1.7.14 ⑤) — `SearchSTNBySubwayLineInfo` 응답.
+     * `{"STATION_CD":"2515","STATION_NM":"마곡",…,"FR_CODE":"514",…}` 줄만 집는다.
+     * `RESULT` 같은 다른 객체는 `STATION_NM` 이 없어 저절로 빠진다.
+     */
+    internal fun parseStations(json: String): List<StationRow> =
+        ROW.findAll(json).mapNotNull { m ->
+            val o = m.value
+            val nm = field(o, "STATION_NM")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            StationRow(field(o, "FR_CODE").orEmpty(), nm)
         }.toList()
 
     /* ── 지선 판정 ───────────────────────────────────────────────── */
@@ -776,7 +821,10 @@ internal object BranchLive {
     internal fun isQuotaError(msg: String) = "337" in msg || "제한" in msg || "초과" in msg
 
     /** 키 로테이션 호출: 한도(ERROR-337) 감지 시 다음 키, 전부 소진 시 5분 백오프 */
-    private suspend fun fetch(pathAfterKey: String): Result<String> = withContext(Dispatchers.IO) {
+    private suspend fun fetch(
+        pathAfterKey: String,
+        base: String = BASE,
+    ): Result<String> = withContext(Dispatchers.IO) {
         if (System.currentTimeMillis() < quotaBlockedUntil)
             return@withContext Result.failure(Exception("일일 호출 한도 초과 (자정 리셋)"))
         var lastErr: Throwable? = null
@@ -788,7 +836,7 @@ internal object BranchLive {
             // (v1.6.71에서 호출을 3 → 2회로 줄인 근거도 이 로그로 확인했다). 키 값은 안 찍는다.
             Log.d(TAG, "API 호출: ${pathAfterKey.substringBefore("/")} · 키#${keyIdx % API_KEYS.size}")
             val r = runCatching {
-                val conn = URL("$BASE/$key/json/$pathAfterKey").openConnection() as HttpURLConnection
+                val conn = URL("$base/$key/json/$pathAfterKey").openConnection() as HttpURLConnection
                 val body = conn.run {
                     connectTimeout = 5000
                     readTimeout = 5000
@@ -842,6 +890,27 @@ internal object BranchLive {
      */
     internal suspend fun arrivalsAt(station: String): Result<List<ArrivalRow>> =
         fetchArrivals(station)
+
+    /**
+     * **한 노선의 역 목록**(v1.7.14 ⑤) — `SearchSTNBySubwayLineInfo`. 호출은 **등록할 때 딱
+     * 1회**이고, 얻은 이웃 넷은 저장값에 담기므로 **보는 화면은 한 번도 안 부른다.**
+     *
+     * ⚠ **호스트가 다르다**([STATION_BASE]) — 실시간 API 는 `swopenapi`, 역 목록은
+     * `openapi.seoul.go.kr:8088` 이다. **인증키는 같은 것이 그대로 먹는다**(2026-09-07 실호출
+     * 확인) — 새 키·새 계정을 만들지 않았고 키 로테이션·한도 백오프도 같은 [fetch] 를 탄다.
+     * 이 호스트도 HTTPS 를 안 열어 `network_security_config.xml` 에 한 줄 늘렸다.
+     *
+     * 인자 자리는 `…/{시작}/{끝}/{STATION_CD}/{STATION_NM}/{LINE_NUM}/` 다 — 앞 둘을 공백으로
+     * 비우고 **셋째(LINE_NUM)만** 준다. 빈 칸을 `//` 로 붙이면 인자가 밀려 **전 노선 799행**이
+     * 온다(실측). 그래서 `%20` 을 넣는다.
+     *
+     * 실패·`INFO-200` 은 **빈 목록**이고 오류가 아니다 — 이름 없는 미니 노선으로 떨어질 뿐이다.
+     */
+    internal suspend fun stationsOfLine(lineNum: String): Result<List<StationRow>> {
+        val q = URLEncoder.encode(lineNum, "UTF-8")
+        return fetch("SearchSTNBySubwayLineInfo/1/999/%20/%20/$q/", STATION_BASE)
+            .map(::parseStations)
+    }
 
     /**
      * **양천구청으로 다가오는 신도림행 열차가 있나** — 적응형 갱신 주기의 판정(v1.6.70).
