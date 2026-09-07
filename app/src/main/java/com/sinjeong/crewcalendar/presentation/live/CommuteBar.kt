@@ -162,8 +162,10 @@ internal fun CommuteBar(
                     selected = open == s,
                     onClick = { open = if (open == s) null else s },
                     label = {
+                        // v1.7.13b ① — **방향까지 적는다**(`5호선 마곡 · 하행`). 같은 역을
+                        // 방향만 달리 둘 등록하면 종전엔 글자가 똑같았다([commuteLabel]).
                         Text(
-                            "${lineName(s.subwayId)} ${s.name}",
+                            commuteLabel(s),
                             fontSize = 12.sp, fontWeight = FontWeight.Bold,
                             maxLines = 1, overflow = TextOverflow.Ellipsis,
                         )
@@ -454,13 +456,12 @@ internal fun CommuteSettingDialog(
                 stations.forEach { s ->
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) {
-                            Text("${lineName(s.subwayId)} ${s.name}", fontWeight = FontWeight.Bold)
-                            Text(
-                                s.updnLine, style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
+                        // 칩과 **같은 꼴 한 줄**이다(v1.7.13b ①) — 종전엔 방향이 둘째 줄에
+                        // 따로 있어 목록과 칩의 글자가 서로 달랐다.
+                        Text(
+                            commuteLabel(s), Modifier.weight(1f),
+                            fontWeight = FontWeight.Bold,
+                        )
                         TextButton(onClick = { onSave(stations - s) }) { Text("삭제") }
                     }
                 }

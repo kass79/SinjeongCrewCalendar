@@ -3,6 +3,8 @@ package com.sinjeong.crewcalendar
 import com.sinjeong.crewcalendar.presentation.live.Heading
 import com.sinjeong.crewcalendar.presentation.live.LOCO_BOARD_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_BOX_H
+import com.sinjeong.crewcalendar.presentation.live.LOCO_RING_H
+import com.sinjeong.crewcalendar.presentation.live.LOCO_WHEEL_BOTTOM
 import com.sinjeong.crewcalendar.presentation.live.headingFor
 import com.sinjeong.crewcalendar.presentation.live.locoBelly
 import com.sinjeong.crewcalendar.presentation.live.locoFlip
@@ -352,23 +354,60 @@ class LocoTest {
     }
 
     /**
+     * **바퀴는 배율이 얼마든 선로 겉면에 앉는다**(v1.7.13b ③) — `MainLineMap.badgeOff` 가
+     * 이제 상수가 아니라 `바퀴 아랫날([LOCO_WHEEL_BOTTOM]) × 배율 + 선로 반굵기` 다.
+     *
+     * 종전 `14dp`(펼침 18)는 **1.0배** 기관차에 눈으로 맞춘 값이라 배율을 내릴수록 기관차가
+     * 선로에서 떴다(0.7배 실측 0.8dp · 0.55배면 3.5dp). 이 테스트가 그 틈을 0 으로 못 박는다
+     * — 확정 표 *"떠 있는 열차 금지"* · *"바퀴는 늘 선로 쪽"*.
+     */
+    @Test
+    fun `바퀴는 어느 배율에서든 선로 겉면에 앉는다`() {
+        /** `MainLineMap.badgeOff` 의 식 그대로(dp). */
+        fun offOf(k: Float, locoScale: Float, rail: Float) =
+            LOCO_WHEEL_BOTTOM * locoScale * k + rail / 2f
+        // 폰 전체 0.55 · 폰 단독 0.64 · 펼침 전체 · 펼침 단독
+        assertEquals("폰 전체", 11.175f, offOf(0.55f, 1f, 7.5f), 1e-3f)
+        assertEquals("폰 단독", 12.39f, offOf(0.64f, 1f, 7.5f), 1e-3f)
+        assertEquals("펼침 전체", 13.2158f, offOf(0.55f, 54f / 46f, 9f), 1e-3f)
+        assertEquals("펼침 단독", 14.6426f, offOf(0.64f, 54f / 46f, 9f), 1e-3f)
+        // 어떤 배율에서도 (오프셋 − 바퀴 아랫날) 이 정확히 선로 반굵기 = 겉면에 딱 앉는다
+        for (k in floatArrayOf(0.4f, 0.55f, 0.64f, 0.82f, 1f))
+            for (ls in floatArrayOf(1f, 54f / 46f))
+                for (rail in floatArrayOf(7.5f, 9f))
+                    assertEquals(
+                        "k=$k ls=$ls rail=$rail",
+                        rail / 2f,
+                        offOf(k, ls, rail) - LOCO_WHEEL_BOTTOM * ls * k,
+                        1e-3f,
+                    )
+    }
+
+    /**
      * **틈에는 기관차 한 대가 든다** — 두 선로 사이(윗변 내선·아랫변 외선의 자리)가
-     * `차선 오프셋 + 타 열차(0.7배) 반높이 + 선로 반굵기 + 2dp` 다. 이 산수가 틀어지면
+     * `차선 오프셋 + 타 열차 반높이 + 선로 반굵기 + 2dp` 다. 이 산수가 틀어지면
      * 틈에 선 열차가 반대편 선로를 밟는다(= 사용자가 v1.6.98 에서 물린 "떠 있는 열차").
+     *
+     * ⚠ v1.7.13b ③ 부터 **차선 오프셋도 배율을 따라간다** — 그래서 틈이 두 번 줄었다
+     * (44.18 → **36.12dp**). 그만큼 두 선로가 붙고 루프가 커져 역 간격이 넓어진다.
      */
     @Test
     fun `복선 간격은 타 열차 한 대가 옆 선로를 안 밟는 값이다`() {
-        /** `MainLineMap.laneGap` 의 식 그대로(dp). */
-        fun gapOf(badge: Float, k: Float, rail: Float) =
-            badge + (LOCO_BOX_H / 2f) * k + rail / 2f + 2f
-        // 폰: 차선 14 · 배수 0.7 · 선로 7.5 / 펼침: 18 · 0.7 × (54/46) · 9
-        assertEquals("폰", 30.6f, gapOf(14f, 0.7f, 7.5f), 1e-3f)
-        assertEquals("펼침", 37.2375f, gapOf(18f, 0.7f * (54f / 46f), 9f), 1e-3f)
+        /** `MainLineMap.laneGap` 의 식 그대로(dp) — 차선 오프셋도 같은 [k] 를 본다. */
+        fun gapOf(k: Float, locoScale: Float, rail: Float): Float {
+            val badge = LOCO_WHEEL_BOTTOM * locoScale * k + rail / 2f
+            return badge + (LOCO_RING_H + LOCO_BOARD_H) * locoScale * k + rail / 2f + 2f
+        }
+        assertEquals("폰", 36.12f, gapOf(0.55f, 1f, 7.5f), 1e-3f)
+        assertEquals("펼침", 42.2496f, gapOf(0.55f, 54f / 46f, 9f), 1e-3f)
         // 기관차 상자 윗날이 반대편 선로 안쪽 면에 안 닿는다
-        for (t in listOf(
-            Triple(14f, 0.7f, 7.5f), Triple(18f, 0.7f * (54f / 46f), 9f))) {
-            val gap = gapOf(t.first, t.second, t.third)
-            assertTrue("$t", t.first + (LOCO_BOX_H / 2f) * t.second <= gap - t.third / 2f)
+        for (ls in floatArrayOf(1f, 54f / 46f)) {
+            val rail = if (ls == 1f) 7.5f else 9f
+            val badge = LOCO_WHEEL_BOTTOM * ls * 0.55f + rail / 2f
+            assertTrue(
+                "ls=$ls",
+                badge + (LOCO_BOX_H / 2f) * ls * 0.55f <= gapOf(0.55f, ls, rail) - rail / 2f,
+            )
         }
     }
 

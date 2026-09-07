@@ -326,8 +326,25 @@ private fun locoScale(big: Boolean) = if (big) 54f / LOCO_LEN else 1f
  *
  * v1.7.4 부터 **전체 보기는 선로가 두 줄**이라 내선·외선이 각자 제 선로 위에 선다
  * ([laneGap]) — 차선을 늘린 것이 아니라 **선로를 늘린 것**이다. 단독 보기는 종전대로 한 줄.
+ *
+ * ## v1.7.13b ③ — **상수를 버리고 배율에서 계산한다**
+ *
+ * 종전엔 `14dp`(펼침 18dp) 한 값이었다. 그건 v1.6.96 에서 **1.0 배 기관차**의 바퀴
+ * 아랫날([LOCO_WHEEL_BOTTOM] 13.5)에 눈으로 맞춘 값이라, 배율이 내려가면 바퀴가 선로에서
+ * 뜬다 — v1.7.5 가 모든 열차를 0.7 배로 내린 뒤 실측이 **선로 겉면 위 0.8dp** 였다(눈에는
+ * 안 띄는 크기라 아무도 못 봤다). 카스 요청으로 몸통을 더 줄이는 이번 회차엔 그 틈이
+ * `0.55` 배에서 **3.5dp** 로 벌어져 확정 표의 *"떠 있는 열차 금지"* 를 정면으로 어긴다.
+ *
+ * 그래서 자리를 **계산값**으로 바꿨다: `바퀴 아랫날 × 배율 + 선로 반굵기`. 이제 배율이
+ * 얼마든 바퀴 아랫날이 **선로 겉면에 정확히 앉는다.** 값은 폰 `13.5k + 3.75` ·
+ * 펼침 `15.85k + 4.5` 이고, 종전 값과 견주면 0.7 배에서 폰 14 → **13.20dp**(0.8dp 안쪽 =
+ * 떠 있던 그만큼)다. `LocoTest` 가 이 산수와 틈([laneGap])을 같이 잠근다.
+ *
+ * @param k 그 화면의 기관차 배수([OTHER_K_ALL] / [OTHER_K_DIR]) — **[drawCabLoop] 이
+ *   쓰는 `otherK` 와 같은 값**이라야 그림과 자리가 맞는다.
  */
-private fun badgeOff(big: Boolean) = (if (big) 18 else 14).dp
+private fun badgeOff(big: Boolean, k: Float) =
+    (LOCO_WHEEL_BOTTOM * locoScale(big) * k).dp + railW(big) / 2f
 
 /** 선로 굵기 — [laneGap] 과 [drawCabLoop] 이 **같은 값**을 봐야 한다. */
 private fun railW(big: Boolean) = (if (big) 9f else 7.5f).dp
@@ -336,8 +353,21 @@ private fun railW(big: Boolean) = (if (big) 9f else 7.5f).dp
 private fun baseRadius(big: Boolean) = (if (big) 40 else 28).dp
 
 /** 다른 열차 기관차 배수 — 전체 보기(복선) / 방향 필터. 자세히는 [CabScreen] `otherK`. */
-private const val OTHER_K_ALL = 0.7f
-private const val OTHER_K_DIR = 0.82f
+private const val OTHER_K_ALL = 0.55f
+private const val OTHER_K_DIR = 0.64f
+
+/**
+ * 본선 지도 **열번 글자 하한**(sp · v1.7.13b ③) — 몸통만 줄이고 글자는 안 준다.
+ *
+ * 종전에 배수 0.7 이 하한이던 이유는 *"열번이 `11sp × scale` 이라 그 밑이면 7.7sp 밑으로
+ * 떨어진다"* 였다. v1.7.10 이 [drawLoco] 에 `numberMinSp` 인자를 내면서(지선 카드가 썼다)
+ * 그 이유가 없어졌다 — 본선도 같은 인자를 넘겨 **7.7sp 를 붙들고 몸통만** 줄인다.
+ *
+ * ⚠ 값은 지선 카드의 `LineMap.NUMBER_MIN_SP` 와 **같은 7.7** 이다(두 지도의 열번이 같은
+ * 크기로 읽힌다). ⚠ 무한정 못 줄인다 — 열번 띠가 `폭 39 units × 배율` 이라 4자리 ExtraBold
+ * 7.7sp(≈19dp)가 들어가려면 배율이 **0.49** 위여야 한다. **0.55 가 그 여유를 2.5dp 남긴 값**이다.
+ */
+private const val NUMBER_MIN_SP = 7.7f
 
 /**
  * **전체 보기 복선의 두 선로 사이 간격**(v1.7.4) — 바깥 = 외선 · 안쪽 = 내선.
@@ -353,7 +383,7 @@ private const val OTHER_K_DIR = 0.82f
  * `차선 오프셋([badgeOff]) + 기관차 반높이 + 선로 반굵기 + 2dp`
  *
  * 기관차는 **타 열차(0.7배)** 기준이다(전체 보기의 남의 열차가 다 이 크기다 — [OTHER_K_ALL]).
- * 폰 `14 + 10.85 + 3.75 + 2 = 30.6dp` · 펼침 `18 + 12.74 + 4.5 + 2 = 37.2dp`.
+ * (이 줄은 v1.7.5 전 계산이다 — 지금은 아래 `둘 중 큰 상자` 가 잡는다.)
  *
  * ## v1.7.5 — **모든 열차가 같은 크기**라 틈 하나로 다 잰다
  *
@@ -364,14 +394,15 @@ private const val OTHER_K_DIR = 0.82f
  * 그러면 틈은 **가장 큰 상자 하나**만 재면 된다 = 행선판을 단 내 열차([roofHalf]):
  * 외곽 2겹([LOCO_RING_H] 17.9dp — 회피 상자보다 2.4dp 크다) + 행선판([LOCO_BOARD_H] 17dp).
  *
- * 폰 `14 + 24.43 + 3.75 + 2 = 44.18dp` · 펼침 `18 + 28.68 + 4.5 + 2 = 53.18dp`.
+ * 폰 `11.18 + 19.20 + 3.75 + 2 = 36.12dp` · 펼침 `13.22 + 22.53 + 4.5 + 2 = 42.25dp`
+ * (v1.7.13b ③ — 배율이 0.7 → 0.55 로 내려가고 [badgeOff] 도 그 배율을 따라가면서 44.18 → 36.12dp).
  *
  * ⚠ v1.7.4 는 내 열차가 **1배**여서 행선판까지 재면 46.5dp 였고, 그러면 안쪽 루프가 역 이름을
  * 포갰다 — 그래서 판이 반대편 선로를 밟는 것을 *알고 둔 대가*로 뒀다. 이제 0.7 배라 같은
- * 계산이 **44.18dp** 로 내려와 그 대가를 안 치른다(실화면 `_미리보기_v1.7.5\AB03` 로 확인).
+ * 계산이 44.18dp 로 내려왔고(v1.7.13b ③ 에서 다시 **36.12dp**) 그 대가를 안 치른다.
  */
 private fun laneGap(big: Boolean): Dp =
-    badgeOff(big) + roofHalf(big, OTHER_K_ALL).dp + railW(big) / 2f + 2.dp
+    badgeOff(big, OTHER_K_ALL) + roofHalf(big, OTHER_K_ALL).dp + railW(big) / 2f + 2.dp
 
 /**
  * **지붕 쪽 반높이** — 가장 큰 상자(행선판 단 내 열차) 기준. 모든 열차가 같은 배율이므로
@@ -395,10 +426,10 @@ private fun roofHalf(big: Boolean, k: Float): Float =
  * 계단으로 올라간 열차가 캔버스를 넘는 것은 [drawCabLoop] 가 그 단을 건너뛰어 막는다.
  *
  * ⚠ v1.7.5 — 기준이 **내 열차 1배** 에서 **모두 같은 배율**로 바뀌면서 다시 쟀다. 두 화면 중
- * 기관차가 큰 쪽(단독 보기 [OTHER_K_DIR] 0.82)으로 잡는다 — 폰 46.5 → **42.62dp**,
- * 펼침 56.15 → **51.62dp** 로 그만큼이 루프에 돌아간다.
+ * 기관차가 큰 쪽(단독 보기 [OTHER_K_DIR])으로 잡는다 — 폰 46.5 → 42.62 → **34.73dp**,
+ * 펼침 56.15 → 51.62 → **40.86dp** 로 그만큼이 루프에 돌아간다(뒷값이 v1.7.13b ③).
  */
-private fun trainPad(big: Boolean) = badgeOff(big) + roofHalf(big, OTHER_K_DIR).dp
+private fun trainPad(big: Boolean) = badgeOff(big, OTHER_K_DIR) + roofHalf(big, OTHER_K_DIR).dp
 
 /**
  * **아래 변 역명**이 루프 밖으로 먹는 깊이(v1.6.98) — 가로 변은 역 이름이 늘 선로 **아래**라
@@ -720,9 +751,18 @@ private fun CabScreen(
      * 사용자: *"열차 아이콘도 본인 열차빼고 한단계 더 축소해야 최적화 될꺼같은데?"* 그래서
      * 전체 **0.8 → 0.7**, 방향 필터 **0.92 → 0.82** 이다(같은 폭으로 내려 두 화면의 비율을 지킨다).
      *
-     * ⚠ **하한은 열번 판독**이다. 열번은 `11sp × scale`([drawLoco]) 이라 0.7 배에서 **7.7sp** —
-     * 4자리 ExtraBold 가 몸통 열번 띠(폭 −23…16dp × 0.7 ≈ 27dp) 안에 그대로 든다(실측 확인).
-     * 더 내리면 글자가 몸통을 넘거나 안 읽힌다 — **0.7 밑으로는 가지 말 것.**
+     * ## v1.7.13b ③ — 한 단 더(0.7 → **0.55** · 0.82 → **0.64**)
+     *
+     * 카스: *"열차 아이콘이 큰가? **신대방, 신림에 열차가 있긴한데 어색하네?**"* 실측(접힘
+     * 폰·전체 보기)에서 몸통이 역 칸의 **0.80** 을 먹어 이웃 두 역 점 사이를 거의 다 덮었다.
+     * 0.55 로 내리면 **0.51 칸**이라 앞뒤로 여백이 남는다(아래 실측표는 v1.7.13b 절).
+     *
+     * ⚠ **종전 하한(0.7)의 근거는 없어졌다.** 그건 *"열번이 `11sp × scale` 이라 0.7 밑이면
+     * 7.7sp 밑"* 이었는데, v1.7.10 이 낸 [drawLoco] `numberMinSp` 를 이제 본선도 넘긴다
+     * ([NUMBER_MIN_SP] 7.7) — **몸통만 줄고 글자는 그대로**다.
+     * ⚠ **새 하한은 둘이다**: ① 열번 띠 폭(`39 units × k`)에 4자리 7.7sp(≈19dp)가 들어갈 것
+     * → `k ≥ 0.49` ② 바퀴가 선로에 앉을 것 → 이건 [badgeOff] 가 배율에서 계산하므로 이제
+     * 배율을 안 묶는다(종전엔 이쪽이 조용한 하한이었다).
      * ⚠ v1.7.5 — **내 열차도 이 값이다**(사용자 확정 *"본인열차 크기도 다른열차 크기랑 동일하게"*).
      *   종전엔 내 열차만 [locoScale](1배)이었다. 구분은 색·테·연기·행선판이 한다.
      * ⚠ 지선 카드(`LineMap.kt`)의 `UP_LOCO_K` 는 별개다 — 사용자가 본선만 지목했다.
@@ -1965,7 +2005,7 @@ private fun DrawScope.drawCabLoop(
     dots(loop, occOut)
     if (dual) dots(loopIn, occIn)
     // ── 열차 자리를 **라벨보다 먼저** 잡는다 ────────────────
-    val off = badgeOff(big).toPx()
+    val off = badgeOff(big, otherK).toPx()
     /** 그 방향의 **제 선로**. 단선이면 둘이 같은 객체라 방향을 안 가린다. */
     fun railOf(inner: Boolean) = if (dual && inner) loopIn else loop
     /**
@@ -2156,6 +2196,7 @@ private fun DrawScope.drawCabLoop(
         drawLoco(c, headOf(t.trainNo), trainScale, pal.otherBody, pal.wheel, t.trainNo,
             pal.otherInk, tm,
             smoke = false, railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
+            numberMinSp = NUMBER_MIN_SP,
             bodyRamp = if (pal.clay) pal.otherTop to pal.otherBottom else null,
             edge = pal.otherEdge, smokeColor = pal.smoke, shadowColor = pal.shadow,
             clayShadow = otherShadow)
@@ -2175,6 +2216,7 @@ private fun DrawScope.drawCabLoop(
             pal.mineInk, tm,
             smoke = true, phase = phase, highlight = true,
             railTowards = Offset(-out.x, -out.y), mapDeg = mapDeg,
+            numberMinSp = NUMBER_MIN_SP,
             dest = mineBoards[t.trainNo].orEmpty(),
             bodyRamp = if (pal.clay) pal.mineTop to pal.mineBottom else null,
             edge = if (pal.clay) pal.mineRing else null, ring = pal.mineRing,

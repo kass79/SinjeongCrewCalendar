@@ -39,7 +39,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
 import com.sinjeong.crewcalendar.presentation.live.CommuteSettingDialog
 import com.sinjeong.crewcalendar.presentation.live.Line2TimetableLoader
-import com.sinjeong.crewcalendar.presentation.live.lineName
+import com.sinjeong.crewcalendar.presentation.live.commuteLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -317,12 +317,28 @@ fun SettingsScreen(
              * 등록 화면은 별도 라우트를 안 판다(다이얼로그 하나면 끝나는 일이라).
              */
             val commute by viewModel.themeController.commuteStations.collectAsStateWithLifecycle()
+            val commuteOn by viewModel.themeController.commuteOn.collectAsStateWithLifecycle()
             var showCommute by remember { mutableStateOf(false) }
+            /*
+             * v1.7.13b ② — **전체 끄기·켜기 스위치**(카스 요청). 끄면 달력 상세시트에서
+             * 그 줄이 통째로 사라지고(높이 0) 15초 폴링도 안 돈다.
+             * ⚠ **등록은 안 지운다** — 다시 켜면 아래 목록이 그대로 돌아온다.
+             *   그래서 꺼져 있어도 줄을 눌러 등록·삭제는 여전히 할 수 있다.
+             */
             SettingRow(
                 title = "출퇴근 역",
-                sub = if (commute.isEmpty())
-                    "등록하면 달력 상세시트 행로표 위에 실시간 도착이 뜹니다 (최대 ${COMMUTE_MAX}개)"
-                else commute.joinToString(" · ") { "${lineName(it.subwayId)} ${it.name}" },
+                sub = when {
+                    commute.isEmpty() ->
+                        "등록하면 달력 상세시트 행로표 위에 실시간 도착이 뜹니다 (최대 ${COMMUTE_MAX}개)"
+                    !commuteOn -> "꺼짐 — 등록은 그대로입니다 (${commute.size}개). 스위치를 켜면 다시 보입니다"
+                    else -> commute.joinToString(" · ") { commuteLabel(it) }
+                },
+                trailing = {
+                    Switch(
+                        checked = commuteOn,
+                        onCheckedChange = { viewModel.themeController.setCommuteOn(it) },
+                    )
+                },
                 onClick = { showCommute = true },
             )
             if (showCommute) CommuteSettingDialog(

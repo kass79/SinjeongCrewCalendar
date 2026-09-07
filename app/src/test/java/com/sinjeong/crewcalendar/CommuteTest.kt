@@ -8,6 +8,8 @@ import com.sinjeong.crewcalendar.presentation.live.atStationText
 import com.sinjeong.crewcalendar.presentation.live.boundOf
 import com.sinjeong.crewcalendar.presentation.live.commuteApproaching
 import com.sinjeong.crewcalendar.presentation.live.commuteAtStation
+import com.sinjeong.crewcalendar.presentation.live.commuteLabel
+import com.sinjeong.crewcalendar.presentation.live.commuteOnOf
 import com.sinjeong.crewcalendar.presentation.live.commuteOptions
 import com.sinjeong.crewcalendar.presentation.live.decodeCommute
 import com.sinjeong.crewcalendar.presentation.live.encodeCommute
@@ -251,6 +253,70 @@ class CommuteTest {
         assertEquals("역5", back.last().name)
         // 딱 다섯이면 한 칸도 안 버린다(경계).
         assertEquals(5, decodeCommute(encodeCommute(six.take(5))).size)
+    }
+
+    /* ── v1.7.13b ① 칩 글자 ─────────────────────────────────── */
+
+    /**
+     * 카스: *"방향을 칩에 적어주면 좋지.."* — 종전 칩은 `5호선 마곡` 뿐이라 **같은 역을
+     * 방향만 달리 둘 등록하면 글자가 똑같았다**(카스 화면에 나란히 둘 떴다).
+     * 방향 낱말 네 가지(`상행`·`하행`·`내선`·`외선`)가 전부 갈리는지 잠근다.
+     */
+    @Test
+    fun `칩 글자에 방향이 붙어 같은 역도 갈린다`() {
+        assertEquals("5호선 마곡 · 하행", commuteLabel(CommuteStation("마곡", "1005", "하행")))
+        assertEquals("5호선 마곡 · 상행", commuteLabel(CommuteStation("마곡", "1005", "상행")))
+        assertEquals("2호선 까치산 · 내선", commuteLabel(CommuteStation("까치산", "1002", "내선")))
+        assertEquals("2호선 까치산 · 외선", commuteLabel(CommuteStation("까치산", "1002", "외선")))
+        // 같은 역·같은 호선인데 방향만 다른 둘 — 글자가 **달라야** 한다(이번 회차의 이유).
+        val a = commuteLabel(CommuteStation("마곡", "1005", "하행"))
+        val b = commuteLabel(CommuteStation("마곡", "1005", "상행"))
+        assertTrue("방향만 다른 둘이 같은 글자다", a != b)
+    }
+
+    /**
+     * **역 이름은 절대 줄이지 않는다**(확정 표) — 방향이 붙어도 그대로다.
+     * 빈 방향·모르는 낱말·앞뒤 공백에도 줄이 안 깨진다.
+     */
+    @Test
+    fun `역 이름은 안 줄이고 빈 방향은 가운뎃점을 뺀다`() {
+        assertEquals(
+            "2호선 구로디지털단지 · 내선",
+            commuteLabel(CommuteStation("구로디지털단지", "1002", "내선")),
+        )
+        // 빈 방향(옛 저장값·손댄 값) — 가운뎃점 없이 역 이름만
+        assertEquals("2호선 신도림", commuteLabel(CommuteStation("신도림", "1002", "")))
+        assertEquals("2호선 신도림", commuteLabel(CommuteStation("신도림", "1002", "   ")))
+        // 모르는 호선 id 는 숫자 그대로(lineName 규칙), 긴 방향 낱말도 통째로 남는다
+        assertEquals(
+            "9999 어딘가 · 아주긴방면낱말",
+            commuteLabel(CommuteStation("어딘가", "9999", " 아주긴방면낱말 ")),
+        )
+    }
+
+    /* ── v1.7.13b ② 전체 스위치 ─────────────────────────────── */
+
+    /**
+     * 카스: *"출퇴근역은 전체 끄기 켜기 스위치가 있으면 좋을거 같은데?"*
+     *
+     * **기본값은 켜짐**(지금까지의 동작 그대로)이고, 모르는 값도 켜짐으로 떨어진다.
+     * ⚠ 끄기는 **지우기가 아니다** — 저장은 키가 따로라 목록(`commute_stations`)이 그대로다.
+     */
+    @Test
+    fun `스위치 기본값은 켜짐이고 끄면 목록은 남는다`() {
+        assertTrue("등록 전 기본값", commuteOnOf(null))
+        assertTrue(commuteOnOf("true"))
+        assertEquals(false, commuteOnOf("false"))
+        // 모르는 값·빈 값·대소문자 뒤섞임은 전부 기본값(켜짐)으로 — 화면이 조용히 사라지면 안 된다
+        for (bad in listOf("", " ", "FALSE", "0", "off", "네")) assertTrue(bad, commuteOnOf(bad))
+        // 껐다 켜도 등록 목록은 저장 키가 달라 한 글자도 안 바뀐다
+        val saved = encodeCommute(
+            listOf(CommuteStation("마곡", "1005", "하행"), CommuteStation("마곡", "1005", "상행")),
+        )
+        assertEquals(false, commuteOnOf(false.toString()))
+        assertEquals(2, decodeCommute(saved).size)
+        assertTrue(commuteOnOf(true.toString()))
+        assertEquals(listOf("하행", "상행"), decodeCommute(saved).map { it.updnLine })
     }
 
     @Test

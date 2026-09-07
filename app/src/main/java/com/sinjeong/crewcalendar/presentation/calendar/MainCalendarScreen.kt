@@ -118,7 +118,16 @@ fun MainCalendarScreen(
     val calStyle by viewModel.themeController.calendarStyle.collectAsStateWithLifecycle()
     val pal = calendarPalette(calStyle)
     // v1.7.9 ⑦ — 설정에 등록한 출퇴근 역. 비어 있으면 상세시트가 그 줄을 아예 안 그린다.
-    val commuteStations by viewModel.themeController.commuteStations.collectAsStateWithLifecycle()
+    /*
+     * v1.7.13b ② — 설정의 **전체 스위치**를 끄면 여기서 **빈 목록**을 넘긴다.
+     * 그러면 [CommuteBar] 가 첫 줄에서 바로 반환해 **높이 0** 이고, 폴링(15초)·
+     * 눈금(1초) [LaunchedEffect] 도 서지 않는다 — 등록 0개일 때와 **같은 길**이라
+     * 꺼진 상태를 위한 가지를 따로 만들 것이 없었다.
+     * ⚠ **저장값(`commute_stations`)은 안 건드린다** — 다시 켜면 등록이 그대로 돌아온다.
+     */
+    val commuteOn by viewModel.themeController.commuteOn.collectAsStateWithLifecycle()
+    val commuteSaved by viewModel.themeController.commuteStations.collectAsStateWithLifecycle()
+    val commuteStations = if (commuteOn) commuteSaved else emptyList()
     val systemDark = isSystemInDarkTheme()
     val isDark = when (themeMode) {
         ThemeMode.DARK -> true

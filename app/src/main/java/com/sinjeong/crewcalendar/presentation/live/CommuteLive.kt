@@ -89,6 +89,37 @@ internal val LINE_NAMES = mapOf(
 
 internal fun lineName(subwayId: String) = LINE_NAMES[subwayId] ?: subwayId
 
+/**
+ * 칩·설정 목록에 쓰는 **한 줄 이름** — `"5호선 마곡 · 하행"`(v1.7.13b ①).
+ *
+ * 카스: *"방향을 칩에 적어주면 좋지.."* — v1.7.12 까지는 `"5호선 마곡"` 뿐이라 **같은 역을
+ * 방향만 달리 두 개 등록하면 칩 두 개의 글자가 똑같았다**(카스 화면에 `5호선 마곡` 이 나란히
+ * 둘 떴다). [CommuteStation.updnLine] 에 이미 방향이 들어 있으니 저장값을 늘릴 것이 없다.
+ *
+ * ⚠ **역 이름은 줄이지 않는다**(확정 표 — `구로디지털단지` 를 `구로` 로 쓰면 다른 역이다).
+ * 글자가 길어지면 칩 줄이 오른쪽으로 밀릴 뿐이고, 그 줄은 v1.7.9 확정대로 **한 줄 · 가로
+ * 스크롤**이다(두 줄 접기 금지).
+ *
+ * ⚠ [CommuteStation.updnLine] 은 **낱말**이다(`상행`·`하행`·`내선`·`외선` — v1.7.9 실측).
+ * 빈 값은 [decodeCommute] 가 이미 버리지만, 옛 저장값·손댄 값이 들어와도 **가운뎃점만 빼고**
+ * 역 이름은 그대로 남긴다.
+ */
+internal fun commuteLabel(s: CommuteStation): String =
+    "${lineName(s.subwayId)} ${s.name}" +
+        if (s.updnLine.isBlank()) "" else " · ${s.updnLine.trim()}"
+
+/**
+ * 출퇴근 역 줄 **전체 스위치** 저장값 읽기(v1.7.13b ②) — 카스: *"출퇴근역은 전체 끄기 켜기
+ * 스위치가 있으면 좋을거 같은데?"*
+ *
+ * **기본값은 켜짐**(지금까지의 동작 그대로)이고, 저장은 [CommuteStation] 목록과 **같은 저장소**
+ * (`theme` prefs, 키 `commute_on`)다. 모르는 값·`null` 은 켜짐 — `MapStyle.of` 와 같은 태도다.
+ *
+ * ⚠ **끄는 것과 지우는 것은 다르다.** 끄면 `commute_stations` 는 **한 글자도 안 건드린다** —
+ * 다시 켜면 등록이 그대로 돌아온다(카스가 "끄기"라 했지 "지우기"라 하지 않았다).
+ */
+internal fun commuteOnOf(saved: String?): Boolean = saved?.toBooleanStrictOrNull() ?: true
+
 /* ── 등록 화면: (호선 × 방향) 조합 뽑기 ─────────────────────── */
 
 /**

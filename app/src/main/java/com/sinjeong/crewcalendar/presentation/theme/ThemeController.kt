@@ -4,6 +4,7 @@ import android.content.Context
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
 import com.sinjeong.crewcalendar.presentation.live.CommuteStation
+import com.sinjeong.crewcalendar.presentation.live.commuteOnOf
 import com.sinjeong.crewcalendar.presentation.live.decodeCommute
 import com.sinjeong.crewcalendar.presentation.live.encodeCommute
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -92,6 +93,23 @@ class ThemeController @Inject constructor(
         val capped = list.take(COMMUTE_MAX)
         _commuteStations.value = capped
         prefs.edit().putString("commute_stations", encodeCommute(capped)).apply()
+    }
+
+    /**
+     * 출퇴근 역 줄 **전체 스위치**(v1.7.13b ②) — 카스: *"출퇴근역은 전체 끄기 켜기 스위치가
+     * 있으면 좋을거 같은데?"*. 위 [commuteStations] 와 **같은 저장소·같은 방식**(`theme` prefs,
+     * 키 `commute_on`)이고 **기본값은 켜짐**이다([commuteOnOf]).
+     *
+     * ⚠ **끄기는 지우기가 아니다** — 여기를 false 로 놔도 `commute_stations` 는 그대로다.
+     * 화면에서 줄을 걷어 내는 것은 `MainCalendarScreen` 이 빈 목록을 넘기는 한 줄이고,
+     * 그러면 `CommuteBar` 가 높이 0으로 바로 반환해 **15초 폴링·1초 눈금도 같이 멎는다.**
+     */
+    private val _commuteOn = MutableStateFlow(commuteOnOf(prefs.getString("commute_on", null)))
+    val commuteOn: StateFlow<Boolean> = _commuteOn
+
+    fun setCommuteOn(on: Boolean) {
+        _commuteOn.value = on
+        prefs.edit().putString("commute_on", on.toString()).apply()
     }
 
     /** 우상단 달 아이콘: 현재 보이는 테마의 반대로 강제 전환 */
