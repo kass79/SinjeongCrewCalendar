@@ -1,7 +1,19 @@
 package com.sinjeong.crewcalendar
 
+import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
+import com.sinjeong.crewcalendar.presentation.live.DELAY_ALERT_MIN
+import com.sinjeong.crewcalendar.presentation.live.InboundTrain
+import com.sinjeong.crewcalendar.presentation.live.RECPTN_STALE_SEC
 import com.sinjeong.crewcalendar.presentation.live.TrainMark
+import com.sinjeong.crewcalendar.presentation.live.bigDelay
+import com.sinjeong.crewcalendar.presentation.live.branchInout
+import com.sinjeong.crewcalendar.presentation.live.delayText
+import com.sinjeong.crewcalendar.presentation.live.isLastCar
+import com.sinjeong.crewcalendar.presentation.live.latestRecptn
+import com.sinjeong.crewcalendar.presentation.live.recptnClock
+import com.sinjeong.crewcalendar.presentation.live.recptnFirstSeen
+import com.sinjeong.crewcalendar.presentation.live.recptnStale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -145,7 +157,6 @@ class BranchLiveTest {
         val r = BranchLive.refineWithArrivals(신정네거리정차, BranchLive.parseArrivals(
             """[{"btrainNo":"5653","bstatnNm":"신도림지선","barvlDt":"180","arvlCd":"5"}]"""))
         assertEquals(1f, r.single().position, 0.001f)                 // 0.5로 안 내려간다
-        assertTrue(BranchLive.approachingYangcheon(r))                // ③ 5초 갱신이 그대로 걸린다
     }
 
     /**
@@ -213,45 +224,143 @@ class BranchLiveTest {
     }
 
     /**
-     * v1.6.70 적응형 갱신의 판정(주기 값은 v1.6.72에서 10초 ↔ 4초).
-     * 창은 **신정네거리 진입(0.85) ~ 양천구청 도착(2.0)**.
-     * 넓히면 한도가 새고, 좁히면 승강장에서 열차를 눈으로 찾는 구간을 놓친다.
-     */
-    @Test
-    fun `양천구청 접근 판정이 창 밖을 안 센다`() {
-        fun up(pos: Float) = listOf(TrainMark("5601", true, pos, ""))
-        assertFalse(BranchLive.approachingYangcheon(up(0.84f)))   // 신정네거리 진입 전
-        assertTrue(BranchLive.approachingYangcheon(up(0.85f)))    // 신정네거리 진입(idx − 0.15)
-        assertTrue(BranchLive.approachingYangcheon(up(1.99f)))
-        assertFalse(BranchLive.approachingYangcheon(up(2f)))      // 양천구청 도착 = 편승 끝
-        // 까치산행은 편승 대상이 아니다 — 하행 때문에 주기를 당기면 한도만 샌다
-        assertFalse(BranchLive.approachingYangcheon(listOf(TrainMark("5602", false, 1.5f, ""))))
-        assertFalse(BranchLive.approachingYangcheon(emptyList()))
-    }
-
-    /**
-     * **주기 값 자체를 잠근다**(v1.6.72: 15/5 → 10/4초). `docs/project-notes.md`의 한도 계산표가
-     * 이 두 숫자에 통째로 얹혀 있다 — 조용히 바뀌면 문서가 거짓말이 되고 한도가 샌다.
+     * **주기 값 자체를 잠근다**(v1.7.16 ①: 적응형 10/4초 → **3초 하나**).
+     * `docs/project-notes.md` 의 호출량 표가 이 숫자에 얹혀 있다 — 조용히 바뀌면 표가 거짓말이 된다.
      *
-     * 그리고 **`LineMap`의 폴링 tick(2초)이 두 값의 최대공약수여야 한다.** 실제 호출은
+     * 그리고 **`LineMap`·`MainLineMap` 의 폴링 tick 이 이 값의 약수여야 한다.** 실제 호출은
      * "주기 이상이 되는 첫 tick"에 일어나므로 나누어떨어지지 않으면 그 눈금으로 반올림된다
-     * (종전 5초 tick에 4초를 넣으면 실제 간격이 5초가 된다 — 한쪽만 고치면 나는 버그).
+     * (종전 5초 tick 에 4초를 넣으면 실제 간격이 5초가 된다 — 한쪽만 고치면 나는 버그).
      */
     @Test
-    fun `접근 여부로 갱신 주기가 갈리고 폴링 눈금과 맞물린다`() {
-        val idle = BranchLive.pollIntervalMs(listOf(TrainMark("5601", true, 0.5f, "")))
-        val near = BranchLive.pollIntervalMs(listOf(TrainMark("5601", true, 1.5f, "")))
-        assertEquals(10_000L, idle)
-        assertEquals(4_000L, near)
-        assertEquals(10_000L, BranchLive.pollIntervalMs(emptyList()))
-        assertTrue(near < idle)
-        val tickMs = 2_000L                                   // LineMap 폴링 LaunchedEffect
-        assertEquals(0L, idle % tickMs)
-        assertEquals(0L, near % tickMs)
+    fun `갱신 주기 3초와 폴링 눈금이 맞물린다`() {
+        assertEquals(3_000L, BranchLive.POLL_INTERVAL_MS)
+        val tickMs = 3_000L                                   // 세 화면의 폴링 LaunchedEffect
+        assertEquals(0L, BranchLive.POLL_INTERVAL_MS % tickMs)
         // 여유는 **한 눈금 미만**이어야 한 눈금 이른 자리가 여전히 걸리고, **0보다 커야**
         // 경계 눈금이 지터로 밀리지 않는다. 이 창을 벗어나면 실측 간격이 주기와 달라진다.
         assertTrue(BranchLive.TICK_SLACK_MS > 0L)
         assertTrue(BranchLive.TICK_SLACK_MS < tickMs)
+    }
+
+    /* ── v1.7.16 ③ 기준 시각 ─────────────────────────────────── */
+
+    /** 응답에서 **가장 새로운** `recptnDt` 하나. 형식이 고정이라 글자 비교가 곧 시각 순서다. */
+    @Test
+    fun `기준 시각은 응답에서 가장 새로운 값이다`() {
+        val rows = BranchLive.parsePositions("""
+            {"list":[
+            {"subwayId":"1002","statnNm":"도림천","trainNo":"5553","updnLine":"1","statnTnm":"신도림지선","trainSttus":"1","recptnDt":"2026-09-08 14:20:19","lstcarAt":"0"},
+            {"subwayId":"1002","statnNm":"신도림","trainNo":"6114","updnLine":"0","statnTnm":"성수종착","trainSttus":"1","recptnDt":"2026-09-08 14:20:45","lstcarAt":"1"}
+            ]}
+        """.trimIndent())
+        assertEquals("2026-09-08 14:20:45", latestRecptn(rows))
+        assertEquals("20:19", rows[0].recptnDt.takeLast(5))
+        assertEquals("1", rows[1].lstcarAt)
+        assertEquals("", latestRecptn(emptyList()))
+        // 필드가 없는 옛 응답(테스트 fixture 포함)도 빈 문자열이지 예외가 아니다
+        assertEquals("", latestRecptn(BranchLive.parsePositions(positions)).let { if (it == "") "" else it })
+    }
+
+    @Test
+    fun `기준 시각 글자 — 없으면 빗금`() {
+        assertEquals("14:20:45", recptnClock("2026-09-08 14:20:45"))
+        assertEquals("--:--:--", recptnClock(""))
+        assertEquals("--:--:--", recptnClock("망가진값"))
+    }
+
+    /**
+     * 나이는 **서버 시각 − 폰 시계**가 아니라 **"몇 초째 안 바뀌나"** 로 잰다 —
+     * 기기 시계가 어긋난 이력(실측 534분)이 있어 절대 시각끼리 견주면 멀쩡한 값이 늘 낡음이 된다.
+     */
+    @Test
+    fun `기준 시각 나이는 값이 안 바뀐 시간으로 잰다`() {
+        val t0 = 1_000_000L
+        // 같은 값 → 처음 본 시각을 지킨다
+        assertEquals(t0, recptnFirstSeen("A", t0, "A", t0 + 30_000))
+        // 바뀌면 지금
+        assertEquals(t0 + 30_000, recptnFirstSeen("A", t0, "B", t0 + 30_000))
+        // 빈 값(못 받음)은 지금으로 친다 — 안 그러면 나이가 무한히 자란다
+        assertEquals(t0 + 30_000, recptnFirstSeen("A", t0, "", t0 + 30_000))
+
+        assertEquals(60, RECPTN_STALE_SEC)
+        assertFalse(recptnStale("A", t0, t0 + RECPTN_STALE_SEC * 1000L))       // 딱 60초는 아직
+        assertTrue(recptnStale("A", t0, t0 + RECPTN_STALE_SEC * 1000L + 1))
+        // 서버 갱신 주기(실측 18~22초)로는 안 걸린다 — 정상 화면이 붉어지면 안 된다
+        assertFalse(recptnStale("A", t0, t0 + 22_000))
+        assertTrue(recptnStale("", t0, t0))                                    // 못 받은 것도 낡은 것
+    }
+
+    /* ── v1.7.16 ④ 지연 · ⑥ 막차 ─────────────────────────────── */
+
+    @Test
+    fun `지연 문구 — 모르면 아무 말도 안 한다`() {
+        assertNull(delayText(null))          // ⚠ null 을 0(정시)으로 바꾸지 말 것
+        assertEquals("정시", delayText(0))
+        assertEquals("+3분", delayText(3))
+        assertEquals("3분 빠름", delayText(-3))
+    }
+
+    @Test
+    fun `많이 늦으면 색을 바꾼다 — 기준 5분`() {
+        assertEquals(5, DELAY_ALERT_MIN)
+        assertFalse(bigDelay(null))          // 모르는 것은 경고가 아니다
+        assertFalse(bigDelay(0))
+        assertFalse(bigDelay(4))
+        assertTrue(bigDelay(5))
+        assertTrue(bigDelay(12))
+        assertFalse(bigDelay(-9))            // 빠른 것은 경고가 아니다
+        // pickRun 의 ±15분 slack 안이어야 화면에 뜰 수 있다 — 그 창의 3분의 1 이 기준값이다
+        assertTrue(DELAY_ALERT_MIN * 3 == 15)
+    }
+
+    /**
+     * ⚠ 지선의 내외선 태그는 **본선과 반대**다 — 자산 전수 확인(2026-09-08).
+     * 뒤집으면 조회가 늘 빈손이라 지연 칸이 **조용히 사라진다**(v1.7.16 첫 판의 실제 증상).
+     */
+    @Test
+    fun `지선 신도림행은 외선 태그다`() {
+        assertEquals(2, branchInout(true))    // 신도림행 — `5625` 가 `1,2,46 → 1,2,33`
+        assertEquals(1, branchInout(false))   // 까치산행 — `5626` 이 `1,1,33 → 1,1,46`
+        // 본선은 반대다(내선 = 1) — 두 규칙이 한 함수에 섞이지 않게 이름을 따로 뒀다
+        assertEquals(1, Line2Timetable.inoutOf(true))
+    }
+
+    @Test
+    fun `막차는 lstcarAt 1 뿐이다`() {
+        assertTrue(isLastCar("1"))
+        assertTrue(isLastCar(" 1 "))
+        assertFalse(isLastCar("0"))
+        assertFalse(isLastCar(""))
+        assertFalse(isLastCar("Y"))          // ⚠ 모르는 값을 막차라고 하면 다음 열차를 포기한다
+    }
+
+    /* ── v1.7.16 ⑤ 입고 ETA — 실측 우선, 시간표는 구간 소요만 ── */
+
+    /**
+     * 시간표는 **길이**만 빌려준다. 못 찾으면 [BranchLive.inboundFromPositions] 의 실측 근사
+     * (남은 역 수 × 110초)가 **그대로 남는다** — 조용히 사라지지 않는다.
+     */
+    @Test
+    fun `입고 ETA 는 실측 위치가 기준이고 시간표는 구간 소요만 준다`() {
+        // 문래(MAIN 34) 출발 07:00:30 → 신도림(33) 도착 07:02:00 = 90초. 외선이라 inout 2.
+        val tt = Line2Timetable.parse("""
+            1,2,34,2401,25200,25230
+            1,2,33,2401,25320,25350
+        """.trimIndent())
+        val approx = InboundTrain("6401", 110, statnNm = "문래", trainSttus = "1", inner = false)
+        val r = BranchLive.refineInbound(listOf(approx), tt, 1, 25230)
+        assertEquals(90, r.single().etaSec)                       // 근사 110 → 시간표 길이 90
+
+        // `출발`(2)이면 그 역을 막 떠난 참 — 근사와 **같은 40초** 보정
+        val left = BranchLive.refineInbound(
+            listOf(approx.copy(trainSttus = "2")), tt, 1, 25230)
+        assertEquals(50, left.single().etaSec)
+
+        // 시간표에 없는 운행이면 실측 근사 그대로
+        val unknown = InboundTrain("6999", 220, statnNm = "영등포구청", trainSttus = "1", inner = false)
+        assertEquals(220, BranchLive.refineInbound(listOf(unknown), tt, 1, 25230).single().etaSec)
+        // 시간표 자체가 없어도(자산 로딩 전) 근사가 산다
+        assertEquals(110, BranchLive.refineInbound(listOf(approx), null, 1, 25230).single().etaSec)
     }
 
     @Test
@@ -648,22 +757,32 @@ class BranchLiveTest {
     }
 
     /**
-     * 입고 ETA 는 **시간표를 먼저 본다**(지연 반영) — 못 찾거나 근사와 5분 넘게 어긋나면
-     * 근사 그대로 둔다. 라이브 `4340` 을 자산의 `2340` 으로 잇는 것이 [sameRun] 이다.
+     * 입고 ETA — **v1.7.16 ⑤ 에서 잣대가 뒤집혔다.**
+     *
+     * v1.7.2~v1.7.15 : 시간표의 **신도림 도착 예정 시각** + 지연 − 지금 → **600초**.
+     *   열차가 어디 있든 값이 같았다(위치를 안 본다). 지연 추정이 틀리면 그대로 새어
+     *   근사와 5분 넘게 벌어지면 통째로 버려야 했다.
+     * v1.7.16       : **실측 위치**(지금 사당) + 시간표의 **길이**(사당 출발 → 신도림 도착)
+     *   → **570초**. 지연은 위치가 이미 품고 있으므로 따로 더하지 않는다.
+     *
+     * ⚠ 시각이 아니라 길이라 **정시 기준 570초**다 — 이 열차는 사당 출발이 30초 늦었으므로
+     * 그만큼(30초) 낙관적이다. 실측 근사(역 수 × 110초)가 이미 갖고 있던 오차와 같은 크기고,
+     * ①로 3초마다 위치가 새로 오므로 다음 역에서 저절로 줄어든다.
+     * 라이브 `4340` 을 자산의 `2340` 으로 잇는 것은 종전대로 [sameRun] 이다.
      */
     @Test
-    fun `입고 ETA 는 시간표가 있으면 그쪽을 쓴다`() {
-        // 신도림 = stationIdx 33. 내선(inout 1) `2340` 이 07:00:00 에 도착한다.
+    fun `입고 ETA 는 시간표에서 길이만 빌린다`() {
+        // 신도림 = stationIdx 33 · 사당 = 25. 내선(inout 1) `2340`.
         val tt = com.sinjeong.crewcalendar.domain.model.Line2Timetable.parse(
             "1,1,25,2340,24600,24630\n1,1,33,2340,25200,25230")
         val rows = BranchLive.parsePositions(
             """[{"subwayId":"1002","statnNm":"사당","trainNo":"4340","updnLine":"0","statnTnm":"신도림","trainSttus":"1"}]""")
         val approx = BranchLive.inboundFromPositions(rows)
-        assertEquals(880, approx[0].etaSec)
-        // 사당(24600) 도착이 60초 늦었다 → 신도림도 60초 늦게 25260. 지금 24660 → 600초 남음.
+        assertEquals(880, approx[0].etaSec)                     // 8역 × 110초
+        // 사당 출발 24630 → 신도림 도착 25200 = 570초. **지금 시각을 안 뺀다**(길이다).
         val refined = BranchLive.refineInbound(approx, tt, 1, 24660)
-        assertEquals(600, refined[0].etaSec)
-        // 시간표를 모르면 근사 그대로
+        assertEquals(570, refined[0].etaSec)
+        // 시간표를 모르면 실측 근사 그대로
         assertEquals(880, BranchLive.refineInbound(approx, null, 1, 24660)[0].etaSec)
     }
 

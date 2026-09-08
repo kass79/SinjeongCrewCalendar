@@ -75,6 +75,18 @@ internal data class TrainMark(
     val toSindorim: Boolean,
     val position: Float,
     val statusText: String,
+    /* ── 아래 셋은 **내 열차 지연**(v1.7.16 ④)·**막차**(⑥)가 쓴다. 전부 기본값이 있어
+     *    종전 경로는 한 줄도 안 바뀐다 — 회차 홀드([ensureFleet])·도착 합성
+     *    ([trainsFromArrivals]) 같은 **우리가 만든** 마크는 빈 채로 두고, 그러면 지연이
+     *    조용히 생략된다(모르는 것을 정시라고 하지 않는다).
+     *    ⚠ [statusText] 에서 되읽으면 안 된다 — [refineWithArrivals] 가 `양천구청 100초 전`
+     *    으로 덮어써서 역 이름도 상태도 글자에 안 남는다. */
+    /** API 가 준 현재 역명(정규화 후) — 시간표 대조용 */
+    val statnNm: String = "",
+    /** API 원본 상태 코드 `0진입 1도착 2출발 3전역출발` */
+    val trainSttus: String = "",
+    /** 응답의 `lstcarAt` — `"1"` 이면 **막차**(v1.7.16 ⑥) */
+    val lstcarAt: String = "",
 )
 
 /**
@@ -99,6 +111,13 @@ internal data class PositionRow(
     val updnLine: String,
     val statnTnm: String,    // 종착역명 ("신도림지선"·"까치산종착" 등 변형이 온다)
     val trainSttus: String,  // 0진입 1도착 2출발 3전역출발
+    /**
+     * **서버가 이 값을 받은 시각**(`YYYY-MM-DD HH:MM:SS`) — v1.7.16 ③ 의 기준 시각.
+     * 폰 시계가 아니라 **자료의 나이**를 말하므로 통신이 끊기면 이 숫자가 멎는다.
+     */
+    val recptnDt: String = "",
+    /** **막차**(v1.7.16 ⑥) — `"1"` 이면 그 방향 막차다. 낮에는 응답이 전부 `"0"` 이다. */
+    val lstcarAt: String = "",
 )
 
 /**
@@ -130,6 +149,109 @@ internal data class ArrivalRow(
     /** 열차가 **오는 쪽**(이전역) 코드 */
     val statnFid: String = "",
 )
+
+/* ── ③ 기준 시각 · ④ 지연 · ⑥ 막차 — 순수 함수 (v1.7.16) ────────────
+ *
+ * 셋 다 **세 화면이 같이 본다**(지선 카드 · 본선 지도 · 출퇴근 역). 화면마다 따로 적으면
+ * 같은 자료를 서로 다른 말로 부르게 된다 — 이 저장소가 여러 번 물린 자리다
+ * (`sttusText` 가 `mainTrains` 와 같은 표인 것과 같은 이유).
+ * 안드로이드·Compose 를 한 줄도 안 쓴다 — `BranchLiveTest` 가 그대로 돌린다.
+ */
+
+/**
+ * 스냅샷의 **기준 시각** = 이 응답에서 가장 새로운 [PositionRow.recptnDt].
+ *
+ * `YYYY-MM-DD HH:MM:SS` 는 자리 수가 고정이라 **글자 크기 비교가 곧 시각 순서**다
+ * (`LocalDateTime` 파싱이 필요 없다 — 형식이 어긋난 값은 애초에 안 온다).
+ * 빈 응답·필드 없음이면 **빈 문자열**이다.
+ */
+internal fun latestRecptn(rows: List<PositionRow>): String =
+    rows.asSequence().map { it.recptnDt.trim() }.filter { it.isNotEmpty() }.maxOrNull().orEmpty()
+
+/** 헤더에 적을 한 토막 — `20:54:27`. 못 받았으면 **`--:--:--`**(빈칸으로 두지 않는다). */
+internal fun recptnClock(recptnDt: String): String =
+    RECPTN_TIME.find(recptnDt)?.value ?: "--:--:--"
+
+private val RECPTN_TIME = Regex("\\d{2}:\\d{2}:\\d{2}")
+
+/**
+ * 이 [newDt] 를 **처음 본 시각**(ms). 값이 그대로면 [prevAt] 을 지키고, 바뀌었으면 지금이다.
+ * 빈 값은 "못 받았다"라 지금으로 친다 — 안 그러면 통신이 죽자마자 나이가 무한히 자란다.
+ */
+internal fun recptnFirstSeen(prevDt: String, prevAt: Long, newDt: String, nowMs: Long): Long =
+    if (newDt.isNotBlank() && newDt == prevDt) prevAt else nowMs
+
+/**
+ * 기준 시각이 **이 초만큼 안 바뀌면** 눈에 띄게 말한다(v1.7.16 ③).
+ *
+ * **60초의 근거**: 서버가 값을 바꾸는 주기가 실측 **18~22초**다(2026-09-08, 2호선 40회).
+ * 그 세 배가 지나도록 같은 값이면 서버 갱신 지연이 아니라 **우리 쪽이 못 받고 있는 것**이다
+ * (비행기 모드 실측에서 그렇게 멎는다). 두 배(40초)는 서버가 한 번 거르면 바로 걸려
+ * 멀쩡한 화면이 붉어지고, 다섯 배(100초)는 승무원이 열차를 놓친 뒤에야 말한다.
+ */
+internal const val RECPTN_STALE_SEC = 60
+
+/** 기준 시각이 낡았나 — **못 받은 것(빈 값)도 낡은 것**이다. */
+internal fun recptnStale(recptnDt: String, firstSeenMs: Long, nowMs: Long): Boolean =
+    recptnDt.isBlank() || nowMs - firstSeenMs > RECPTN_STALE_SEC * 1000L
+
+/**
+ * **지연 한 토막** — `정시` · `+3분` · `3분 빠름`. 모르면 **null 이고 아무 말도 안 한다**.
+ *
+ * 카스: *"`내 열차 · 정시` / `+3분` 처럼 짧게"*. 종전(v1.6.88~v1.7.15) 본선 헤더는
+ * `+3분 지연` 이었는데 `정시` 와 나란히 서면 `지연` 두 글자가 없어도 뜻이 산다 —
+ * 헤더 한 줄이 자원이라([HEAD_LADDER]) 두 글자가 그대로 지도로 간다.
+ *
+ * ⚠ **null 을 0 으로 바꾸지 말 것.** 시간표에 그 운행이 없으면(지선 아닌 다른 호선,
+ * 자산에 없는 열번) 값을 **모르는** 것이지 정시인 것이 아니다.
+ */
+internal fun delayText(delay: Int?): String? = when {
+    delay == null -> null
+    delay > 0 -> "+${delay}분"
+    delay < 0 -> "${-delay}분 빠름"
+    else -> "정시"
+}
+
+/**
+ * **눈에 띄게 말할 지연**(분). 이 값 이상이면 헤더 글자색이 [MapPalette.fail] 로 바뀐다.
+ *
+ * **5분의 근거 셋**:
+ *  1. 2호선 평시 배차가 **3~6분**이다 — 5분 지연은 배차 한 칸을 통째로 잃은 것이고,
+ *     승무원의 다음 사업(교대·편승)이 그때부터 흔들린다.
+ *  2. `pickRun` 이 같은 몸통 라이브를 가를 때 쓰는 slack 이 **±15분**이다(v1.7.3).
+ *     지연이 그 값을 넘으면 애초에 **다른 열차로 잡히므로** 화면에 뜨는 지연은
+ *     구조적으로 |15| 분 안이다 — 그 창의 3분의 1 이 5분이다. 색이 15분에서야 켜지면
+ *     켜질 자리가 거의 없고, 2분에서 켜지면 늘 켜져 있어 신호가 안 된다.
+ *  3. 카스 추천값과 같다.
+ */
+internal const val DELAY_ALERT_MIN = 5
+
+/** [DELAY_ALERT_MIN] 이상 늦었나. `null`(모름)·정시·빠름은 전부 false. */
+internal fun bigDelay(delay: Int?): Boolean = delay != null && delay >= DELAY_ALERT_MIN
+
+/**
+ * 신정지선 열차의 **시간표 내외선 태그**(v1.7.16 ④) — 본선과 **반대로 읽힌다**.
+ *
+ * 자산 전수 확인(2026-09-08 `assets/timetable/line2.csv`):
+ * ```
+ * 5625  1,2,46(까치산) → 1,2,33(신도림)   신도림행 = inout 2 (외선)
+ * 5626  1,1,33(신도림) → 1,1,46(까치산)   까치산행 = inout 1 (내선)
+ * ```
+ * 신도림에서 **외선 루프로 이어지는 방향**이 신도림행이라 그렇다.
+ *
+ * ⚠ [TrainMark.toSindorim] 을 [Line2Timetable.inoutOf] 에 **그대로 넘기면 조회가 늘 빈손**이고
+ * 지연 칸이 조용히 사라진다(v1.7.16 첫 판에서 실제로 그랬다 — 화면이 아무 말도 안 했다).
+ */
+internal fun branchInout(toSindorim: Boolean): Int = Line2Timetable.inoutOf(!toSindorim)
+
+/**
+ * **막차인가**(v1.7.16 ⑥) — 응답의 `lstcarAt` 은 `"0"`/`"1"` 이다(2026-09-08 실호출로
+ * 필드 존재 확인 · 낮에는 전 행이 `"0"`).
+ *
+ * ⚠ **모르는 값은 false** 다 — 막차가 아닌 열차에 막차라고 하면 승무원이 다음 열차를
+ * 포기한다(반대 방향 실수보다 나쁘다).
+ */
+internal fun isLastCar(lstcarAt: String): Boolean = lstcarAt.trim() == "1"
 
 /**
  * 열차가 **큰 `FR_CODE` 쪽에서 오나** — [commuteNeighbors] 의 차례를 정한다(v1.7.14 ⑤).
@@ -178,6 +300,18 @@ internal data class Snapshot(
     val mainTrains: List<MainTrainMark> = emptyList(),
     val inbound: List<InboundTrain> = emptyList(),
     val fetchedAtMillis: Long = 0L,
+    /**
+     * **기준 시각**(v1.7.16 ③) — 이 스냅샷에서 가장 새로운 [PositionRow.recptnDt].
+     * 헤더가 폰 시계 대신 이 값을 적는다. 못 받았으면 빈 문자열이고 [recptnClock] 이
+     * `--:--:--` 로 적는다.
+     */
+    val recptnDt: String = "",
+    /**
+     * 위 [recptnDt] 를 **처음 본 우리 시각**(ms) — 나이는 이 값과의 차로 잰다([recptnStale]).
+     * ⚠ 서버 시각에서 폰 시계를 빼지 않는다: 기기 시계가 어긋난 이력이 있어(실측 534분)
+     * 절대 시각끼리 견주면 멀쩡한 값이 늘 "낡음"이 된다. 잣대는 **"몇 초째 안 바뀌나"** 다.
+     */
+    val recptnAtMillis: Long = 0L,
     val error: String? = null,
 )
 
@@ -225,17 +359,32 @@ internal object BranchLive {
     private const val STATION_BASE = "http://openapi.seoul.go.kr:8088"
 
     /**
-     * 갱신 주기 — **적응형**(v1.6.70, 값은 v1.6.72에서 15/5 → **10/4초**).
-     * 평소 10초, 편승 열차가 양천구청으로 다가오는 동안만 4초. 판정은 [approachingYangcheon].
-     * 한도 산정은 `docs/project-notes.md` **v1.6.72 절**(실이용자 50명 전제 — 282명이 아니다).
+     * 갱신 주기 — **3초 하나**(v1.7.16 ①, 카스가 일일 호출량 제한 없음을 승인받았다).
      *
-     * ⚠ **[BranchLiveMap]의 폴링 눈금(2초)과 맞물려 있다.** 이 상수는 "중복 호출을 흡수하는
-     * 하한"이라 실제 호출 시각은 *이 값 이상이 되는 첫 폴링 눈금*이다. 그래서 눈금이
-     * 두 값의 **최대공약수**여야 한다 — `gcd(10, 4) = 2`초. 한쪽만 바꾸면 조용히 어긋난다:
-     * 종전 5초 눈금에 4초를 넣으면 첫 눈금이 5초라 **실제 간격이 5초로 반올림**된다.
+     * ## 왜 3초이고, 왜 그 이상 빨라져 봐야 소용이 없나
+     *
+     * **서버가 값을 바꾸는 주기는 18~22초**다(2026-09-08 실측 — 2호선을 2초 간격 40회 불러
+     * `recptnDt` 가 바뀐 것이 5번, 간격 18·22·18·18초). 그러니 **더 자주 불러도 자료가
+     * 더 새로워지지는 않는다.** 얻는 것은 하나뿐이다: 우리 물음과 서버 갱신이 안 맞물리므로
+     * **새 값을 받기까지 평균 = 우리 주기의 절반**이고, 15초면 7.5초·3초면 1.5초다 —
+     * 곧 **평균 6초 빨라진다.** 그것이 이 상수를 내리는 실익 전부다.
+     *
+     * ## 적응형(10초/4초)을 버린 이유
+     *
+     * v1.6.70~v1.7.15 는 평소 10초, 편승 열차가 양천구청에 다가오는 동안만 4초였다
+     * (판정 `approachingYangcheon`). **두 값이 다 3초가 되면 그 분기는 죽은 가지**라
+     * 판정 함수와 함께 지웠다 — 남겨 두면 다음 사람이 "왜 안 걸리지" 하고 들여다본다.
+     * 되살릴 일이 생기면 `git log` 의 v1.7.15 판이 그대로 있다.
+     *
+     * ⚠ **이제 막는 것은 호출 수가 아니라 배터리다.** 그래서 폴링은 종전과 똑같이
+     * **화면을 보고 있는 동안만** 돈다(시트를 접으면 [LaunchedEffect] 가 취소돼 멎는다).
+     *
+     * ⚠ **[BranchLiveMap]·[MainLineMapDialog] 의 폴링 눈금(3초)과 맞물려 있다.** 이 상수는
+     * "중복 호출을 흡수하는 하한"이라 실제 호출 시각은 *이 값 이상이 되는 첫 폴링 눈금*이다 —
+     * 눈금이 이 값의 약수여야 한다(지금은 같은 3초). 한쪽만 바꾸면 조용히 어긋난다:
+     * 종전 5초 눈금에 4초를 넣으면 첫 눈금이 5초라 **실제 간격이 5초로 반올림**됐다.
      */
-    private const val IDLE_INTERVAL_MS = 10_000L
-    private const val NEAR_INTERVAL_MS = 4_000L
+    internal const val POLL_INTERVAL_MS = 3_000L
 
     /**
      * 주기 판정에 주는 **여유** — 눈금의 절반. 없으면 **경계에서 동전 던지기가 된다.**
@@ -333,6 +482,8 @@ internal object BranchLive {
                 updnLine = field(o, "updnLine").orEmpty(),
                 statnTnm = field(o, "statnTnm").orEmpty(),
                 trainSttus = field(o, "trainSttus") ?: "9",
+                recptnDt = field(o, "recptnDt").orEmpty(),
+                lstcarAt = field(o, "lstcarAt").orEmpty(),
             )
         }.toList()
 
@@ -490,7 +641,8 @@ internal object BranchLive {
                     "3" -> " 접근 중"; else -> " 부근"
                 }
                 TrainMark(r.trainNo, toSindorim,
-                    posOf(idx, if (toSindorim) 1f else -1f, r.trainSttus), st)
+                    posOf(idx, if (toSindorim) 1f else -1f, r.trainSttus), st,
+                    statnNm = norm(r.statnNm), trainSttus = r.trainSttus, lstcarAt = r.lstcarAt)
             }
             .distinctBy { it.trainNo }
             .toList()
@@ -524,7 +676,8 @@ internal object BranchLive {
                     else -> true
                 }
                 TrainMark(r.trainNo, up, posOf(idx, if (up) 1f else -1f, r.trainSttus),
-                    BranchLine.stations[idx] + " 부근")
+                    BranchLine.stations[idx] + " 부근",
+                    statnNm = norm(r.statnNm), trainSttus = r.trainSttus, lstcarAt = r.lstcarAt)
             }.toList()
     }
 
@@ -606,27 +759,41 @@ internal object BranchLive {
             .toList()
 
     /**
-     * 입고 ETA 를 **시간표의 신도림 도착 시각**으로 다듬는다(v1.7.2) — 지연이 반영된다.
+     * 입고 ETA 를 **실측 위치 기준**으로 다듬는다 — v1.7.16 ⑤ 에서 잣대를 뒤집었다.
      *
-     * 근사(역 수 × 110초)는 지연을 모른다. 시간표에서 그 운행의 신도림 도착을 찾을 수 있으면
-     * `도착시각 + 지연 − 지금` 을 쓰고, 못 찾거나 값이 **터무니없으면 근사 그대로 둔다.**
+     * ## 실측이 기준이고 시간표는 **보조**다
+     *
+     * ① 로 3초마다 실제 위치가 오므로, **지금 어느 역인가**([InboundTrain.statnNm], 위치 API)가
+     * 늘 기준이다. 시간표에서 빌려오는 것은 **시각이 아니라 길이** 하나뿐이다 — 그 역을 떠나
+     * 신도림에 닿기까지의 예정 소요([Line2Timetable.travelSeconds]).
+     *
+     * ```
+     * ETA = travelSeconds(지금 역 → 신도림)      ← 실측 위치 + 시간표 구간 소요
+     * 못 찾으면 ETA = 남은 역 수 × 110초           ← [inboundFromPositions] 의 실측 근사 그대로
+     * ```
+     *
+     * **v1.7.2~v1.7.15 는 반대였다**: 시간표의 **신도림 도착 예정 시각** + 지연 − 지금.
+     * 절대 시각이라 열차가 어디 있든 결과가 같았고(위치를 안 본다), 지연 추정이 틀리면
+     * 그대로 새어 나가 근사와 5분 넘게 벌어지면 통째로 버려야 했다(`abs(eta - t.etaSec) <= 300`).
+     * 길이만 빌려 오면 그 두 문제가 함께 없어진다 — 지연은 **위치가 이미 품고 있다.**
      *
      * ⚠ 라이브 열번(`4340`)은 자산 CSV 에 없다 — 같은 운행의 `2340` 을 [Line2Timetable] 이
-     * [sameRun] 으로 찾아 준다. 창(900초)은 근사로 이미 좁혀 놓은 뒤라 여기서 다시 안 건다.
+     * [sameRun] 으로 찾아 준다. **15분 창은 [inboundFromPositions] 가 이미 걸었고**, 화면 칩도
+     * `1..900` 으로 한 번 더 거른다(확정 표 "15분 이내만 표시").
      */
     internal fun refineInbound(
         inbound: List<InboundTrain>, tt: Line2Timetable?, weekTag: Int, nowSec: Int,
     ): List<InboundTrain> {
         if (tt == null || inbound.isEmpty()) return inbound
         return inbound.map { t ->
-            val io = Line2Timetable.inoutOf(t.inner)
-            val arrive = tt.arriveSecAt(weekTag, io, t.trainNo, "신도림", nowSec, t.destName)
-                ?: return@map t
-            val delay = tt.delayMinutes(
-                weekTag, io, t.trainNo, t.statnNm, t.trainSttus, nowSec, t.destName) ?: 0
-            val eta = arrive + delay * 60 - nowSec
-            // 근사와 5분 넘게 어긋나면 다른 바퀴(순환선이라 같은 역을 또 지난다)를 잡은 것이다.
-            if (eta in 0..1200 && kotlin.math.abs(eta - t.etaSec) <= 300) t.copy(etaSec = eta) else t
+            val travel = tt.travelSeconds(
+                weekTag, Line2Timetable.inoutOf(t.inner), t.trainNo, t.statnNm, "신도림",
+                nowSec, t.destName,
+            ) ?: return@map t                     // 시간표를 못 찾으면 실측 근사 그대로
+            // `출발`(2)이면 그 역을 막 떠난 참이라 예정 소요가 그만큼 남는다 —
+            // [inboundFromPositions] 의 근사가 쓰는 것과 **같은 40초** 보정이다(보정 손잡이).
+            val eta = (travel - if (t.trainSttus == "2") 40 else 0).coerceAtLeast(30)
+            if (eta <= 1200) t.copy(etaSec = eta) else t
         }.sortedBy { it.etaSec }
     }
 
@@ -933,50 +1100,34 @@ internal object BranchLive {
     }
 
     /**
-     * **양천구청으로 다가오는 신도림행 열차가 있나** — 적응형 갱신 주기의 판정(v1.6.70).
-     *
-     * 기준: 신도림행(편승 대상) 중 위치가 **0.85 이상 2.0 미만**.
-     *  · 0.85 = 신정네거리 `진입`이 찍히는 자리([posOf]의 `"0"` = idx − 0.15). 승무원이
-     *    양천구청 승강장에서 열차를 눈으로 찾기 시작하는 시점 — 여기부터 초 단위가 필요하다.
-     *  · 2.0 = 양천구청 도착. 지나가면 편승은 끝났으니 평소 주기로 돌아간다.
-     *  · 까치산행(하행)은 세지 않는다 — 양천구청에서 잡아 타는 건 신도림행뿐이다.
-     * 창(0.85~2.0)의 실주행 시간 = 0.15 × 100 + 130 ≈ **145초**. 상행 배차 6분 기준
-     * 가동률 ≈ 40%다(한도 계산의 근거 — `docs/project-notes.md` v1.6.70).
-     */
-    internal fun approachingYangcheon(trains: List<TrainMark>) =
-        trains.any { it.toSindorim && it.position >= 0.85f && it.position < 2f }
-
-    /**
-     * 이번 갱신에 쓸 주기. [approachingYangcheon] 하나로 갈린다 — 값은 테스트가 잠근다
-     * (문서의 한도 계산표가 이 두 숫자에 얹혀 있어서, 조용히 바뀌면 표가 거짓말이 된다).
-     */
-    internal fun pollIntervalMs(trains: List<TrainMark>) =
-        if (approachingYangcheon(trains)) NEAR_INTERVAL_MS else IDLE_INTERVAL_MS
-
-    /**
      * 스냅샷 1회 = **API 2회**(2호선 위치 1 + 양천구청 도착 1).
      * v1.6.70이 더했던 신정네거리 도착(3번째)은 v1.6.71에서 껐다 — [loadFromSeoulApi] 주석.
-     * 주기 내 재호출은 캐시 반환(한도 보호) — 주기는 [pollIntervalMs]에 따라 10초/4초.
+     * 주기 내 재호출은 캐시 반환 — 주기는 [POLL_INTERVAL_MS] **3초 하나**다(v1.7.16 ①).
      *
+     * ⚠ **캐시는 같은 인스턴스를 돌려준다** — 눈금이 주기보다 잦아도 리컴포지션이 안 는다.
      * ⚠ 호출자는 반드시 **컴포지션에 묶인 코루틴**에서 부를 것 — 상세시트가 닫히면
      * [BranchLiveMap]의 LaunchedEffect가 취소되며 폴링이 함께 멎는다.
      */
     suspend fun loadSnapshot(force: Boolean = false): Snapshot {
         val nowMs = System.currentTimeMillis()
-        // 직전 스냅샷의 위치로 판정한다 — 최대 10초 묵은 값이지만, 접근 창이 145초라 놓치지 않는다.
-        val interval = pollIntervalMs(lastSnapshot?.trains.orEmpty())
-        if (!force) lastSnapshot?.let { if (nowMs - lastFetchAt < interval - TICK_SLACK_MS) return it }
+        val prev = lastSnapshot
+        if (!force) prev?.let { if (nowMs - lastFetchAt < POLL_INTERVAL_MS - TICK_SLACK_MS) return it }
         lastFetchAt = nowMs
         var snap = retainLastGood(loadFromSeoulApi())
         // ⚠ 순서 고정: 회차 공백 메꾸기(실측 열번) → 머리 전환(+5/+1) → 겹침 정리.
         //   [ensureFleet] KDoc 참고 — 뒤집으면 회차 중 아이콘이 사라진다.
-        snap = snap.copy(trains = squashOverlaps(applyTurnaround(ensureFleet(snap.trains, nowMs))))
+        snap = snap.copy(
+            trains = squashOverlaps(applyTurnaround(ensureFleet(snap.trains, nowMs))),
+            // ③ 기준 시각이 **언제부터 안 바뀌었나** — 나이는 여기서만 잰다.
+            recptnAtMillis = recptnFirstSeen(
+                prev?.recptnDt.orEmpty(), prev?.recptnAtMillis ?: nowMs, snap.recptnDt, nowMs),
+        )
         lastSnapshot = snap
         // 주기는 **이번 호출을 통과시킨 값**이다 — logcat 타임스탬프 간격과 그대로 맞는다.
         // 열차 목록까지 남긴다 — 지도가 무엇을 그리는지(위치 융합·회차 홀드)를 실기기에서
         // 확인할 유일한 창이다. 시트가 열려 있는 동안 4~10초에 한 줄이라 시끄럽지 않다.
         Log.i(TAG, "스냅샷: 열차 ${snap.trains.size}대 · 입고 ${snap.inbound.size}건 " +
-            "· 주기 ${interval / 1000}초" + (snap.error?.let { " · $it" } ?: "") +
+            "· 주기 ${POLL_INTERVAL_MS / 1000}초 · 기준 ${recptnClock(snap.recptnDt)}" + (snap.error?.let { " · $it" } ?: "") +
             snap.trains.joinToString(", ", " [", "]") {
                 "${it.trainNo}@${"%.2f".format(it.position)} ${it.statusText}"
             })
@@ -1054,6 +1205,7 @@ internal object BranchLive {
                 mainTrains = mainTrains(posRows),
                 inbound = inboundFromPositions(posRows),
                 fetchedAtMillis = System.currentTimeMillis(),
+                recptnDt = latestRecptn(posRows),
                 // 두 호출이 같은 이유로 죽으면 문구도 하나만 (`인터넷 연결 안 됨 · 인터넷 연결 안 됨` 방지).
                 // 원문은 logcat으로 — 진단은 그쪽에서 한다.
                 error = listOfNotNull(pos.exceptionOrNull(), yang.exceptionOrNull())

@@ -17,8 +17,11 @@ import com.sinjeong.crewcalendar.presentation.live.approachFromHigher
 import com.sinjeong.crewcalendar.presentation.live.chipInkArgb
 import com.sinjeong.crewcalendar.presentation.live.commuteLead
 import com.sinjeong.crewcalendar.presentation.live.commuteOffset
+import com.sinjeong.crewcalendar.presentation.live.commuteDestLine
+import com.sinjeong.crewcalendar.presentation.live.commuteStatusLine
 import com.sinjeong.crewcalendar.presentation.live.commuteStops
 import com.sinjeong.crewcalendar.presentation.live.commuteTrains
+import com.sinjeong.crewcalendar.presentation.live.stepCommute
 import com.sinjeong.crewcalendar.presentation.live.contrastRatio
 import com.sinjeong.crewcalendar.presentation.live.destText
 import com.sinjeong.crewcalendar.presentation.live.frKey
@@ -166,8 +169,8 @@ class CommuteMiniTest {
 
     private fun pos(
         no: String, statn: String, updn: String, sttus: String = "1",
-        line: String = "1005", dest: String = "방화",
-    ) = PositionRow(line, statn, no, updn, dest, sttus)
+        line: String = "1005", dest: String = "방화", lstcar: String = "0",
+    ) = PositionRow(line, statn, no, updn, dest, sttus, lstcarAt = lstcar)
 
     /**
      * 2026-09-07 20:27:49 `realtimePosition/5호선` 실응답에서 마곡 부근 세 대를 그대로 옮겼다
@@ -482,6 +485,83 @@ class CommuteMiniTest {
         assertEquals(false, approachFromHigher(null))
         assertEquals(false, approachFromHigher(ArrivalRow("x", "방화", 1, "99")))
         assertEquals(false, approachFromHigher(up.copy(statnFid = "abc")))
+    }
+
+    /* ── v1.7.16 ② 1초 보간 — 규칙 셋을 잠근다 ─────────────────── */
+
+    /**
+     * 확정 표 v1.7.5 그대로다. 규칙은 [stepCommute] → `stepMotion` **한 곳**이고 여기서는
+     * 그것이 출퇴근 칸(0..4)에서도 그대로 사는지만 본다.
+     *
+     * ⚠ 속도는 **순수 등속 가정**(`DEFAULT_SEG_SEC` 110초)이다 — 출퇴근 역은 어느 호선이든
+     * 등록될 수 있고 자산은 2호선 시간표뿐이라 구간 소요를 모른다.
+     */
+    private fun train(pos: Float, holding: Boolean = false, no: String = "t") =
+        commuteTrains(listOf(pos(no, "마곡", "1", if (holding) "1" else "2")), magokDown)
+            .single().copy(pos = pos, holding = holding)
+
+    @Test
+    fun `보간 ⓐ 앞으로만 간다`() {
+        val t = train(1.5f)
+        // 왼쪽 → 오른쪽(하행)에서 목표가 **뒤**(1.2)면 버린다 — 뒤로 안 미끄러진다
+        val m0 = stepCommute(null, t.copy(pos = 1.5f), forward = true, nowMs = 0L)
+        val m1 = stepCommute(m0, t.copy(pos = 1.2f), forward = true, nowMs = 10_000L)
+        assertTrue(m1.pos > 1.5f)
+        // 오른쪽 → 왼쪽(상행)도 같다 — 좌표가 줄어드는 쪽이 "앞"이다
+        val n0 = stepCommute(null, t.copy(pos = 2.5f), forward = false, nowMs = 0L)
+        val n1 = stepCommute(n0, t.copy(pos = 2.8f), forward = false, nowMs = 10_000L)
+        assertTrue(n1.pos < 2.5f)
+    }
+
+    @Test
+    fun `보간 ⓑ 다음 칸을 안 넘는다`() {
+        val start = stepCommute(null, train(1.15f), forward = true, nowMs = 0L)
+        // 110초 × 다섯 칸을 흘려도 예측은 2.0 을 못 넘는다(0.95 지점에서 멈춘다)
+        val far = stepCommute(start, train(1.15f), forward = true, nowMs = 600_000L)
+        assertEquals(1.95f, far.pos, 1e-4f)
+        // 칸 밖(0..4)으로도 안 나간다 — 5칸은 순환이 아니라 끝이 있다
+        val edge = stepCommute(
+            stepCommute(null, train(3.9f), forward = true, nowMs = 0L),
+            train(3.9f), forward = true, nowMs = 600_000L,
+        )
+        assertTrue(edge.pos <= (COMMUTE_SLOTS - 1).toFloat())
+    }
+
+    @Test
+    fun `보간 ⓒ 도착·진입이면 역 자리에 선다`() {
+        // `1`(도착)·`0`(진입) 은 holding — 예측을 아예 안 돌린다
+        assertTrue(commuteTrains(listOf(pos("a", "마곡", "1", "1")), magokDown).single().holding)
+        assertTrue(commuteTrains(listOf(pos("a", "마곡", "1", "0")), magokDown).single().holding)
+        assertFalse(commuteTrains(listOf(pos("a", "마곡", "1", "2")), magokDown).single().holding)
+        assertFalse(commuteTrains(listOf(pos("a", "마곡", "1", "3")), magokDown).single().holding)
+
+        val hold = train(2f, holding = true)
+        val m0 = stepCommute(null, hold, forward = true, nowMs = 0L)
+        val m1 = stepCommute(m0, hold, forward = true, nowMs = 300_000L)
+        assertEquals(2f, m1.pos, 1e-4f)          // 5분이 흘러도 역 위 그대로
+    }
+
+    /* ── v1.7.16 ③ 기준 시각 · ⑥ 막차 글줄 ──────────────────── */
+
+    @Test
+    fun `막차는 굵은 첫 줄에 붙는다`() {
+        val plain = commuteTrains(listOf(pos("5656", "마곡", "1", "1")), magokDown).single()
+        assertFalse(plain.lastCar)
+        assertEquals("도착", commuteStatusLine(plain))
+
+        val last = commuteTrains(
+            listOf(pos("5656", "마곡", "1", "1", lstcar = "1")), magokDown).single()
+        assertTrue(last.lastCar)
+        assertEquals("도착 · 막차", commuteStatusLine(last))
+    }
+
+    @Test
+    fun `둘째 줄은 행선과 기준 시각이다`() {
+        assertEquals("방화행 · 14:20:45", commuteDestLine("방화행", "2026-09-08 14:20:45"))
+        // 행선을 모르면 시각만 — 가운뎃점이 홀로 남지 않는다
+        assertEquals("14:20:45", commuteDestLine("", "2026-09-08 14:20:45"))
+        // 기준 시각을 못 받았으면 빗금이 그 자리를 지킨다(빈칸으로 두지 않는다)
+        assertEquals("방화행 · --:--:--", commuteDestLine("방화행", ""))
     }
 
     @Test

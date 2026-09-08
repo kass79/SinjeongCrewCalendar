@@ -1,5 +1,9 @@
 package com.sinjeong.crewcalendar.presentation.live
 
+import com.sinjeong.crewcalendar.domain.model.DEFAULT_SEG_SEC
+import com.sinjeong.crewcalendar.domain.model.TrainMotion
+import com.sinjeong.crewcalendar.domain.model.stepMotion
+
 /*
  * 출퇴근 역 실시간 (v1.7.9 ⑦) — **순수 로직만.**
  *
@@ -397,6 +401,13 @@ internal data class CommuteTrain(
     val pos: Float,
     val status: String,
     val dest: String,
+    /**
+     * **역에 섰나**(v1.7.16 ②) — `trainSttus` 가 `0`(진입)·`1`(도착)이면 참이고,
+     * 그동안 [stepCommute] 는 앞으로 **한 칸도 안 기어간다**(확정 표 v1.7.5 규칙 ⓒ).
+     */
+    val holding: Boolean = false,
+    /** 응답의 `lstcarAt` 이 `"1"` — **막차**(v1.7.16 ⑥). */
+    val lastCar: Boolean = false,
 )
 
 /**
@@ -429,11 +440,82 @@ internal fun commuteTrains(rows: List<PositionRow>, s: CommuteStation): List<Com
                 pos = (slot + commuteOffset(r.trainSttus, forward)).coerceIn(0f, lastSlot),
                 status = sttusText(r.trainSttus),
                 dest = destText(r.statnTnm),
+                holding = r.trainSttus.trim() in AT_STOP_STTUS,
+                lastCar = isLastCar(r.lstcarAt),
             )
         }
         .distinctBy { it.trainNo }
         .toList()
 }
+
+/** 역에 선 상태 — `0` 진입 · `1` 도착. [CommuteTrain.holding] 의 잣대다. */
+private val AT_STOP_STTUS = setOf("0", "1")
+
+/* ── ② 1초 보간 — **지도가 쓰는 그 함수**를 그대로 쓴다 (v1.7.16) ──
+ *
+ * 카스: *"부드럽게 보이는것으로 하고"*. v1.7.15 ① 이 실시간 위치로 갈아타면서 뺐던
+ * 1초 눈금을 되살린다. 규칙은 **새로 안 만든다** — 확정 표 v1.7.5 *"열차 이동 = 시간 기반
+ * 등속 전진"* 의 `stepMotion` 한 곳이 그대로 ⓐⓑⓒ 를 지킨다:
+ *
+ *  ⓐ **앞으로만** 간다 — 목표가 뒤면 버린다(`dir * (goal − creep) <= 0f` 가지).
+ *  ⓑ **다음 칸을 안 넘는다** — 예측은 `nextStop − CREEP_MARGIN`(0.95 지점)에서 멈춘다.
+ *  ⓒ **도착·진입이면 선다** — [CommuteTrain.holding] 이면 예측을 아예 안 돌린다.
+ *
+ * ## ⚠ 여기는 **시간표가 없다** — 순수 등속 가정이다
+ *
+ * 본선 지도와 지선 카드의 보간은 속도를 **그 운행·그 구간의 시간표**에서 얻는다
+ * (`Line2Timetable.segmentSeconds` · `BranchLine.SEG_UP/SEG_DN`). 출퇴근 역은 **어느 호선이든
+ * 등록될 수 있고 자산은 2호선 시간표뿐**이라 그 재료가 없다 — 그래서 속도는
+ * [DEFAULT_SEG_SEC](110초) **하나**이고, 이것은 측정이 아니라 **가정**이다.
+ *
+ * 그 가정이 감당할 만한 이유: ① 로 실측이 **3초마다** 오므로 보간이 메우는 구간이 3초뿐이다
+ * (v1.7.13 의 15초에서 5분의 1로 줄었다). 3초 × 1/110 = **한 칸의 2.7%** 라, 가정이 실제와
+ * 두 배 틀려도 화면은 한 칸의 5% 안에서 움직이고 다음 실측이 곧바로 ⓐ 로 끌어당긴다.
+ * ⚠ 그래도 **없는 값을 지어내는 것**은 맞다 — 110초를 노선별로 바꾸고 싶으면 그때는
+ * 그 호선 시간표를 받아야 한다(카스에게 물을 자리).
+ */
+
+/**
+ * 한 걸음. [prev] 가 없으면 목표 자리에서 시작한다(처음 본 열차가 훅 미끄러지지 않는다).
+ *
+ * @param forward 화면에서 **왼쪽 → 오른쪽**으로 가나(= `!CommuteStation.fromHigher`).
+ *   `stepMotion` 의 `inner` 자리에 그대로 넣는다 — 둘 다 "좌표가 커지는 쪽"이라는 같은 뜻이다.
+ */
+internal fun stepCommute(
+    prev: TrainMotion?, t: CommuteTrain, forward: Boolean, nowMs: Long,
+): TrainMotion {
+    val m = stepMotion(prev, t.pos, t.holding, forward, DEFAULT_SEG_SEC, nowMs)
+    // 다섯 칸을 벗어나면 안 그리는 것이 규칙이라([commuteTrains]) 좌표도 칸 안에 가둔다.
+    // ⚠ `TrainMotion.folded` 는 43역 순환용이라 여기서는 못 쓴다 — 5칸은 순환이 아니다.
+    val cap = m.pos.coerceIn(0f, (COMMUTE_SLOTS - 1).toFloat())
+    return if (cap == m.pos) m else m.copy(pos = cap)
+}
+
+/**
+ * 오른쪽 **첫 줄**(굵은 글자) — `도착` · 막차면 `도착 · 막차`(v1.7.16 ⑥).
+ *
+ * ## 왜 막차가 여기인가
+ *
+ * 확정 표 *"열차 아이콘 = 열번 상자 · 열번을 아이콘 밖 배지로 빼지 말 것"* 이라 기관차
+ * 몸통에는 못 적고, 지붕 위 행선판은 [LOCO_BOARD_H] 만큼 위로 더 먹어 **카드 밖으로 나간다**
+ * (칸 위 여유가 실측 1.2dp 뿐이다 — `CommuteBar.LOCO_MIN_H` KDoc). 남는 자리는 이 두 줄이고,
+ * 그중 **굵은 첫 줄**이 눈에 먼저 든다. 세로도 한 픽셀 안 는다.
+ *
+ * ⚠ **다가오는 한 대만** 말한다([commuteLead]) — 그 열차가 곧 탈 열차다. 다섯 칸의 다른
+ * 열차가 막차인 경우는 안 적힌다(카스에게 물을 자리).
+ */
+internal fun commuteStatusLine(t: CommuteTrain): String =
+    t.status + if (t.lastCar) " · 막차" else ""
+
+/**
+ * 오른쪽 **둘째 줄** — `방화행 · 20:54:27`. 뒤 토막이 **기준 시각**(v1.7.16 ③)이다.
+ *
+ * 이 카드에는 헤더가 없어 폰 시계도 없었다 — 그래서 **통신이 끊겨도 화면이 살아 있어 보였다.**
+ * 여기에 서버의 `recptnDt` 를 놓으면 값이 멎는 것이 곧 신호다. 줄을 늘리지 않고 행선 뒤에
+ * 붙이는 이유는 카드 높이가 카스가 두 번 깎아 낸 자리이기 때문이다(v1.7.13 ③ · v1.7.14 ③).
+ */
+internal fun commuteDestLine(dest: String, recptnDt: String): String =
+    listOf(dest, recptnClock(recptnDt)).filter { it.isNotBlank() }.joinToString(" · ")
 
 /**
  * 오른쪽 두 줄이 말할 **한 대** — 등록역으로 **다가오는 쪽**에서 가장 가까운 열차.

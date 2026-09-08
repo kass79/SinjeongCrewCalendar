@@ -587,14 +587,14 @@ internal fun MainLineMapDialog(
         Log.i(TAG, "본선 지도 열림 — 폴링 시작")
         onDispose { Log.i(TAG, "본선 지도 닫힘 — 폴링·애니메이션 취소") }
     }
-    // 눈금 규칙(2초 · 절대시각)은 [BranchLiveMap] 과 같다 — 왜 그런지는 그쪽 KDoc.
+    // 눈금 규칙(**3초** · 절대시각, v1.7.16 ①)은 [BranchLiveMap] 과 같다 — 왜 그런지는 그쪽 KDoc.
     LaunchedEffect(Unit) {
         var nextTick = System.currentTimeMillis()
         while (isActive) {
             snap = BranchLive.loadSnapshot()
-            nextTick += 2_000
+            nextTick += BranchLive.POLL_INTERVAL_MS
             val nowMs = System.currentTimeMillis()
-            if (nextTick < nowMs) nextTick = nowMs + 2_000
+            if (nextTick < nowMs) nextTick = nowMs + BranchLive.POLL_INTERVAL_MS
             delay(nextTick - nowMs)
         }
     }
@@ -739,13 +739,15 @@ internal fun MainLineMapDialog(
                         // ⚠ **회전각을 안으로 내려 준다**(v1.6.91). 캔버스는 자기가 돌아간
                         // 줄 모르므로, 열번·행선판 글자를 화면 기준으로 바로 세우려면
                         // 그리는 쪽이 이 값을 알아야 한다([locoTextDeg]).
-                        CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
+                        CabScreen(ch, inset, now, snap.recptnDt, snap.recptnAtMillis,
+                            shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
                             snap.error, picked, { picked = it }, eff, { filter = it },
                             userPicked = filter != null, onRefresh = refresh, onDismiss = onDismiss,
                             mapDeg = 90f, pal = pal)
                     }
                 } else {
-                    CabScreen(ch, inset, now, shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
+                    CabScreen(ch, inset, now, snap.recptnDt, snap.recptnAtMillis,
+                        shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
                         snap.error, picked, { picked = it }, eff, { filter = it },
                         userPicked = filter != null, onRefresh = refresh, onDismiss = onDismiss,
                         mapDeg = 0f, pal = pal)
@@ -777,6 +779,8 @@ internal fun Modifier.shrinkHeight(h: Dp) = layout { measurable, constraints ->
 @Composable
 private fun CabScreen(
     ch: Dp, inset: PaddingValues, nowMillis: Long,
+    /** ③ 응답의 **기준 시각**과 그것을 처음 본 시각 — 헤더가 폰 시계 대신 적는다(v1.7.16). */
+    recptnDt: String, recptnAtMillis: Long,
     trains: List<MainTrainMark>, mine: MyTrain?, mineMark: MainTrainMark?,
     /** [mineMark] 를 맞힌 **행로표 번호** — API 번호와 다를 때만 헤더가 괄호로 보여 준다. */
     mineRoute: String?,
@@ -918,7 +922,8 @@ private fun CabScreen(
 
     Column(Modifier.fillMaxSize().padding(inset)) {
         Box(Modifier.onSizeChanged { headPx = it.height }) {
-            CabHeader(nowMillis, mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
+            CabHeader(nowMillis, recptnDt, recptnAtMillis,
+                mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
                 delay, nextSec, mineHidden, big, pal, onRefresh, onDismiss)
         }
         /*
@@ -1130,13 +1135,10 @@ private fun mineHead(
             (mineRoute?.takeIf { it != mineMark.trainNo }?.let { "(행로표 $it)" }.orEmpty()) +
             " · " + (if (mineMark.inner) "내선" else "외선") +
             dest?.let { " · $it" }.orEmpty() +
-            delay?.let {
-                when {
-                    it > 0 -> " · +${it}분 지연"
-                    it < 0 -> " · ${-it}분 빠름"
-                    else -> " · 정시"
-                }
-            }.orEmpty() +
+            // ④ v1.7.16 — 문구를 [delayText] 한 곳으로 모았다(지선 카드와 같은 말).
+            //    `+3분 지연` → **`+3분`**: `정시` 와 나란히 서면 두 글자가 없어도 뜻이 살고,
+            //    헤더 한 줄은 [HEAD_LADDER] 가 조각을 버려 가며 지키는 자원이다.
+            delayText(delay)?.let { " · $it" }.orEmpty() +
             nextSec?.let {
                 if (it <= 0) " · 곧 도착" else " · 다음 역 ${(it + 59) / 60}분 후"
             }.orEmpty() +
@@ -1213,7 +1215,18 @@ private val HEAD_LADDER = listOf(
  */
 @Composable
 private fun CabHeader(
-    nowMillis: Long, mineMark: MainTrainMark?, mineRoute: String?,
+    nowMillis: Long,
+    /**
+     * ③ **기준 시각**(v1.7.16) — 응답의 `recptnDt` 와 그것을 **처음 본 우리 시각**.
+     *
+     * 종전 이 자리는 **폰 시계**였다. 통신이 끊겨도 초가 흘러 화면이 살아 있어 보였는데,
+     * 이제 서버가 자료를 받은 시각이라 **끊기면 멎는다.** 확정 표의 헤더 우선순위
+     * (내 열차 상태 > 오늘 열번 > 날짜·시계)에서 **자리는 종전 시계 그대로**다 —
+     * 새 조각을 늘리지 않았으므로 [HEAD_LADDER] 의 사다리(초 → 열번 → 날짜 → 제목)도
+     * 손댈 것이 없고, 폭이 모자라면 종전처럼 **초부터** 덜어진다.
+     */
+    recptnDt: String, recptnAtMillis: Long,
+    mineMark: MainTrainMark?, mineRoute: String?,
     /** 내 열차 **행선**([myDestination]) — 모르면 null 이라 낱말 자체가 안 나온다(v1.7.5). */
     mineDest: String?,
     candidates: List<String>,
@@ -1228,11 +1241,18 @@ private fun CabHeader(
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
     }
+    /** ③ 기준 시각이 60초째 안 바뀌었나 — 그러면 붉은 색 + `멈춤` 낱말이다. */
+    val stale = recptnStale(recptnDt, recptnAtMillis, nowMillis)
     val baseSp = if (big) 12f else 9.5f
-    // 시계는 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
+    // 기준 시각은 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
     val clockSp = if (big) 14f else 11.5f
     // 크림 바탕에서는 노랑이 안 보인다 — 팔레트가 스타일에 맞는 강조색을 준다.
-    val mineColor = if (mineMark != null) pal.mineText else pal.dim
+    // ④ **많이 늦으면**(≥ [DELAY_ALERT_MIN] 분) 내 열차 토막이 통째로 [MapPalette.fail] 이다.
+    val mineColor = when {
+        bigDelay(delay) -> pal.fail
+        mineMark != null -> pal.mineText
+        else -> pal.dim
+    }
     val head = mineHead(mineMark, mineRoute, mineDest, candidates, delay, nextSec, mineHidden)
     val tm = rememberTextMeasurer()
 
@@ -1249,14 +1269,15 @@ private fun CabHeader(
             }
             withStyle(
                 SpanStyle(
-                    color = pal.clock, fontSize = (clockSp * s.k).sp,
+                    color = if (stale) pal.fail else pal.clock, fontSize = (clockSp * s.k).sp,
                     fontWeight = FontWeight.Bold,
                 )
             ) {
-                append(
-                    if (s.seconds) "%02d:%02d:%02d".format(t.hour, t.minute, t.second)
-                    else "%02d:%02d".format(t.hour, t.minute)
-                )
+                // ③ 폰 시계가 아니라 **응답의 기준 시각**이다. 사다리 ③ 이 `초`를 덜어내면
+                //    `20:54` 만 남는다 — 종전 시계와 **같은 규칙**이라 사다리는 안 바뀌었다.
+                val clock = recptnClock(recptnDt)
+                append(if (s.seconds) clock else clock.substringBeforeLast(":"))
+                if (stale) append(" 멈춤")
             }
             val info = listOfNotNull(
                 head, mineTail(mineMark, candidates, s.take).ifEmpty { null },

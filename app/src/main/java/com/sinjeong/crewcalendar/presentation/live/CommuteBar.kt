@@ -31,6 +31,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -51,6 +52,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.sinjeong.crewcalendar.domain.model.TrainMotion
+import com.sinjeong.crewcalendar.domain.model.pruneMotions
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -122,6 +125,13 @@ internal fun CommuteBar(
     var rows by remember { mutableStateOf(emptyList<PositionRow>()) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    /** ③ 응답의 **기준 시각**과 그것을 **처음 본 우리 시각** — 나이를 재는 두 값이다. */
+    var recptnDt by remember { mutableStateOf("") }
+    var recptnAt by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    /** ② 1초 눈금 — **보간만** 돌린다(API 는 위 폴링만 부른다). */
+    var uiNow by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    /** ② 열차별 화면 위치 장부([stepCommute]). 지도의 `motions` 와 같은 물건이다. */
+    val motions = remember { mutableMapOf<String, TrainMotion>() }
 
     /*
      * ① **실시간 위치 폴링**(v1.7.15) — `realtimePosition/{호선명}` 을 15초에 한 번.
@@ -131,12 +141,13 @@ internal fun CommuteBar(
      * 칩은 한 번에 하나만 펼쳐지므로 **한 순간에 도는 폴링은 늘 하나**다.
      * 접으면(null) 조기 반환 후 루프가 아예 안 돌고, 시트를 닫으면 [LaunchedEffect] 가 취소된다.
      *
-     * 눈금은 **절대 시각**으로 놓는다 — `delay(15_000)` 로 재우면 네트워크에 쓴 시간과 delay
+     * 눈금은 **절대 시각**으로 놓는다 — `delay(3_000)` 로 재우면 네트워크에 쓴 시간과 delay
      * 오버슈트가 누적돼 주기가 밀린다(근거는 [BranchLiveMap] 폴링 KDoc, v1.6.72 실측).
      *
-     * ⚠ **1초 눈금은 없앴다**(v1.7.13 ① 폐기). 위치 API 에는 남은 초가 없어 칸 사이를 메울
-     * 재료가 없다 — 없는 값으로 미끄러뜨리면 그것이 또 다른 추정이다. 대신 [commuteOffset] 이
-     * `trainSttus`(진입·도착·출발·전역출발)로 역 점 앞뒤를 **응답이 말한 만큼만** 벌린다.
+     * ⚠ **주기는 15초 → 3초**(v1.7.16 ①, 카스 지시). 서버는 18~22초마다 값을 바꾸므로
+     * 자료가 더 새로워지지는 않는다 — 줄어드는 것은 **새 값을 받기까지의 기다림**(평균 =
+     * 주기의 절반)이라 7.5초 → 1.5초다. 근거와 한계는 [BranchLive.POLL_INTERVAL_MS] KDoc.
+     * ⚠ **1초 눈금을 되살렸다**(v1.7.16 ②) — 칸 사이는 [stepCommute] 가 등속으로 메운다.
      */
     LaunchedEffect(open?.subwayId) {
         val s = open ?: return@LaunchedEffect
@@ -144,13 +155,32 @@ internal fun CommuteBar(
         var next = System.currentTimeMillis()
         while (isActive) {
             BranchLive.positionsOfLine(lineName(s.subwayId))
-                .onSuccess { rows = it; error = null }
+                .onSuccess {
+                    rows = it; error = null
+                    // ③ 값이 그대로면 처음 본 시각을 지킨다 — 그래야 "몇 초째 안 바뀌나"가 산다.
+                    val dt = latestRecptn(it)
+                    recptnAt = recptnFirstSeen(recptnDt, recptnAt, dt, System.currentTimeMillis())
+                    recptnDt = dt
+                }
                 .onFailure { error = BranchLive.humanError(it) }
             loading = false
-            next += 15_000
+            next += BranchLive.POLL_INTERVAL_MS
             val now = System.currentTimeMillis()
-            if (next < now) next = now + 15_000
+            if (next < now) next = now + BranchLive.POLL_INTERVAL_MS
             delay(next - now)
+        }
+    }
+    /*
+     * ② **1초 눈금** — 보간만 돌린다(v1.7.16). 이 카드는 연기·물결이 없어 캔버스를 다시
+     * 그릴 이유가 저절로 생기지 않는다([CommuteMiniLine] 은 `smoke = false`) — 그래서
+     * [uiNow] 한 값이 컴포지션을 깨워 [stepCommute] 를 한 걸음 돌린다.
+     * 접으면(`open == null`) 키가 바뀌어 이 루프도 그 자리에서 멎는다.
+     */
+    LaunchedEffect(open?.subwayId) {
+        if (open == null) return@LaunchedEffect
+        while (isActive) {
+            uiNow = System.currentTimeMillis()
+            delay(1_000)
         }
     }
 
@@ -202,6 +232,8 @@ internal fun CommuteBar(
              */
             val trains = commuteTrains(rows, s)
             val lead = commuteLead(trains, s.fromHigher)
+            /** ③ 기준 시각이 [RECPTN_STALE_SEC] 넘게 안 바뀌었나 — 그러면 붉게 말한다. */
+            val stale = recptnStale(recptnDt, recptnAt, uiNow)
             Surface(
                 // ⑥ 지도 스타일을 따라간다 — 남색이면 운전실, 클레이면 크림(v1.7.14).
                 color = pal.bg,
@@ -258,7 +290,8 @@ internal fun CommuteBar(
                             val label = NAME_SP.sp.toDp() * (if (long) 2.7f else 1.35f)
                             maxOf(label + 2.dp + LOCO_MIN_H, ETA_LINE.toDp() + DEST_LINE.toDp())
                         }
-                        CommuteMiniLine(s, trains, pal, Modifier.weight(1f).height(miniH))
+                        CommuteMiniLine(s, trains, pal, motions, uiNow,
+                            Modifier.weight(1f).height(miniH))
                         Spacer(Modifier.width(6.dp))
                         /*
                          * ⚠ **칸 높이를 정하는 것은 미니 노선이 아니라 이 두 줄이다**(v1.7.13 ③ 실측).
@@ -277,17 +310,23 @@ internal fun CommuteBar(
                                  * 이유는 **미니 노선이 이미 그 역 위에 기관차를 세워** 같은 말을
                                  * 두 번 하게 되기 때문이다(확정 표 *"빈 상태·오류 자리"* 의 취지).
                                  */
-                                lead.status,
+                                // ⑥ 막차면 `도착 · 막차` — 자리와 이유는 [commuteStatusLine] KDoc.
+                                commuteStatusLine(lead),
                                 fontSize = 14.sp, lineHeight = ETA_LINE,
                                 fontWeight = FontWeight.ExtraBold,
                                 // ⚠ 글자색은 **팔레트의 기본 잉크**다 — `pal.clock`(클레이 주황
                                 //   `#D98A2B`)은 크림 위에서 **2.45:1** 이라 못 읽는다(실측).
-                                color = pal.label,
+                                //   막차만 예외로 [MapPalette.fail] 을 쓴다(두 팔레트 다 대비 확인).
+                                color = if (lead.lastCar) pal.fail else pal.label,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                             Text(
-                                lead.dest,
-                                fontSize = 9.sp, lineHeight = DEST_LINE, color = pal.label,
+                                // ③ `방화행 · 20:54:27` — 뒤가 응답의 기준 시각이다.
+                                //   낡으면(60초째 그대로) 붉게 바뀌어 통신이 끊긴 것을 말한다.
+                                commuteDestLine(lead.dest, recptnDt),
+                                fontSize = 9.sp, lineHeight = DEST_LINE,
+                                color = if (stale) pal.fail else pal.label,
+                                fontWeight = if (stale) FontWeight.Bold else FontWeight.Normal,
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -413,6 +452,10 @@ private fun CommuteMiniLine(
     station: CommuteStation,
     trains: List<CommuteTrain>,
     pal: MapPalette,
+    /** ② 열차별 화면 위치 장부 — 프레임마다 [stepCommute] 가 한 걸음씩 옮긴다(v1.7.16). */
+    motions: MutableMap<String, TrainMotion>,
+    /** ② 1초 눈금. 이 값이 바뀌어야 캔버스가 다시 그려진다(연기가 없어 저절로는 안 돈다). */
+    nowMs: Long,
     modifier: Modifier,
 ) {
     val line = Color(lineArgb(station.subwayId))
@@ -428,6 +471,20 @@ private fun CommuteMiniLine(
     }
     /** ② **화면에서의 진행 방향** — `false` 면 오른쪽에서 왼쪽으로 달린다. */
     val forward = !station.fromHigher
+    /*
+     * ② **한 걸음** — 규칙(앞으로만 · 다음 칸 안 넘음 · 도착·진입은 정지)은 지도가 쓰는
+     * [stepCommute] → `stepMotion` 한 곳이다. 여기서 새로 세지 않는다.
+     * ⚠ 목록에서 사라진 열차의 기억은 2분 뒤 지운다([pruneMotions]) — 그 안에 다시 나타나면
+     *   **이어서** 달리고, 넘으면 새 열차로 쳐서 목표 자리에서 시작한다.
+     */
+    val placed = run {
+        pruneMotions(motions, trains.mapTo(HashSet()) { it.trainNo }, nowMs)
+        trains.map { t ->
+            val m = stepCommute(motions[t.trainNo], t, forward, nowMs)
+            motions[t.trainNo] = m
+            t to m.pos
+        }
+    }
     Canvas(modifier) {
         val step0 = size.width / COMMUTE_SLOTS          // 이름 한 칸이 쓸 수 있는 폭(어림)
         /*
@@ -473,7 +530,7 @@ private fun CommuteMiniLine(
         // 삐져나간다(v1.7.13 ③ 배율 1.5 실측 자리).
         val k = (y / (LOCO_TOTAL_H * 1.dp.toPx())).coerceIn(0.28f, LOCO_MAX_K)
         val covers = coversSlots(LOCO_BOX_W / 2f * k * 1.dp.toPx(), 3.2.dp.toPx(), step)
-        fun covered(i: Int) = trains.any { kotlin.math.abs(it.pos - i) < covers }
+        fun covered(i: Int) = placed.any { kotlin.math.abs(it.second - i) < covers }
 
         // ⚠ 크림 바탕(클레이)에서는 옅은 호선색이 묻힌다 — 2호선 초록 `#00A84D` 이 크림 위에서
         //   2.78:1 뿐이라 0.32 알파로는 선이 안 보인다(실측). 남색은 4.66:1 이라 종전 값 그대로.
@@ -519,9 +576,9 @@ private fun CommuteMiniLine(
          * ⚠ **떠 있는 열차 금지** — 중심을 `y − LOCO_WHEEL_BOTTOM × k` 에 놓아 바퀴 아랫날이
          *   선 위에 앉는다.
          */
-        trains.forEach { t ->
+        placed.forEach { (t, pos) ->
             drawLoco(
-                center = Offset(xOf(t.pos), y - LOCO_WHEEL_BOTTOM * k * 1.dp.toPx()),
+                center = Offset(xOf(pos), y - LOCO_WHEEL_BOTTOM * k * 1.dp.toPx()),
                 heading = headingFor(1f, 0f, forward),
                 scale = k,
                 body = line,

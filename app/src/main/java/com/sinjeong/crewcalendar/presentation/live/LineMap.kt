@@ -331,13 +331,14 @@ internal fun BranchLiveMap(
             // 바뀔 때만 쓴다 — 시트가 열려 있는 동안 4~10초마다 값이 바뀌는 자리다.
             BranchLive.turnMemory().let { if (it != saved) { saved = it; sp.edit().putString(TURN_KEY, it).apply() } }
             /*
-             * ⚠ 실제 갱신 주기를 정하는 건 [BranchLive.pollIntervalMs](10초/4초)다. 여기 눈금은
-             * 그 주기를 **정확히 집어낼 수 있는 자**여야 하고, 조건이 둘이다. 둘 다 v1.6.72
-             * 실측에서 하나씩 걸린 것이라 어느 쪽도 장식이 아니다.
+             * ⚠ 실제 갱신 주기를 정하는 건 [BranchLive.POLL_INTERVAL_MS](**3초**, v1.7.16 ①)다.
+             * 여기 눈금은 그 주기를 **정확히 집어낼 수 있는 자**여야 하고, 조건이 둘이다.
+             * 둘 다 v1.6.72 실측에서 하나씩 걸린 것이라 어느 쪽도 장식이 아니다.
              *
-             * 1. 눈금이 두 주기의 **최대공약수** — `gcd(10, 4) = 2`초. 5초 눈금에 4초 주기를 넣으면
-             *    첫 눈금이 5초라 실제 간격이 5초로 반올림된다.
-             * 2. **눈금은 절대 시각으로 놓는다.** `delay(2_000)`처럼 "지금부터 2초"로 재우면
+             * 1. 눈금이 주기의 **약수** — 적응형(10/4초)이던 v1.7.15 까지는 최대공약수 2초였고,
+             *    주기가 3초 하나가 된 지금은 **같은 3초**다. 5초 눈금에 4초 주기를 넣으면
+             *    첫 눈금이 5초라 실제 간격이 5초로 반올림된다(종전에 실제로 물렸다).
+             * 2. **눈금은 절대 시각으로 놓는다.** `delay(3_000)`처럼 "지금부터 3초"로 재우면
              *    네트워크에 쓴 시간(실측 0.9~1.2초)과 `delay` 오버슈트(에뮬 실측 눈금당 ~0.17초)가
              *    **누적**된다 — 실측으로 10초 주기가 11.5초(10.4~12.2초)까지 밀렸고,
              *    "지금부터 2초"를 "이번 눈금부터 2초"로만 고쳤을 때도 4초가 4.34초로 남았다.
@@ -345,9 +346,9 @@ internal fun BranchLiveMap(
              * 눈금 사이의 호출은 캐시가 같은 인스턴스를 돌려주므로 리컴포지션도 안 난다(공짜다).
              * 뒤처지면(백그라운드 등) 밀린 눈금을 몰아치지 않고 **자를 다시 놓는다.**
              */
-            nextTick += 2_000
+            nextTick += BranchLive.POLL_INTERVAL_MS
             val nowMs = System.currentTimeMillis()
-            if (nextTick < nowMs) nextTick = nowMs + 2_000
+            if (nextTick < nowMs) nextTick = nowMs + BranchLive.POLL_INTERVAL_MS
             delay(nextTick - nowMs)
         }
     }
@@ -391,6 +392,37 @@ internal fun BranchLiveMap(
         BranchLive.refineInbound(snap.inbound, tt, Line2Timetable.weekTagOf(d), sec)
     }
 
+    /*
+     * ④ **내 열차 지연**(v1.7.16) — 본선 지도 헤더가 v1.6.88 부터 하던 계산을 지선 카드에도
+     * 그대로 붙인다. 재료는 셋뿐이고 전부 이미 있다: 시간표 자산 · 내 열차([pickRun] 이 고른
+     * 라이브) · 그 열차의 **원본 역명·상태**([TrainMark.statnNm]·[TrainMark.trainSttus]).
+     *
+     * ⚠ **자산 CSV 는 2호선뿐이다.** 신정지선(`5xxx`)은 4역이 자산에 들어 있어 값이 나오지만,
+     * 못 찾으면 `null` 이고 그때는 **아무 말도 안 한다** — 지연 칸이 통째로 빠진다.
+     * ⚠ **신정지선의 내외선 태그는 본선과 반대로 읽힌다** — 자산 전수 확인(2026-09-08):
+     *   **신도림행 = `inout 2`(외선)** · **까치산행 = `inout 1`(내선)** 이다
+     *   (`5625` 는 `1,2,46 → 1,2,33` 로 까치산에서 신도림으로 가고, `5626` 은 `1,1,33 → 1,1,46`).
+     *   신도림에서 외선 루프로 이어지는 방향이라 그렇다. 그래서 [Line2Timetable.inoutOf] 에
+     *   **`!toSindorim`** 을 넘긴다 — `toSindorim` 을 그대로 넘기면 조회가 늘 빈손이고
+     *   지연 칸이 **조용히 사라진다**(첫 판에서 실제로 그랬다).
+     * ⚠ `now / 15_000` — 15초에 한 번만 다시 센다(본선 지도와 같은 눈금). 시간표 조회는
+     *   자산이라 공짜가 아니고, 지연은 15초 안에 안 바뀐다.
+     */
+    val mineDelay = remember(snap.trains, candidates, tt, now / 15_000) {
+        val t = tt
+        val lives = snap.trains.map { LiveRef(it.trainNo) }
+        val m = candidates.firstNotNullOfOrNull { no ->
+            pickRun(no, lives)?.let { l -> snap.trains.first { it.trainNo == l.trainNo } }
+        }
+        if (t == null || m == null || m.statnNm.isBlank()) null else {
+            val (d, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
+            t.delayMinutes(
+                Line2Timetable.weekTagOf(d), branchInout(m.toSindorim),
+                m.trainNo, m.statnNm, m.trainSttus, sec,
+            )
+        }
+    }
+
     LineMapCard(
         onFullMap = { showFull = true },
         trains = snap.trains,
@@ -398,6 +430,13 @@ internal fun BranchLiveMap(
         candidates = candidates,
         fetchedAtMillis = snap.fetchedAtMillis,
         nowMillis = now,
+        // ③ 헤더가 폰 시계 대신 적을 **응답의 기준 시각**(v1.7.16).
+        recptnDt = snap.recptnDt,
+        recptnAtMillis = snap.recptnAtMillis,
+        // ④ 내 열차 지연 — **시간표만 본다**(API 호출 0회). 15초에 한 번 다시 센다.
+        //    `tt` 를 아직 못 읽었거나 자산에 그 운행이 없으면 null 이고, 그러면
+        //    화면이 **아무 말도 안 한다**(모르는 것을 정시라고 하지 않는다).
+        delayMin = mineDelay,
         error = snap.error,
         onRefresh = { scope.launch { snap = BranchLive.loadSnapshot(force = true) } },
         pal = paletteOf(style),
@@ -423,6 +462,11 @@ private fun LineMapCard(
     candidates: List<String>,
     fetchedAtMillis: Long,
     nowMillis: Long,
+    /** ③ 응답의 기준 시각과 **그것을 처음 본 시각** — 헤더가 이 둘로 나이를 잰다(v1.7.16). */
+    recptnDt: String,
+    recptnAtMillis: Long,
+    /** ④ 내 열차 지연(분). **모르면 null 이고 화면은 아무 말도 안 한다**(v1.7.16). */
+    delayMin: Int?,
     error: String?,
     pal: MapPalette,
     onRefresh: () -> Unit,
@@ -529,7 +573,7 @@ private fun LineMapCard(
                 val canvasH = laneH + UP_LINE_H + laneH + LINE_H + nameH + 7.dp * CARD_K
 
                 Column(Modifier.padding(vertical = 2.dp)) {
-                    BranchHeader(nowMillis, big, pal, onRefresh)
+                    BranchHeader(recptnDt, recptnAtMillis, nowMillis, big, pal, onRefresh)
                     /*
                      * 내 열차 한 줄 — `내 열차 5581 · 신도림행 · 양천구청 진입`.
                      * ⚠ **도착 예정 시각은 만들지 않는다**(본선 헤더와 같은 규칙) — 그 데이터가
@@ -537,10 +581,19 @@ private fun LineMapCard(
                      */
                     if (candidates.isNotEmpty()) Text(
                         mine?.let {
-                            "내 열차 ${it.trainNo} · ${destOf(it.toSindorim)} · ${it.statusText}"
+                            "내 열차 ${it.trainNo} · ${destOf(it.toSindorim)}" +
+                                // ④ 지연은 **행선 바로 뒤**다 — 확정 표 우선순위가 `내 열차 상태`
+                                //   를 맨 앞에 두므로, 잘릴 때 먼저 잘리는 것은 뒤의 현재 역·상태다
+                                //   (그건 지도의 빨간 점이 이미 말한다).
+                                delayText(delayMin)?.let { d -> " · $d" }.orEmpty() +
+                                " · ${it.statusText}"
                         } ?: ("내 열차 미검출 · 오늘 열번 " + shortNos(candidates)),
                         fontSize = (if (big) 12.5f else 11f).sp,
-                        color = pal.dim, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        // ④ 많이 늦으면 줄 전체가 [MapPalette.fail] 로 바뀐다 — 이 줄은 통째로
+                        //   내 열차 이야기라 한 조각만 물들이는 것보다 눈에 먼저 든다.
+                        color = if (bigDelay(delayMin)) pal.fail else pal.dim,
+                        fontWeight = if (bigDelay(delayMin)) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.padding(horizontal = 12.dp),
                     )
 
@@ -1050,12 +1103,26 @@ private fun destOf(toSindorim: Boolean) = if (toSindorim) "신도림행" else "�
 private fun shortNos(nos: List<String>): String =
     nos.take(2).joinToString("·") + if (nos.size > 2) " 외 " + (nos.size - 2) + "개" else ""
 
-/** 헤더 한 줄 — 왼쪽 `신정지선 실시간`, 오른쪽 노란 시계와 새로고침. */
+/**
+ * 헤더 한 줄 — 왼쪽 `신정지선 실시간`, 오른쪽 **기준 시각**과 새로고침.
+ *
+ * ## ③ 폰 시계를 응답의 `recptnDt` 로 바꿨다 (v1.7.16)
+ *
+ * v1.6.43~v1.7.15 는 여기가 **폰 시계**였다. 그러면 통신이 끊겨도 숫자가 계속 돌아
+ * **화면이 살아 있는 것처럼 보인다** — 승무원은 열차가 안 움직이는 것이 지연인지 고장인지
+ * 알 수 없었다. 이제 서버가 자료를 받은 시각을 그대로 적으므로 **통신이 끊기면 이 숫자가
+ * 멎는다.** 덤으로, 18~22초 동안 값이 안 바뀌는 것이 **고장이 아니라 서버 갱신 주기**라는
+ * 것도 이 숫자가 말해 준다(그 사이 초가 안 흐른다).
+ *
+ * ⚠ 낡으면([recptnStale], 60초) 색이 [MapPalette.fail] 로 바뀌고 뒤에 `멈춤` 이 붙는다.
+ * 색만으로는 색각 이상에서 안 갈리므로 **낱말을 같이** 놓는다(`전반`·`후반` 칩과 같은 처방).
+ */
 @Composable
-private fun BranchHeader(nowMillis: Long, big: Boolean, pal: MapPalette, onRefresh: () -> Unit) {
-    val t = remember(nowMillis / 1_000) {
-        LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
-    }
+private fun BranchHeader(
+    recptnDt: String, recptnAtMillis: Long, nowMillis: Long,
+    big: Boolean, pal: MapPalette, onRefresh: () -> Unit,
+) {
+    val stale = recptnStale(recptnDt, recptnAtMillis, nowMillis)
     val sp = (if (big) 17f else 15f).sp
     Row(
         // ⚠ v1.7.12 ② — 높이를 [HEADER_H] 로 잡는다. ↻ 의 48dp 터치 영역은 그대로다
@@ -1067,9 +1134,13 @@ private fun BranchHeader(nowMillis: Long, big: Boolean, pal: MapPalette, onRefre
         Text("신정지선 실시간", fontSize = sp, fontWeight = FontWeight.Bold,
             color = pal.title, maxLines = 1)
         Spacer(Modifier.weight(1f))
-        // 시계는 노란색(사용자 확정 — 본선 헤더와 같다).
-        Text("%02d:%02d:%02d".format(t.hour, t.minute, t.second),
-            fontSize = sp, fontWeight = FontWeight.Bold, color = pal.clock, maxLines = 1)
+        // 기준 시각은 노란색(종전 시계 자리·색 그대로 — 본선 헤더와 같다). 낡으면 붉다.
+        Text(
+            recptnClock(recptnDt) + if (stale) " 멈춤" else "",
+            fontSize = sp, fontWeight = FontWeight.Bold,
+            color = if (stale) pal.fail else pal.clock,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+        )
         RefreshButton(pal, onRefresh)
     }
 }

@@ -128,4 +128,34 @@ class Line2TimetableTest {
         val (d, s) = Line2Timetable.serviceClock(LocalDateTime.of(2026, 9, 5, 1, 0))
         assertEquals(LocalDate.of(2026, 9, 4), d); assertEquals(25 * 3600, s)
     }
+
+    /**
+     * v1.7.16 ⑤ — **시각이 아니라 길이**를 준다. 신정 입고 안내가 실측 위치(지금 어느 역)에
+     * 이 길이를 더해 ETA 를 내므로, 시간표가 얼마나 낡았든 **어디서부터 재는가는 늘 실측**이다.
+     */
+    @Test fun `travelSeconds — 떠나서 닿기까지의 길이`() {
+        // 홍대입구 출발 25230 → 이대 도착 25440 = 210초
+        assertEquals(210, tt.travelSeconds(1, 1, "2006", "홍대입구", "이대", 25200))
+        // 한 칸(홍대입구 → 신촌) = 25320 − 25230 = 90초 — segmentSeconds 와 같은 값이다
+        assertEquals(90, tt.travelSeconds(1, 1, "2006", "홍대입구", "신촌", 25200))
+        // 접두가 달라도 같은 운행을 찾는다(라이브 `8006`)
+        assertEquals(210, tt.travelSeconds(1, 1, "8006", "홍대입구", "이대", 25200))
+    }
+
+    @Test fun `travelSeconds — 모르면 null, 뒤로는 안 잰다`() {
+        assertNull(tt.travelSeconds(1, 1, "9999", "홍대입구", "이대", 25200))   // 없는 운행
+        assertNull(tt.travelSeconds(1, 1, "2006", "홍대입구", "신도림", 25200)) // 안 지나는 역
+        assertNull(tt.travelSeconds(1, 1, "2006", "이대", "홍대입구", 25440))   // 이미 지난 역
+    }
+
+    /**
+     * 같은 역을 두 번 지나는 운행(성수 1142건)은 **지금에 가까운 정차**에서 잰다 —
+     * [Line2Timetable.stopAt] 의 v1.7.7 장치를 그대로 탄다.
+     */
+    @Test fun `travelSeconds — 같은 역 두 번이면 지금에 가까운 쪽에서 잰다`() {
+        // 2060: 성수 시발 출발 24540 → 건대입구 도착 24660(120초) → 성수 종착 도착 30060.
+        // 새벽 시각을 주면 시발 쪽에서 재고, 종착 근처를 주면 그 뒤에 건대입구가 없어 null 이다.
+        assertEquals(120, tt.travelSeconds(1, 1, "2060", "성수", "건대입구", 24540))
+        assertNull(tt.travelSeconds(1, 1, "2060", "성수", "건대입구", 30060))
+    }
 }

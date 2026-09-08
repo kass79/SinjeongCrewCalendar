@@ -153,6 +153,38 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
     }
 
     /**
+     * 이 운행이 [from] 을 **떠나** [to] 에 **닿기까지의 예정 소요(초)** — 시각이 아니라 **길이**다.
+     * 못 찾거나 [to] 가 [from] 보다 앞이면 `null`.
+     *
+     * ## 왜 시각이 아니라 길이인가 (v1.7.16 ⑤)
+     *
+     * 신정 입고 안내는 v1.7.2~v1.7.15 에 [arriveSecAt] 이 준 **절대 도착 시각**에 지연을 더해
+     * `도착시각 − 지금` 으로 남은 시간을 냈다. 그러면 열차가 실제로 어디 있든 값이 같다 —
+     * **위치를 안 보는 것**이고, 지연 추정이 틀리면 그대로 새어 근사와 5분 넘게 벌어지면
+     * 통째로 버려야 했다.
+     *
+     * 길이만 빌려 주면 **어디서부터 재는가는 실측**([BranchLive.inboundFromPositions] 이
+     * 위치 API 에서 읽은 `statnNm`)이고 시간표는 구간 소요만 말한다 — 지연은 위치가 이미
+     * 품고 있으므로 따로 더할 것이 없다.
+     *
+     * ⚠ [stopAt] 이 [nowSec] 에 가까운 정차를 고르므로 순환선이 같은 역을 두 번 스쳐도
+     * 지금 지나는 쪽을 잡는다(v1.7.7 의 그 장치를 그대로 쓴다). [to] 는 **그 뒤 첫 번째**만
+     * 본다 — 한 바퀴 더 도는 판을 잡지 않는다.
+     */
+    fun travelSeconds(
+        weekTag: Int, inout: Int, trainNo: String, from: String, to: String,
+        nowSec: Int, dest: String? = null,
+    ): Int? {
+        val toIdx = stationIdx(to).takeIf { it >= 0 } ?: return null
+        val (list, i) = stopAt(weekTag, inout, trainNo, from, nowSec, dest) ?: return null
+        val j = (i + 1 until list.size).firstOrNull { list[it].stationIdx == toIdx } ?: return null
+        val depart = list[i].let { if (it.leftSec >= 0) it.leftSec else it.arriveSec }
+        val arrive = list[j].let { if (it.arriveSec >= 0) it.arriveSec else it.leftSec }
+        if (depart < 0 || arrive < 0) return null
+        return (arrive - depart).takeIf { it > 0 }
+    }
+
+    /**
      * 이 역 → 다음 역 소요 **초**. 지도의 열차 전진 속도가 이 값을 쓴다([stepMotion]).
      * 모르면 [DEFAULT_SEG_SEC](**110초**, v1.7.5 사용자 지정 — 종전 120).
      *
