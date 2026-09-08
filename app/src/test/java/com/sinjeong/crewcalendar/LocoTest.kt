@@ -5,7 +5,9 @@ import com.sinjeong.crewcalendar.presentation.live.LOCO_BOARD_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_BOX_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_RING_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_WHEEL_BOTTOM
+import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import com.sinjeong.crewcalendar.presentation.live.headingFor
+import com.sinjeong.crewcalendar.presentation.live.labelTilted
 import com.sinjeong.crewcalendar.presentation.live.locoBelly
 import com.sinjeong.crewcalendar.presentation.live.locoFlip
 import com.sinjeong.crewcalendar.presentation.live.locoHalf
@@ -474,5 +476,42 @@ class LocoTest {
         // 아직 안 잰 줄(첫 프레임)은 손대지 않는다 — 지도가 튀면 안 된다.
         assertEquals(0, mapCenterNudgePx(true, leftBandPx = 0, rightBandPx = 188, maxPx = 31))
         assertEquals(0, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 0, maxPx = 31))
+    }
+
+    /**
+     * **카스가 짚은 네 역은 노선도 옆에 기울여 적는다**(v1.7.15 ⑤).
+     *
+     * 카스: *"뚝섬이 한양대 텍스트기울기처럼 노선도 옆에 넣어줘야지. 건대입구도 마찬가지,
+     * 합정, 홍대입구도 노선도 옆에 넣어줘."* 셋(`합정`·`홍대입구`·`뚝섬`)은 원래 윗변이라
+     * 이미 기울어져 있었고 — 밀려나 있었을 뿐이다 — **규칙이 바뀐 것은 `건대입구` 하나**다.
+     * 그 하나가 열리면서 `SIDE_LANE2` 로 물러나던 상자가 사라져 `뚝섬` 도 제자리를 찾았다.
+     *
+     * 네 변의 역 목록은 `Line2Test.둘레 네 변 배치가 사진과 같다` 가 이미 잠근다.
+     */
+    @Test
+    fun `모서리 네 역은 기울여 적고 나머지 세로 변은 가로로 적는다`() {
+        val start = Line2Stations.MAIN.indexOf("합정")
+        fun tilted(outside: Boolean) = (0 until 43)
+            .filter { labelTilted(it, topN = 17, rightN = 5, bottomN = 16, sideLaneOutside = outside) }
+            .map { Line2Stations.MAIN[(it + start) % 43] }
+            .toSet()
+
+        val inside = tilted(false)
+        for (n in listOf("합정", "홍대입구", "뚝섬", "건대입구")) assertTrue(n, n in inside)
+        // 기준으로 든 `한양대`(윗변)도 당연히 기울어져 있다.
+        assertTrue("한양대", "한양대" in inside)
+        // 나머지 세로 변 아홉은 종전대로 **가로**다 — 여기를 열면 이름 열이 통째로 무너진다.
+        for (n in listOf("구의", "강변", "잠실나루", "잠실",
+                         "대림", "신도림", "문래", "영등포구청", "당산"))
+            assertFalse(n, n in inside)
+        // 윗변 17 + 아랫변 16 + 모서리 예외 1
+        assertEquals(34, inside.size)
+
+        // 가로 × 전체 보기(세로 변 이름이 루프 **밖** 차선) — 예외 없음(v1.7.7 D1 보존).
+        val outside = tilted(true)
+        assertFalse("건대입구", "건대입구" in outside)
+        assertEquals(33, outside.size)
+        // 가로 변은 두 화면이 똑같다.
+        assertEquals(outside, inside - "건대입구")
     }
 }

@@ -222,6 +222,34 @@ internal fun mapCenterNudgePx(
     else ((leftBandPx - rightBandPx) / 2).coerceIn(0, maxPx.coerceAtLeast(0))
 
 /**
+ * 역 이름을 **기울여**(−35°) 선로 옆에 적는 둘레 자리인가 — 순수 함수, `LocoTest` 가 잠근다.
+ *
+ * 확정 배치는 **가로 변(윗변·아랫변)만 기울이고 세로 변은 가로로** 적는 것이다.
+ * 여기에 **예외가 하나** 있다 — 오른변 **첫 역**([topN] 번째 = `건대입구`)도 기울인다
+ * (v1.7.15 ⑤). 카스: *"뚝섬이 한양대 텍스트기울기처럼 노선도 옆에 넣어줘야지.
+ * **건대입구도 마찬가지**, 합정, 홍대입구도 노선도 옆에 넣어줘."*
+ *
+ * ## 왜 그 한 자리만인가
+ *
+ * 모서리에서는 가로 규칙(`점 + 4dp` · 선로에서 `LABEL_GAP`)과 세로 규칙(선로에서
+ * `LABEL_GAP`)의 기준점이 사실상 한 점에서 만난다(v1.7.14 ⑧ 실측 `성수` ↔ `건대입구`
+ * **15px 차**). 한쪽이 반드시 비켜야 하는데, 놓는 차례상 **이 모서리에서만 세로 변이 진다** —
+ * 상대가 `성수`(KEY, `sizeSp + 2` 굵게)라 세로 변보다 먼저 자리를 잡기 때문이다. 진 쪽은
+ * `SIDE_LANE2` 로 89px 물러났고, 그 물러난 상자가 윗변 `뚝섬` 까지 밀어냈다 — 카스가 짚은
+ * 네 역 중 둘이 이 한 자리에서 나왔다. 나머지 세 모서리는 세로 변이 먼저 놓여 이긴다.
+ *
+ * ⚠ [sideLaneOutside] = 세로 변 이름을 루프 **밖 차선**에 적는 화면(가로 × 전체 보기)에서는
+ * **예외 없음**. 거기는 좌·우변 다섯 이름이 전용 차선에 차례대로 서 있어 모서리 다툼이
+ * 애초에 없고, v1.7.7 D1 이 실측으로 잡아 둔 배치다.
+ */
+internal fun labelTilted(
+    k: Int, topN: Int, rightN: Int, bottomN: Int, sideLaneOutside: Boolean,
+): Boolean {
+    val horiz = k < topN || k in (topN + rightN) until (topN + rightN + bottomN)
+    return horiz || (!sideLaneOutside && k == topN)
+}
+
+/**
  * 안 뒤집은 몸통의 **배(바퀴)가 가는 쪽** — 지도 좌표. [drawLoco] 의 `p()` 표와 한 벌이라
  * 둘 중 하나만 고치면 안 된다. 순수 함수 — [LocoTest] 가 잠근다.
  */
