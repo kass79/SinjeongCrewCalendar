@@ -117,6 +117,10 @@ fun MainCalendarScreen(
     // **달력 탭만** 본다 — 상세시트·근무선택 시트·하단 탭바는 종전 테마 그대로다.
     val calStyle by viewModel.themeController.calendarStyle.collectAsStateWithLifecycle()
     val pal = calendarPalette(calStyle)
+    // v1.7.15 ⑦ — 달력 칸 글꼴 크기 두 단계(날짜 숫자 · 메모). 기본은 `보통`(배수 1f)이라
+    // 안 고른 사람 화면은 v1.7.14 와 픽셀 하나까지 같다. 설정에서 바꾸면 곧바로 따라온다.
+    val dateStep by viewModel.themeController.calDateSize.collectAsStateWithLifecycle()
+    val memoStep by viewModel.themeController.calMemoSize.collectAsStateWithLifecycle()
     // v1.7.9 ⑦ — 설정에 등록한 출퇴근 역. 비어 있으면 상세시트가 그 줄을 아예 안 그린다.
     /*
      * v1.7.13b ② — 설정의 **전체 스위치**를 끄면 여기서 **빈 목록**을 넘긴다.
@@ -367,6 +371,8 @@ fun MainCalendarScreen(
                         frozenUntil = state.user?.frozenUntil,
                         onLongPress = { freezeAsk = it },
                         pal = pal,
+                        dateStep = dateStep,
+                        memoStep = memoStep,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -704,6 +710,10 @@ private fun CalendarGrid(
     onLongPress: (LocalDate) -> Unit,
     /** 달력 색 한 벌(v1.7.6) — 기본 / 클레이 */
     pal: CalendarPalette,
+    /** 칸 날짜 숫자 크기 단계(v1.7.15 ⑦) — 기본 `보통` = 종전 크기 */
+    dateStep: CalendarTextSize = CalendarTextSize.NORMAL,
+    /** 칸 메모 크기 단계(v1.7.15 ⑦) */
+    memoStep: CalendarTextSize = CalendarTextSize.NORMAL,
     modifier: Modifier = Modifier,
 ) {
     val leading = month.atDay(1).dayOfWeek.value % 7
@@ -788,6 +798,8 @@ private fun CalendarGrid(
                         nameBelow = nameBelow,
                         frozen = frozenUntil != null && day.date <= frozenUntil,
                         pal = pal,
+                        dateStep = dateStep,
+                        memoStep = memoStep,
                         onClick = { onSelect(day.date) },
                         onLongClick = { onLongPress(day.date) },
                     )
@@ -887,22 +899,39 @@ private fun DayCell(
     frozen: Boolean,
     /** 달력 색 한 벌(v1.7.6) — 기본 / 클레이 */
     pal: CalendarPalette,
+    /** 날짜 숫자 크기 단계(v1.7.15 ⑦) */
+    dateStep: CalendarTextSize,
+    /** 메모 크기 단계(v1.7.15 ⑦) */
+    memoStep: CalendarTextSize,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
     val duty = pal.duty
     val isToday = day.date == LocalDate.now()
     val (chipBg, chipFg) = dutyCellColors(day.duty.colorType, duty, pal.textDim)
+    // ⚠ 아래 "안 들어가면 줄인다" 상태들의 `remember` 키에는 **글자배율**도 든다(v1.7.7 D4).
+    // 전부 한 방향(줄이기)이라, 배율을 도로 낮춰도 키가 그대로면 **줄어든 채로 굳는다.**
+    val fontScale = LocalDensity.current.fontScale
     // big = 칸이 넉넉할 때(≥100dp) 전체 폰트 한 단계 확대
     // 날짜 숫자는 공휴일 이름·근무 칩에 폭을 양보하려고 작게(v1.6.8 7.5→7, v1.6.10 7→6.5, v1.6.11 6.5→6sp)
-    val dateSize = if (big) 8.sp else 6.sp
+    //
+    // v1.7.15 ⑦ — 날짜 숫자·메모만 **사용자가 고른 단계**([CalendarTextSize])를 곱한다.
+    // 기본 `보통` 은 배수가 정확히 `1f` 라 종전 값 그대로다(`6f.sp * 1f` === `6.sp`).
+    // 공휴일 이름·근무 칩·출근시각은 **안 건드린다** — 카스가 고른 것은 두 가지뿐이다.
+    val dateSize = dateStep.spOf(
+        if (big) CalendarTextSize.DATE_SP_BIG else CalendarTextSize.DATE_SP, fontScale,
+    ).sp
     val holSize = if (big) 8.sp else 6.5.sp
     val chipSizeBig = if (big) 13.sp else 11.5.sp
     val chipSizeSmall = if (big) 11.5.sp else 10.sp
     val signOnSize = if (big) 8.sp else 7.sp
     // 메모는 v1.6.99에서 **한 단계 키웠다**(폰 8→9.5 / 펼침 9.5→11sp). 사용자:
     // *"메모 한 내용이 좀 더 보일 수있게 가능?"* — 줄 수 상한도 같이 풀었다(아래 [MEMO_MAX_LINES]).
-    val memoSize = if (big) 11.sp else 9.5.sp
+    // ⚠ 여기서 글자를 키우면 **줄 수는 저절로 준다** — 아래 [MEMO_MAX_LINES] 가 남은 높이에
+    // 직접 물어보기 때문이다. 줄 수를 dp 상수로 다시 고정하지 말 것(v1.6.99 가 없앤 자리).
+    val memoSize = memoStep.spOf(
+        if (big) CalendarTextSize.MEMO_SP_BIG else CalendarTextSize.MEMO_SP, fontScale,
+    ).sp
 
     // 근무 저장된 칸의 연녹색(v1.6.69 사용자 요청 — 참고 앱의 "저장된 근무는 바탕이 연녹색").
     // 새 색을 만들지 않고 앱 고유색 `primaryContainer`를 얹는다: 라이트는 #A8F2C1 45% → 연녹색,
@@ -916,15 +945,16 @@ private fun DayCell(
     // 클레이만 세로 그라데이션 — 근무 저장된 칸(민트)은 단색이라 제외한다
     val baseBrush = if (frozen) null else pal.cellBrush
 
-    // ⚠ 아래 "안 들어가면 줄인다" 상태들의 `remember` 키에는 **글자배율**도 든다(v1.7.7 D4).
-    // 전부 한 방향(줄이기)이라, 배율을 도로 낮춰도 키가 그대로면 **줄어든 채로 굳는다.**
-    val fontScale = LocalDensity.current.fontScale
+    // ⚠ 키에는 **글꼴 크기 단계**도 든다(v1.7.15 ⑦) — 배율과 같은 이유다. 단계를 도로 낮춰도
+    //   키가 그대로면 줄어든 채 굳는다.
     // **메모가 다 안 보일 때만** 켜지는 점(v1.6.82). 메모 [Text]가 배치될 때 스스로 정한다.
     // 다 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
-    var memoCut by remember(day.memo, height, big, fontScale) { mutableStateOf(false) }
+    var memoCut by remember(day.memo, height, big, fontScale, memoSize to dateSize) {
+        mutableStateOf(false)
+    }
     // 칸에 남은 높이가 **근무 칩·출근시각조차** 못 담으면 켜진다(v1.7.7 D4) → 위 취소선(원래
     // 근무)을 접는다. 순서는 사용자 확정: **칩·출근시각이 먼저, 나머지는 남는 만큼.**
-    var tightCell by remember(day.duty.raw, day.originalDutyRaw, height, big, fontScale) {
+    var tightCell by remember(day.duty.raw, day.originalDutyRaw, height, big, fontScale, dateSize) {
         mutableStateOf(false)
     }
     /** 줄상자가 칸에 안 들어가면 = 이 줄이 잘리면 [tightCell] 을 켠다(한 방향이라 진동하지 않는다) */
@@ -1141,7 +1171,7 @@ private fun DayCell(
         // `_최종점검_v1.7.6\F37b_...` 1일 칸: 남은 높이 14.5dp, 한 줄 17.1dp). 이제 **0줄**까지
         // 내려가 아예 안 그리고 잘림 점만 켠다(v1.7.7 D4).
         if (day.memo.isNotBlank()) {
-            var memoLines by remember(day.memo, height, big, fontScale) {
+            var memoLines by remember(day.memo, height, big, fontScale, memoSize to dateSize) {
                 mutableIntStateOf(MEMO_MAX_LINES)
             }
             if (memoLines > 0) Text(

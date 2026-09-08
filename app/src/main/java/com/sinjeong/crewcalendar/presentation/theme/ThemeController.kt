@@ -2,6 +2,7 @@ package com.sinjeong.crewcalendar.presentation.theme
 
 import android.content.Context
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarTextSize
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
 import com.sinjeong.crewcalendar.presentation.live.CommuteStation
 import com.sinjeong.crewcalendar.presentation.live.commuteOnOf
@@ -75,6 +76,29 @@ class ThemeController @Inject constructor(
     fun setCalendarStyle(style: CalendarStyle) {
         _calendarStyle.value = style
         prefs.edit().putString("calendar_style", style.name).apply()
+    }
+
+    /**
+     * 달력 칸 **글꼴 크기 두 단계**(v1.7.15 ⑦) — 카스: *"달력숫자,메모 글꼴크기 설정할수 있게 해줘"*.
+     * 위 스타일 둘과 **같은 저장소·같은 방식**(`theme` prefs, 키 `cal_date_size`·`cal_memo_size`).
+     * **기본값은 종전 크기**([CalendarTextSize.NORMAL] = 배수 1f)라 안 고른 사람 화면은 안 바뀐다.
+     */
+    private val _calDateSize =
+        MutableStateFlow(CalendarTextSize.of(prefs.getString("cal_date_size", null)))
+    val calDateSize: StateFlow<CalendarTextSize> = _calDateSize
+
+    fun setCalDateSize(size: CalendarTextSize) {
+        _calDateSize.value = size
+        prefs.edit().putString("cal_date_size", size.name).apply()
+    }
+
+    private val _calMemoSize =
+        MutableStateFlow(CalendarTextSize.of(prefs.getString("cal_memo_size", null)))
+    val calMemoSize: StateFlow<CalendarTextSize> = _calMemoSize
+
+    fun setCalMemoSize(size: CalendarTextSize) {
+        _calMemoSize.value = size
+        prefs.edit().putString("cal_memo_size", size.name).apply()
     }
 
     /**

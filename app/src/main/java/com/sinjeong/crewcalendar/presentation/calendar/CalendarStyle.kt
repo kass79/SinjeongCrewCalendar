@@ -54,6 +54,80 @@ enum class CalendarStyle(val label: String) {
     }
 }
 
+/**
+ * 달력 칸의 **글꼴 크기 단계** — 설정 > 화면 > `달력 날짜 숫자 크기` · `달력 메모 크기`(v1.7.15 ⑦).
+ *
+ * 카스 원문: *"그리고 달력숫자,메모 글꼴크기 설정할수 있게 해줘"*.
+ *
+ * **[NORMAL] 이 기본값이고 배수가 정확히 `1f` 다** — 아무것도 고르지 않은 사용자의 달력은
+ * v1.7.14 와 **픽셀 하나까지 같다**(`6.sp * 1f` 는 IEEE754 에서 정확히 `6.sp` 다).
+ *
+ * ## 줄 수를 다시 고정하지 않는다
+ *
+ * 글자를 키우면 메모 줄 수는 **저절로 준다** — 칸에 남은 높이에 직접 물어보는 v1.6.99 구조가
+ * 그대로다(`MainCalendarScreen` 의 `MEMO_MAX_LINES` 주석). **dp 상수로 줄 수를 다시 박지 말 것.**
+ *
+ * ## ⚠ 시스템 글자배율과 **곱해진다**
+ *
+ * 안드로이드 설정에서 1.5배를 쓰는 사람이 여기서 `크게` 를 고르면 `1.5 × 1.2 = 1.8` 배다.
+ * 그래서 곱에 상한 [MAX_SCALE] 을 두고 [factorAt] 이 거기서 멎는다 — 시스템 배율은 **안 건드린다**
+ * (`LocalDensity` 를 갈아 끼우면 dp 까지 따라 움직여 칸 크기가 바뀐다).
+ *
+ * ⚠ 이 enum 은 `theme` 저장소에 `.name` 으로 저장된다 — 이름을 바꾸면 선택이 조용히 기본값으로
+ * 돌아간다([CalendarStyle]·[com.sinjeong.crewcalendar.presentation.theme.MapStyle] 과 같은 규칙).
+ *
+ * ⚠ **최상위 `val`·함수로 빼지 말 것** — 이 파일의 최상위 프로퍼티([CLAY_PALETTE])는 `Color(...)`
+ * 를 부르는데 테스트 하네스에는 Compose 가 없다. 최상위에 두면 `CalendarStyleKt` 클래스 초기화가
+ * 딸려 나와 터진다. 그래서 상수도 [Companion] 안에 산다(그리고 `const` 가 아니라 `val` 이다 —
+ * `const` 는 테스트 바이트코드에 인라인돼 값을 고쳐도 테스트가 안 깨진다).
+ */
+enum class CalendarTextSize(val label: String, val factor: Float) {
+    SMALL("작게", 0.85f),
+    NORMAL("보통", 1f),
+    LARGE("크게", 1.2f),
+    XLARGE("아주 크게", 1.4f);
+
+    /**
+     * 시스템 글자배율 [fontScale] 까지 곱한 **실제 배수**.
+     * 곱이 [MAX_SCALE] 를 넘으면 거기서 멎고, **[NORMAL] 밑으로는 절대 안 내려간다**
+     * (상한이 먹어도 사용자가 고르지 않은 `작게` 가 되지는 않는다).
+     * 순수 함수 — `CalendarTextSizeTest` 가 잠근다.
+     */
+    fun factorAt(fontScale: Float): Float =
+        if (factor <= 1f) factor
+        else factor.coerceAtMost((MAX_SCALE / fontScale.coerceAtLeast(1f)).coerceAtLeast(1f))
+
+    /** [base] sp 글자가 이 단계·이 배율에서 실제로 그려지는 **sp 값**. */
+    fun spOf(base: Float, fontScale: Float): Float = base * factorAt(fontScale)
+
+    companion object {
+        /**
+         * 사용자 선택 × 시스템 배율의 **곱 상한 1.8**.
+         *
+         * 근거: 이 앱이 출시 점검표에서 **깨지지 않음을 매번 확인하는 배율이 1.5** 이고
+         * (`SKILL.md` 글자배율 항목), 그 위에 한 단(`크게` 1.2)까지가 실측으로 남는 여유다.
+         * 폰 5주 달 기준 출근시각 아래 남는 높이 **86dp** 에 메모 한 줄이 `9.5sp × 1.2(줄간격)`
+         * = 11.4dp → 곱 1.8 이면 **20.5dp** 라 4줄이 남는다(0줄이 되면 잘림 점만 켜져 칸은 안 깨진다).
+         * 날짜 숫자는 6sp × 1.8 = **10.8sp** 로, 칸 폭 54dp 에 두 자리 + 배지 여백이 그대로 든다.
+         *
+         * 상한이 먹는 조합: 시스템 1.5 × `아주 크게`(2.1 → **1.2**), 시스템 1.75 × `크게`
+         * (2.1 → 1.03) 등. 시스템 1.0 이면 네 단계가 전부 그대로 산다.
+         */
+        val MAX_SCALE = 1.8f
+
+        /** 달력 칸 **날짜 숫자** 기본 sp — 폰(좁은 칸) / `big`(펼침 등 칸 ≥ 100dp). v1.7.14 값이다. */
+        val DATE_SP = 6f
+        val DATE_SP_BIG = 8f
+
+        /** 달력 칸 **메모** 기본 sp — v1.6.99 에서 한 단 키운 값 그대로다(폰 8 → 9.5 / 펼침 9.5 → 11). */
+        val MEMO_SP = 9.5f
+        val MEMO_SP_BIG = 11f
+
+        /** 저장값 → 단계. 모르는 값·`null`·빈 값은 **보통**(= 종전 크기)이다. */
+        fun of(saved: String?): CalendarTextSize = entries.firstOrNull { it.name == saved } ?: NORMAL
+    }
+}
+
 internal object CalendarArgb {
 
     /* ── 기본(DEFAULT) — v1.7.5 의 알파. 색 자체는 테마에서 온다 ───────────── */

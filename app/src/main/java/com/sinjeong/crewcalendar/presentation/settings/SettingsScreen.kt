@@ -31,6 +31,7 @@ import com.sinjeong.crewcalendar.data.local.LocalUserRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
+import com.sinjeong.crewcalendar.presentation.calendar.CalendarTextSize
 import com.sinjeong.crewcalendar.presentation.theme.MapStyle
 import com.sinjeong.crewcalendar.presentation.theme.ThemeController
 import com.sinjeong.crewcalendar.presentation.theme.ThemeMode
@@ -305,6 +306,58 @@ fun SettingsScreen(
                             onClick = { viewModel.setCalendarStyle(s) },
                             shape = SegmentedButtonDefaults.itemShape(i, CalendarStyle.entries.size),
                         ) { Text(s.label, fontSize = 11.sp) }
+                    }
+                }
+            }
+
+            /*
+             * 달력 글자 크기 두 줄(v1.7.15 ⑦) — 카스 원문 *"그리고 달력숫자,메모 글꼴크기
+             * 설정할수 있게 해줘"*.
+             *
+             * **달력 스타일 바로 아래**다 — 셋 다 "달력 탭이 어떻게 보이나"라 한 벌로 읽힌다.
+             * 컨트롤은 위 두 줄과 **같은 세그먼트**이고 저장도 같은 저장소(`theme`)다.
+             * 자유 숫자 입력을 안 쓰는 이유: 칸 높이가 고정이라 임의 값은 칸을 깨뜨린다.
+             *
+             * ⚠ **기본은 `보통`(= 종전 크기)** 이고 배수가 정확히 1f 라, 안 고른 사람의 달력은
+             *   한 픽셀도 안 바뀐다.
+             * ⚠ 메모를 키우면 **줄 수가 저절로 준다** — 그게 맞는 동작이다(v1.6.99 구조 그대로).
+             */
+            val dateStep by viewModel.themeController.calDateSize.collectAsStateWithLifecycle()
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("달력 날짜 숫자 크기", fontWeight = FontWeight.Bold)
+                Text(
+                    "달력 칸 왼쪽 위 날짜 숫자의 크기입니다 (기본 보통)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    CalendarTextSize.entries.forEachIndexed { i, s ->
+                        SegmentedButton(
+                            selected = dateStep == s,
+                            onClick = { viewModel.themeController.setCalDateSize(s) },
+                            shape = SegmentedButtonDefaults.itemShape(i, CalendarTextSize.entries.size),
+                        ) { Text(s.label, fontSize = 11.sp, maxLines = 1) }
+                    }
+                }
+            }
+
+            val memoStep by viewModel.themeController.calMemoSize.collectAsStateWithLifecycle()
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("달력 메모 크기", fontWeight = FontWeight.Bold)
+                Text(
+                    "달력 칸 안 메모 글자의 크기입니다. 키우면 한 칸에 보이는 줄 수가 줄어듭니다 (기본 보통)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    CalendarTextSize.entries.forEachIndexed { i, s ->
+                        SegmentedButton(
+                            selected = memoStep == s,
+                            onClick = { viewModel.themeController.setCalMemoSize(s) },
+                            shape = SegmentedButtonDefaults.itemShape(i, CalendarTextSize.entries.size),
+                        ) { Text(s.label, fontSize = 11.sp, maxLines = 1) }
                     }
                 }
             }
