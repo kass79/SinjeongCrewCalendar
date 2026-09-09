@@ -8,8 +8,8 @@ import org.junit.Test
 /**
  * 달력 칸 **글꼴 크기 단계**(v1.7.15 ⑦) — 카스: *"달력숫자,메모 글꼴크기 설정할수 있게 해줘"*.
  *
- * 잠그는 것 셋: ① **기본값은 종전 크기**(배수 정확히 1f) ② 저장·복원(모르는 값·빈 값 → 기본)
- * ③ 단계별 sp 값과 **시스템 글자배율과의 곱 상한**.
+ * 잠그는 것 넷: ① **기본값은 종전 크기**(배수 정확히 1f) ② 저장·복원(모르는 값·빈 값 → 기본)
+ * ③ 단계별 sp 값 ④ **어느 배율에서든 네 단계가 서로 다르다**(v1.7.17 ①).
  *
  * ⚠ 이 하네스에는 **Compose 가 없다**(`tools/runtests.ps1`) — 그래서 `TextUnit` 이 아니라
  * `Float`(sp 숫자)을 읽는다. `CalendarStyle.kt` 의 **최상위** 프로퍼티(`CLAY_PALETTE`)는
@@ -80,39 +80,68 @@ class CalendarTextSizeTest {
     }
 
     /**
-     * **시스템 글자배율과 곱해진다** — 안드로이드 설정 1.5배 사용자가 여기서 `크게` 를 고르면
-     * `1.5 × 1.2 = 1.8` 이다. 곱이 [CalendarTextSize.MAX_SCALE](**1.8**)를 넘으면 거기서 멎는다.
+     * **배율이 얼마든 네 단계는 서로 다른 값이다**(v1.7.17 ① — 이 파일의 핵심 자물쇠).
      *
-     * 근거는 `CalendarStyle.kt` 의 KDoc: 출시 점검표가 매번 확인하는 배율이 **1.5** 이고 그 위
-     * 한 단(`크게` 1.2)까지가 실측 여유다(폰 5주 달, 출근시각 아래 86dp 에 메모 한 줄 20.5dp → 4줄).
+     * 카스 보고(2026-09-09, 폴드7 을 글자 크게 놓고 씀): *"달력 날짜, 숫자 크기, 달력 메모크기
+     * 적용이 잘안되는듯?"*. v1.7.16 까지의 **곱 상한 1.8** 은 배율 1.5 에서 `크게`=`아주 크게`,
+     * 배율 1.8 이상에서 `보통`=`크게`=`아주 크게` 로 단계를 뭉갰다(에뮬 실측: fs 2.0 의 세 단계가
+     * 모두 `dateSp=8.0 memoSp=11.0`). 그래서 **곱이 아니라 폭**에 상한을 건다.
      *
-     * ⚠ **상한이 먹어도 `보통` 밑으로는 안 내려간다** — 사용자가 고르지도 않은 `작게` 가 되는 것은
-     * 잘못이다. 그래서 하한이 1f 다.
+     * 이 테스트가 깨지면 그 증상이 돌아온 것이다 — 상한을 곱 쪽으로 되돌리지 말 것.
      */
     @Test
-    fun `시스템 배율과의 곱은 상한에서 멎는다`() {
-        assertEquals(1.8f, CalendarTextSize.MAX_SCALE, 0f)
-        // 배율 1.0 — 네 단계가 전부 그대로 산다
-        CalendarTextSize.entries.forEach {
-            assertEquals(it.factor, it.factorAt(1f), 0f)
+    fun `어느 배율에서든 네 단계는 서로 다르다`() {
+        val scales = listOf(0.85f, 1f, 1.15f, 1.3f, 1.5f, 1.7f, 1.8f, 2f, 2.5f, 3f)
+        scales.forEach { fs ->
+            val f = CalendarTextSize.entries.map { it.factorAt(fs) }
+            assertEquals("배율 $fs 에서 단계가 뭉쳤다: $f", 4, f.toSet().size)
+            // 순서도 지킨다 — 작게 < 보통 < 크게 < 아주 크게
+            assertTrue("배율 $fs 순서가 뒤집혔다: $f", f.zipWithNext().all { (a, b) -> a < b })
+            // 그려지는 sp 도 네 값이 서로 다르다(날짜·메모 · 폰·펼침 네 기준 모두)
+            listOf(
+                CalendarTextSize.DATE_SP, CalendarTextSize.DATE_SP_BIG,
+                CalendarTextSize.MEMO_SP, CalendarTextSize.MEMO_SP_BIG,
+            ).forEach { base ->
+                val sp = CalendarTextSize.entries.map { it.spOf(base, fs) }
+                assertEquals("배율 $fs · 기준 $base sp 가 뭉쳤다: $sp", 4, sp.toSet().size)
+            }
         }
-        // 배율 1.5 — `크게` 는 곱 1.8 이라 딱 상한, `아주 크게` 는 2.1 이라 1.2 로 잘린다
-        assertEquals(1.2f, CalendarTextSize.LARGE.factorAt(1.5f), 0.0001f)
-        assertEquals(1.2f, CalendarTextSize.XLARGE.factorAt(1.5f), 0.0001f)
-        // 배율 2.0 — 곱 상한이 1.8 이라 키우는 두 단계가 0.9 로 내려가야 하지만 **1f 에서 멎는다**
-        assertEquals(1f, CalendarTextSize.LARGE.factorAt(2f), 0f)
-        assertEquals(1f, CalendarTextSize.XLARGE.factorAt(2f), 0f)
-        // `작게` 는 상한과 무관하다(줄이는 쪽은 칸을 안 깨뜨린다)
-        assertEquals(0.85f, CalendarTextSize.SMALL.factorAt(2f), 0f)
-        // 배율이 1 밑(작은 글꼴 사용자)이어도 배수를 **부풀리지 않는다**
-        assertEquals(1.4f, CalendarTextSize.XLARGE.factorAt(0.85f), 0f)
-        // 어떤 배율에서도 곱은 상한을 안 넘는다
-        listOf(1f, 1.15f, 1.3f, 1.5f, 1.8f, 2f, 2.5f).forEach { fs ->
-            CalendarTextSize.entries.forEach { s ->
-                assertTrue(
-                    "곱 상한 초과: $s x $fs",
-                    s.factorAt(fs) * fs <= CalendarTextSize.MAX_SCALE + 0.0001f || s.factorAt(fs) <= 1f,
-                )
+    }
+
+    /**
+     * **상한은 키우는 두 단계에만 걸린다** — `작게`·`보통` 은 배율이 얼마든 그대로다.
+     *
+     * `보통` 이 그대로여야 하는 이유: 아무것도 안 고른 사람의 달력이 v1.7.14 와 같아야 하고
+     * (배율 1.0 뿐 아니라 **모든 배율에서**), 시스템 글자배율은 접근성 설정이라
+     * 앱이 임의로 눌러 **글자를 작게 만들면 안 된다**.
+     */
+    @Test
+    fun `상한은 키우는 단계에만 걸린다`() {
+        assertEquals(1.5f, CalendarTextSize.MAX_EXTRA_SCALE, 0f)
+        listOf(0.85f, 1f, 1.5f, 2f, 3f).forEach { fs ->
+            assertEquals("배율 $fs 에서 작게가 움직였다", 0.85f, CalendarTextSize.SMALL.factorAt(fs), 0f)
+            assertEquals("배율 $fs 에서 보통이 움직였다", 1f, CalendarTextSize.NORMAL.factorAt(fs), 0f)
+        }
+        // 한계 배율까지는 고른 배수가 **그대로** 산다(1.0 화면은 v1.7.16 과 픽셀 0 차이)
+        listOf(1f, 1.15f, 1.3f, 1.5f).forEach { fs ->
+            CalendarTextSize.entries.forEach {
+                assertEquals("배율 $fs 에서 ${it.name} 이 눌렸다", it.factor, it.factorAt(fs), 0.0001f)
+            }
+        }
+        // 한계 배율 위에서는 **폭만** 줄고, 그래도 `보통`(1f)보다는 크다
+        listOf(1.7f, 2f, 2.5f, 3f).forEach { fs ->
+            listOf(CalendarTextSize.LARGE, CalendarTextSize.XLARGE).forEach {
+                val v = it.factorAt(fs)
+                assertTrue("배율 $fs · ${it.name} 이 보통 이하다: $v", v > 1f)
+                assertTrue("배율 $fs · ${it.name} 이 안 눌렸다: $v", v < it.factor)
+            }
+        }
+        // 폭은 배율 1.5 에서 그린 절대 크기에서 **더 안 자란다**
+        listOf(1.7f, 2f, 3f).forEach { fs ->
+            CalendarTextSize.entries.filter { it.factor > 1f }.forEach {
+                val extra = (it.factorAt(fs) - 1f) * fs
+                assertEquals("배율 $fs · ${it.name} 폭이 1.5배 자리를 벗어났다",
+                    (it.factor - 1f) * CalendarTextSize.MAX_EXTRA_SCALE, extra, 0.0001f)
             }
         }
     }
