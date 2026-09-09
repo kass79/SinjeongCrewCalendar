@@ -10,6 +10,8 @@ import com.sinjeong.crewcalendar.presentation.live.headingFor
 import com.sinjeong.crewcalendar.presentation.live.HALF_PI
 import com.sinjeong.crewcalendar.presentation.live.cornerInsetPx
 import com.sinjeong.crewcalendar.presentation.live.labelGapDp
+import com.sinjeong.crewcalendar.presentation.live.labelLeadDp
+import com.sinjeong.crewcalendar.presentation.live.labelSideOffDp
 import com.sinjeong.crewcalendar.presentation.live.labelTilted
 import com.sinjeong.crewcalendar.presentation.live.locoBelly
 import com.sinjeong.crewcalendar.presentation.live.locoFlip
@@ -570,5 +572,36 @@ class LocoTest {
         // 단독 보기(접힘·펼침) — 호가 이미 평균보다 길어 **0**. v1.7.17 배치가 그대로다.
         assertEquals(0f, cornerInsetPx(1818f, 457f, 73.5f, nH = 17, nV = 5), 0f)
         assertEquals(0f, cornerInsetPx(1514f, 852f, 112.4f, nH = 17, nV = 5), 0f)
+    }
+
+    /**
+     * **모서리 짝은 제자리에서 갈린다**(v1.7.18 ②-b — [labelLeadDp] · [labelSideOffDp]).
+     *
+     * 카스(접힘 화면을 보고): *"접혔을때 건대입구가 성수와 구의 사이에 있어야 하는데?"*
+     *
+     * `성수`(윗변 끝)와 `건대입구`(오른변 첫)는 같은 −35° 로 **나란한 두 띠**에 앉는다.
+     * 띠 사이 법선 간격이 `글자 높이 + 여백` 보다 좁으면 제자리에서 겹쳐 한쪽이 밀리는데,
+     * 접힘 전체 보기 실측이 **23px ↔ 필요 40px** 이었다. 두 앵커를 벌린 결과가 **44px** 다.
+     *
+     * 여기서 잠그는 것은 그 산수의 두 인자다(간격 자체는 `TextMeasurer` 가 있어야 잰다 —
+     * 실측표는 `docs/project-notes.md` v1.7.18 ②-b 절):
+     *  · 윗변 **모서리 쪽 끝**(`성수`, k = topN−1)만 **−4dp** — `big` 을 안 탄다.
+     *  · 세로 변 **위 끝 두 역**(`건대입구` k = topN · `당산` k = loopN−1)만 **8dp**.
+     */
+    @Test
+    fun `모서리 짝만 앵커를 벌린다`() {
+        // 윗변: 모서리 쪽 끝(성수)만 반대로 4dp, 나머지는 접힘 4 · 펼침 8dp 그대로.
+        for (big in listOf(false, true)) {
+            val normal = if (big) 8f else 4f
+            for (k in listOf(0, 1, 8, 15)) // 합정 … 뚝섬
+                assertEquals("k=$k big=$big", normal, labelLeadDp(k, topN = 17, big = big), 0f)
+            assertEquals("성수 big=$big", -4f, labelLeadDp(16, topN = 17, big = big), 0f)
+        }
+        // 세로 변: 위 끝 두 역만 8dp. 아래 끝(잠실 21 · 대림 38)은 4dp 그대로 —
+        // 아랫변 이름이 루프 밖에 살아 다툴 상대가 없고, 더 내리면 아래 선로를 문다.
+        assertEquals("건대입구", 8f, labelSideOffDp(17, topN = 17, loopN = 43), 0f)
+        assertEquals("당산", 8f, labelSideOffDp(42, topN = 17, loopN = 43), 0f)
+        for (k in listOf(18, 19, 20, 21, 38, 39, 40, 41)) // 구의 … 잠실 · 대림 … 영등포구청
+            assertEquals("k=$k", 4f, labelSideOffDp(k, topN = 17, loopN = 43), 0f)
     }
 }
