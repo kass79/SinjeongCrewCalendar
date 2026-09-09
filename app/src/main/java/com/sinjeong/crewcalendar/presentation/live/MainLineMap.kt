@@ -252,6 +252,26 @@ private fun decorInsets(ctx: Context, dens: Density): Triple<Dp, Dp, Dp> {
 private val KEY_STATIONS = setOf("신도림", "성수")
 
 /**
+ * **`성수` 는 크기를 보통 역과 같이**(v1.7.17 ②) — 카스: *"홍대입구, 건대입구, **성수**
+ * 글꼴을 기울이거나 **줄여서** 최적화 시켜줘!"*
+ *
+ * v1.6.96~v1.7.16 은 [KEY_STATIONS] 둘 다 `sizeSp + 2` 였다. `성수` 는 **오른쪽 위 모서리**
+ * 역이라 그 큰 상자가 이웃 셋을 한꺼번에 밀어냈다(접힘 전체 보기 실측: `성수` 89px ·
+ * `뚝섬` 89px · `구의` 93px — 셋 다 제자리 69px 를 못 지켰다).
+ *
+ * **왜 한 단이 아니라 보통 역 크기까지 내렸나 — 글자배율 때문이다.** 한 단만 내리면
+ * (`sizeSp − LABEL_STEP`) 배율 1.0 에서는 셋 다 69~75px 로 들어오지만, 지도 상한
+ * **배율 1.15** 에서 상자가 다시 커져 `건대입구` 143px → `구의` 119px → `강변` 104px 로
+ * 오른변이 줄줄이 밀리고 끝의 `잠실` 이 **자리를 못 찾아 `잠실나루` 와 겹쳤다**(실측).
+ * 보통 역 크기면 배율 1.15 에서도 **겹침 0 · 선로 침범 0** 이다.
+ *
+ * ⚠ **`신도림` 은 안 건드린다** — 카스가 `성수` 만 말했고, 신도림은 좌변 한가운데라
+ * 모서리 다툼이 없다. **주황·ExtraBold 는 둘 다 그대로**(색은 안 열렸다) — `성수` 는 이제
+ * **크기가 아니라 색과 굵기로** 도드라진다.
+ */
+private const val KEY_SMALL = "성수"
+
+/**
  * **운전취급역** 6곳 — 사용자(기관사) 확정(v1.6.98):
  * *"신도림, 성수빼고 역텍스트 색깔은 동일하게 해! 그리고 서울대입구,교대,삼성,종합운동장,
  * 을지로입구,홍대입구역은 운전취급역이니까 약간 다른 색깔로 해줘!"*
@@ -266,7 +286,8 @@ private val OP_STATIONS =
  * **보통 역 이름**이 기준 크기에서 내려가는 한 단계(v1.6.96 사용자 요청 — *"역 텍스트 너무 큰거
  * 아니가? … 쫌 쭐여도 되는데?"*). 이 앱이 쓰는 "한 단계" = 1.5sp 다.
  *
- * ⚠ **[KEY_STATIONS] 에는 안 먹인다** — 신도림·성수는 종전 크기·주황 그대로가 사용자 확정이다.
+ * ⚠ **`신도림` 에는 축소 단수를 안 먹인다** — `labelStyle` 이 `sizeSp + 2` 로 따로 정한다.
+ * `성수` 는 v1.7.17 ② 부터 **보통 역과 같은 2단**이다([KEY_SMALL]).
  * 폴드 펼침의 큰 글자(`big`)에도 같은 폭으로 붙어 비율이 유지된다.
  *
  * ## 몇 단을 내리는지 — v1.6.97 에서 한 단 더
@@ -511,18 +532,10 @@ private const val DIAG = -35f
  * *"역명이 제 점에서 멀어진다"* 는 이번 피드백의 원인이다. 줄일 때는 **밀린 라벨 수 0**
  * 을 실측으로 확인할 것.
  */
-private val LABEL_GAP = 16.dp
+private val LABEL_GAP = labelGapDp(dual = false, big = false, bottom = false).dp
 
-/**
- * **전체 보기(복선)** 의 [LABEL_GAP] — 단독보다 크다.
- *
- * 복선은 안쪽 선로의 모서리 반지름이 [laneGap] 만큼 깎여 **거의 직각**이다(폰 실측
- * 바깥 46dp ↔ 안쪽 **10dp**). 그래서 모서리에서 마주 보는 두 이름(`합정`↔`당산`)의
- * 점 사이가 단독 74px 에서 **26px** 로 줄고, 둘을 갈라 놓는 거리가 사실상 이 값 하나다
- * (실측: 16dp 면 `당산`이 [SIDE_LANE2] 로 131px 물러나고, 26dp 면 둘 다 제자리 69/70px).
- * 단독은 모서리가 넉넉해 16dp 로도 갈라선다 — **한 값으로 묶으면 한쪽이 반드시 깨진다.**
- */
-private val LABEL_GAP_DUAL = 26.dp
+/** **접힘 × 전체 보기**의 루프 안쪽 거리 — 값과 근거는 [labelGapDp] 한 곳이다. */
+private val LABEL_GAP_DUAL = labelGapDp(dual = true, big = false, bottom = false).dp
 
 /**
  * 폴드 **펼침**([big])에서 **아랫변** 역명 거리([LABEL_GAP])에만 곱하는 배수.
@@ -812,7 +825,23 @@ private fun CabScreen(
     // 한 방향만 그리면 배지가 반으로 줄어드니 글자를 키운다. 겹침은 [layoutLabels] 가
     // **측정값으로** 판정하므로 이 두 값만 바꿔도 회피가 따라온다.
     val filtered = eff != DirFilter.ALL
-    val labelSp = if (filtered) (if (big) 16f else 13.5f) else (if (big) 14f else 11.5f)
+    /*
+     * ⚠ **펼침 × 전체 보기만 14 → 12.5**(v1.7.17 ②). 카스: *"폴더를 접었을때 펼쳤을때 더
+     * 최적화"*. 펼침은 윗변 한 칸이 **87.2px** 뿐인데(접힘 107.7px) 글자는 도리어 커서,
+     * 기울인 이웃 사이의 수직 거리 `87.2 × sin35° = 50.0px` 가 상자 높이(보통 역 11sp =
+     * 44 + 여백 8.4 = **52.4px**)보다 **2.4px 모자랐다** — 윗변 17개가 줄줄이 밀리고
+     * 거울로 뒤집혀 `한양대` 231px · `왕십리` 210px 까지 갔다(실측).
+     *
+     * **접힘과 같은 11.5 로 내린 이유는 글자배율이다.** 여백([pad] 3dp)은 배율을 안 타므로
+     * 조건은 `상자 높이 × 배율 + 8.4 ≤ 50.0` 이고, 지도 배율 상한이 **1.15** 라 보통 역
+     * 상자가 배율 1.0 에서 **35.6px** 아래여야 한다. 실측(density 450 · 배율 1.5 → 지도 1.15):
+     * 12.5 → 상자 37 → 43.2 + 8.4 = **51.6 ✗** · 12.0 → 36 → 42 + 8.4 = **50.4 ✗**(거울 8개 ·
+     * `왕십리` 180px) · **11.5 → 34.5 → 40.3 + 8.4 = 48.7 ✓**. 카스는 폴드7 을 **글자 크게**
+     * 놓고 쓴다(`SKILL.md`) — 배율 1.15 에서 성립해야 실기기에서 산다.
+     * 펼침은 density 450 이라 같은 sp 라도 접힘(420)보다 **7% 크게** 그려진다.
+     * 긴 역명은 [LABEL_MIN_SP] 7.0sp 가 받친다.
+     */
+    val labelSp = if (filtered) (if (big) 16f else 13.5f) else 11.5f
     /*
      * 다른 열차 기관차 크기 배수(v1.6.91). 종전 `badgeSp` 와 **같은 이유로** 필터를 켜면 커진다 —
      * 한 차선만 그리니 자리가 남는다.
@@ -1532,7 +1561,8 @@ private class Loop(
  * v1.7.7 부터 [drawCabLoop] 도 **세로 변 이름 차선 폭을 재느라** 같은 값을 알아야 하는데,
  * 두 군데서 따로 만들면 한쪽만 고쳐 어긋난다.
  *
- * ⚠ **[KEY_STATIONS](신도림·성수)는 `sizeSp + 2`·굵게·주황 그대로**가 사용자 확정이다.
+ * ⚠ **[KEY_STATIONS] 은 굵게·주황 그대로**다. 크기는 `신도림` 만 `sizeSp + 2` 이고
+ * `성수` 는 **보통 역과 같다**(v1.7.17 ② — [KEY_SMALL] KDoc).
  * 보통 역은 [LABEL_STEP] **2단**([LABEL_DROP]), [LONG_NAME_LEN] 자 이상 긴 역은 **3단**
  * ([LABEL_DROP_LONG]) 내린 크기다(v1.6.96~97). 색만 팔레트가 준다(v1.7.0) — 남색은
  * 신도림·성수가 둘 다 주황이고 클레이는 신도림 초록·성수 빨강이다([MapPalette.keyInk]).
@@ -1542,7 +1572,7 @@ private fun labelStyle(name: String, sizeSp: Float, pal: MapPalette): TextStyle 
     val key = name in KEY_STATIONS
     return TextStyle(
         fontSize = (
-            if (key) sizeSp + 2f
+            if (key && name != KEY_SMALL) sizeSp + 2f
             else (sizeSp - LABEL_STEP *
                 (if (name.length >= LONG_NAME_LEN) LABEL_DROP_LONG else LABEL_DROP))
                 // ⚠ 판독 하한 — 전체 보기 긴 역명이 5.5sp 로 떨어지는 것을 막는다(v1.7.14).
@@ -1684,17 +1714,39 @@ private fun DrawScope.layoutLabels(
     val bandH = (loopIn.y1 - loopIn.y0) - railW
     val flat = sideLaneX != null
     /**
-     * 단독은 [LABEL_GAP] · 복선은 [LABEL_GAP_DUAL].
+     * 루프 **안**(윗변·세로 변) 이름의 거리 — [LABEL_GAP_DUAL] 이 걸리는 자리가 여기뿐이다.
      * 단독인지는 두 [Loop] 이 **같은 객체**인가로 안다(v1.7.4).
      */
-    val base = (if (loop === loopIn) LABEL_GAP else LABEL_GAP_DUAL).toPx()
+    val base = labelGapDp(dual = loop !== loopIn, big = big, bottom = false).dp.toPx()
     val gap = if (!flat) base else (bandH * 0.20f).coerceIn(9.dp.toPx(), base)
     /**
-     * 아랫변은 루프 **밖**([namePad] 자리)이라 띠 두께와 무관하다.
+     * 아랫변은 루프 **밖**([namePad] 자리)이라 모서리 다툼이 아예 없다 — **늘 [LABEL_GAP]**
+     * 이다(v1.7.17 ②. 종전엔 복선에서 [LABEL_GAP_DUAL] 을 같이 먹어 16역이 10dp 씩 멀었다).
      * 펼침에서만 [LABEL_GAP_OUT_BIG_K] 배로 더 띄운다(그 KDoc의 실측 근거).
      */
-    val gapOut = base * (if (big) LABEL_GAP_OUT_BIG_K else 1f)
+    val gapOut = labelGapDp(dual = loop !== loopIn, big = big, bottom = true).dp.toPx() *
+        (if (big) LABEL_GAP_OUT_BIG_K else 1f)
     val pad = 3.dp.toPx()
+    /**
+     * 기울인 가로 변 이름의 기준점이 **제 점보다 오른쪽**으로 나가는 몫(v1.7.17 ②).
+     *
+     * 기울인 상자는 기준점에서 **왼쪽 아래**로 눕는다. 그래서 이 값이 작으면 변의 **왼쪽 끝**
+     * (`합정`)에서 꼬리가 안쪽 선로를 넘어(`inBounds`) 제자리가 막히고, 막히면 **거울**로
+     * 눕는다 — 그리고 거울 상자는 오른쪽 아래로 뻗어 **오른쪽 이웃의 제자리까지 물어**
+     * 거울이 변을 따라 줄줄이 옮는다(펼침 실측: 윗변 17개 중 **11개**가 거울이었다).
+     *
+     * **펼침은 8dp 로 벌리면 그 첫 단추가 안 풀린다** — 펼침 `합정` 의 꼬리는 선로를 9.7px
+     * 넘는데 8dp(22.5px)면 제자리에 들어가고, **모든 가로 변 이름이 같이 옮겨 가므로
+     * 이웃 사이 간격은 한 픽셀도 안 변한다**(도미노가 없다). 실측 펼침 전체 보기:
+     * 거울 **7 → 0개** · 43개 평균 57.1 → **56.3px** · 최댓값 122 → **86px**.
+     * 덤으로 짧은 이름은 글자 덩어리의 가운데가 제 점 **바로 밑**으로 온다.
+     *
+     * ⚠ **접힘은 4dp 그대로다.** 접힘 모서리는 반지름이 9.9dp 뿐이라 `합정` 은 8dp 로도
+     * 선로를 넘고(거울은 그대로), 오른쪽으로 나간 상자가 이번엔 좌변 `당산` 을 밀어
+     * [SIDE_LANE2] 로 **158px** 물러나게 한다(실측 · 8dp 에서 `홍대입구` 153px).
+     * 접힘 최적은 4dp 다(43개 평균 59.7px · 최댓값 75px).
+     */
+    val lead = (if (big) 8 else 4).dp.toPx()
     /** 선로 겉면에서 이만큼 떨어져야 "안 닿았다"고 본다(v1.7.7 D7 — 실측 2px 닿음). */
     val clear = railW / 2f + 2.dp.toPx()
     val placed = mutableListOf<Lab>()
@@ -1847,7 +1899,7 @@ private fun DrawScope.layoutLabels(
         val awayX = if (p.x < midX) 0.7f else -0.7f
         val labY = sideY[k] ?: p.y
         val (pivot, push) = when {
-            horiz -> Offset(p.x + 4.dp.toPx(), p.y + (if (onBottom) gapOut else gap)) to
+            horiz -> Offset(p.x + lead, p.y + (if (onBottom) gapOut else gap)) to
                 Offset(awayX, 0.7f)
             // 모서리 예외 — 가로 변과 **같은 기울기·같은 거리**로 선로 옆에 붙인다.
             // 선로가 세로라 여유는 x 로(루프 안쪽), 점을 지나는 4dp 는 y 로(모서리 반대쪽)
@@ -1916,8 +1968,12 @@ private fun DrawScope.layoutLabels(
             // 윗변은 루프 세로 한가운데를 안 넘는다 — 넘으면 아랫변 열차 차선을 문다.
             return !onTop || lab.pivot.y <= size.height / 2f
         }
-        /** [limit] = 변을 따라 밀어도 되는 최대 거리. 넘겨야 한다면 이 차선은 포기한다. */
-        fun search(from: Offset, limit: Float): Boolean {
+        /**
+         * [limit] = 변을 따라 밀어도 되는 최대 거리. 넘겨야 한다면 이 차선은 포기한다.
+         * @param dir 미는 방향. 기본은 [push] 이고, **변을 따라서만** 미끄러질 때는
+         *   `push` 의 가로 성분만 넘긴다(v1.7.17 ② — 선로에서 멀어지지 않는 회피).
+         */
+        fun search(from: Offset, limit: Float, dir: Offset = push): Boolean {
             lab.pivot = from
             var t = 0
             while (t < maxTries) {
@@ -1934,7 +1990,7 @@ private fun DrawScope.layoutLabels(
                 // ⚠ 가로로 흘리는 건 **모서리 회피용**이지 이동 수단이 아니다 — 세 칸
                 // (`33 × 0.7 ≈ 23dp`)에서 멈춘다. 더 흘리면 이웃 역을 건너뛰어 순서가 뒤집힌다.
                 val dx = if (d > LATERAL_STEPS * step) LATERAL_STEPS * step else d
-                lab.pivot = Offset(base.x + push.x * dx, base.y + push.y * d)
+                lab.pivot = Offset(base.x + dir.x * dx, base.y + dir.y * d)
             }
             return false
         }
@@ -1966,6 +2022,27 @@ private fun DrawScope.layoutLabels(
              * ⚠ 밀기가 거울보다 먼저면 안 된다: 밀기는 **성공해도 이름을 데려간다.**
              */
             placedOk = search(pivot, 0f)
+            /*
+             * ⚠ v1.7.17 ② — **거울 앞에 "변을 따라서만" 한 번**.
+             *
+             * 종전은 제자리가 막히면 곧장 거울이었다. 그런데 거울은 **한 번 눕는 방향이
+             * 뒤집히면 이웃까지 줄줄이 뒤집힌다** — 접힘 전체 보기 실측에서 `합정` 이
+             * 거울로 눕자 그 상자가 `홍대입구` 제자리를 물어 `홍대입구` 도, 이어서 `신촌`
+             * 까지 거울이 됐다(윗변 셋만 +35°). 이웃에 막힌 것뿐이라면 **선로에서 안
+             * 멀어지는 방향**(변을 따라 가로로)으로 한두 칸 미끄러지면 기울기를 지킨 채
+             * 풀린다 — `신촌` 이 그렇게 −35° 로 돌아왔고, 오른쪽 위 `성수` 도 선로 경계에
+             * 걸리던 것을 한 칸 미끄러져 89px → 69px 로 붙었다.
+             *
+             * 칸 수가 둘로 갈리는 이유: **선로(경계)에 막힌 것은 한 칸**이면 족하고,
+             * 더 가면 제 점에서 멀어지기만 한다(`합정` 은 두 칸을 가도 안 풀려 거울이
+             * 답이다). **이웃에 막힌 것은 두 칸**까지 준다 — 이웃 상자 한 개 폭이다.
+             */
+            if (!placedOk && !cornerTilt) {
+                lab.pivot = pivot
+                val byRail = !inBounds(lab.quad(pad))
+                placedOk = search(
+                    pivot, (if (byRail) 1 else 2) * step, Offset(push.x, 0f))
+            }
             if (!placedOk) { mirror(true); placedOk = search(pivot, 0f) }
             if (!placedOk) { mirror(false); placedOk = search(pivot, Float.MAX_VALUE) }
             if (!placedOk) { mirror(true); placedOk = search(pivot, Float.MAX_VALUE) }
@@ -1986,6 +2063,7 @@ private fun DrawScope.layoutLabels(
     }
     return placed
 }
+
 
 /* ────────────────────────── 그리기 ────────────────────────── */
 

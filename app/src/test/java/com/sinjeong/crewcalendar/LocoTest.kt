@@ -7,6 +7,7 @@ import com.sinjeong.crewcalendar.presentation.live.LOCO_RING_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_WHEEL_BOTTOM
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import com.sinjeong.crewcalendar.presentation.live.headingFor
+import com.sinjeong.crewcalendar.presentation.live.labelGapDp
 import com.sinjeong.crewcalendar.presentation.live.labelTilted
 import com.sinjeong.crewcalendar.presentation.live.locoBelly
 import com.sinjeong.crewcalendar.presentation.live.locoFlip
@@ -479,12 +480,14 @@ class LocoTest {
     }
 
     /**
-     * **카스가 짚은 네 역은 노선도 옆에 기울여 적는다**(v1.7.15 ⑤).
+     * **카스가 짚은 역들은 노선도 옆에 기울여 적는다**(v1.7.15 ⑤ · v1.7.17 ②).
      *
      * 카스: *"뚝섬이 한양대 텍스트기울기처럼 노선도 옆에 넣어줘야지. 건대입구도 마찬가지,
-     * 합정, 홍대입구도 노선도 옆에 넣어줘."* 셋(`합정`·`홍대입구`·`뚝섬`)은 원래 윗변이라
-     * 이미 기울어져 있었고 — 밀려나 있었을 뿐이다 — **규칙이 바뀐 것은 `건대입구` 하나**다.
-     * 그 하나가 열리면서 `SIDE_LANE2` 로 물러나던 상자가 사라져 `뚝섬` 도 제자리를 찾았다.
+     * 합정, 홍대입구도 노선도 옆에 넣어줘."*(v1.7.15) 셋(`합정`·`홍대입구`·`뚝섬`)은 원래
+     * 윗변이라 이미 기울어져 있었고 — 밀려나 있었을 뿐이다 — 규칙이 바뀐 것은 `건대입구` 다.
+     * 이어서 *"홍대입구, **건대입구**, 성수 글꼴을 **기울이거나** 줄여서 최적화 시켜줘!"*
+     * (v1.7.17)에 따라 **오른변 둘째 역 `구의` 까지** 같이 기울여 **한 벌**로 만들었다 —
+     * `건대입구` 혼자 누우면 오른변에서 어색하고, 그 상자가 `구의` 를 아래로 63px 밀어냈다.
      *
      * 네 변의 역 목록은 `Line2Test.둘레 네 변 배치가 사진과 같다` 가 이미 잠근다.
      */
@@ -497,21 +500,49 @@ class LocoTest {
             .toSet()
 
         val inside = tilted(false)
-        for (n in listOf("합정", "홍대입구", "뚝섬", "건대입구")) assertTrue(n, n in inside)
+        for (n in listOf("합정", "홍대입구", "뚝섬", "건대입구", "구의")) assertTrue(n, n in inside)
         // 기준으로 든 `한양대`(윗변)도 당연히 기울어져 있다.
         assertTrue("한양대", "한양대" in inside)
-        // 나머지 세로 변 아홉은 종전대로 **가로**다 — 여기를 열면 이름 열이 통째로 무너진다.
-        for (n in listOf("구의", "강변", "잠실나루", "잠실",
+        // 나머지 세로 변 여덟은 종전대로 **가로**다 — 여기를 열면 이름 열이 통째로 무너진다.
+        for (n in listOf("강변", "잠실나루", "잠실",
                          "대림", "신도림", "문래", "영등포구청", "당산"))
             assertFalse(n, n in inside)
-        // 윗변 17 + 아랫변 16 + 모서리 예외 1
-        assertEquals(34, inside.size)
+        // 윗변 17 + 아랫변 16 + 오른변 위 두 역
+        assertEquals(35, inside.size)
 
         // 가로 × 전체 보기(세로 변 이름이 루프 **밖** 차선) — 예외 없음(v1.7.7 D1 보존).
         val outside = tilted(true)
-        assertFalse("건대입구", "건대입구" in outside)
+        for (n in listOf("건대입구", "구의")) assertFalse(n, n in outside)
         assertEquals(33, outside.size)
         // 가로 변은 두 화면이 똑같다.
-        assertEquals(outside, inside - "건대입구")
+        assertEquals(outside, inside - "건대입구" - "구의")
+    }
+
+    /**
+     * **역명↔선로 거리는 16dp 한 값이고, 예외는 접힘 × 전체 보기의 루프 안쪽 하나**
+     * (v1.7.17 ② — [labelGapDp] KDoc 에 근거가 있다).
+     *
+     * 카스: *"전체보기 해보니 폴더를 접었을때 펼쳤을때 더 최적화 … 역명이 노선도에 좀 더
+     * 붙어야 할거 같애."* v1.7.16 은 **전체 보기 전부** 26dp 였다 — 아랫변 16역과 펼침
+     * 43역이 그 값을 헛되이 물고 있었다(실측 43개 평균 접힘 70.6 → 59.7px ·
+     * 펼침 95.5 → 53.3px).
+     *
+     * ⚠ **`Dp` 값 자체는 여기서 못 잰다**(하네스에 Compose 가 없다 — `MapArgb` 가 `Long`
+     * 인 것과 같은 사정). 그래서 [labelGapDp] 를 **숫자를 돌려주는 순수 함수**로 빼서
+     * 잠근다. 실제 픽셀 거리는 `docs/project-notes.md` v1.7.17 ② 실측표가 근거다.
+     */
+    @Test
+    fun `역명 거리는 16dp 이고 접힘 전체 보기 안쪽만 26dp 다`() {
+        // 단독 보기 — 접힘·펼침 · 루프 안팎 넷 다 16dp
+        for (big in listOf(false, true)) for (bottom in listOf(false, true))
+            assertEquals("단독 big=$big bottom=$bottom", 16f,
+                labelGapDp(dual = false, big = big, bottom = bottom), 0f)
+        // 전체 보기 — **접힘 × 루프 안쪽** 한 자리만 26dp
+        assertEquals(26f, labelGapDp(dual = true, big = false, bottom = false), 0f)
+        // 아랫변은 루프 밖이라 모서리 다툼이 없다
+        assertEquals(16f, labelGapDp(dual = true, big = false, bottom = true), 0f)
+        // 펼침은 안쪽 모서리 반지름이 접힘의 두 배라 16dp 로도 갈라선다
+        assertEquals(16f, labelGapDp(dual = true, big = true, bottom = false), 0f)
+        assertEquals(16f, labelGapDp(dual = true, big = true, bottom = true), 0f)
     }
 }
