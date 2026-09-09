@@ -842,10 +842,27 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 > 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
 
 
-## v1.7.17 (진행 중 — 산출물 없음)
+## v1.7.17 (128) — 달력 **글꼴 크기 단계** 뭉개짐 수정 · 본선 **전체 보기** 역명 최적화
 
-`versionCode` 는 **127 그대로**(올리지 않았다) · 테스트 **451 → 453건 전건 통과**(회귀 0).
-바꾼 파일 **2개** — `presentation/calendar/CalendarStyle.kt` · `CalendarTextSizeTest.kt`.
+2026-09-09 릴리즈. `versionCode` **127 → 128**(파일 실값을 읽고 +1) · `versionName` **1.7.17** ·
+테스트 **451 → 453건 전건 통과**(회귀 0).
+바꾼 파일 **5개**(본코드 3 · 테스트 2) — `presentation/calendar/CalendarStyle.kt` ·
+`presentation/live/MainLineMap.kt` · `presentation/live/Loco.kt` · `CalendarTextSizeTest.kt` · `LocoTest.kt`.
+
+| 산출물 | 크기 |
+|---|---|
+| `C:\Users\admin\Downloads\신정승무캘린더_체험판.apk`(release · 덮어쓰기) | 40,552,306 B |
+| `C:\Users\admin\Downloads\신정승무캘린더_v1.7.17.aab` | 40,115,439 B |
+| `C:\Users\admin\Downloads\신정승무캘린더_v1.7.17.zip`(APK 압축) | 39,146,914 B |
+
+APK 크기가 v1.7.16 과 **우연히 같은 40,552,306 B** 다 — 내용은 다르다(SHA-256
+`451AD094…C8504A5B` ↔ v1.7.16 `59D64622…0ABB05D1`). zip 안 APK 해시는 원본과 같다.
+
+`aapt2 dump badging` 첫 줄 — **`application-debuggable` 0건**:
+
+```
+package: name='com.sinjeong.crewcalendar' versionCode='128' versionName='1.7.17' platformBuildVersionName='16' platformBuildVersionCode='36' compileSdkVersion='36' compileSdkVersionCodename='16'
+```
 
 ## ① 글꼴 크기 단계가 **시스템 배율에 뭉개지던 것** (`CalendarStyle.kt` — 곱 상한 → 폭 상한)
 
