@@ -842,10 +842,10 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 > 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
 
 
-## v1.7.18 (129) — 본선 **전체 보기** 배치 · 달력 **글꼴 단계 1.3/1.6** · **근무 다이아 크기**
+## v1.7.18 (129) — 본선 **전체 보기 역명 고정 배치**(모서리 간격·43개 기울임·역명 거리·접힘 중앙·단독 보기 글자) · 달력 **글꼴 단계 1.3/1.6** + **근무 다이아 크기**
 
-2026-09-09 작업. `versionCode` **129** · `versionName` **1.7.18** — **버전 줄은 코디네이터가 올린다**
-(이 회차는 배치만 고쳤다). 테스트 **453 → 456건** 전건 통과(회귀 0 — ②-b 포함).
+2026-09-09 작업·릴리즈. `versionCode` **129** · `versionName` **1.7.18**(`app/build.gradle.kts` 두 줄,
+릴리즈 때 코디네이터가 128 → 129 로 올렸다). 테스트 **453 → 456건** 전건 통과(회귀 0 — ②-b 포함).
 바꾼 파일 **8개** — `presentation/live/MainLineMap.kt` · `presentation/live/Loco.kt` ·
 `presentation/calendar/CalendarStyle.kt` · `presentation/calendar/MainCalendarScreen.kt` ·
 `presentation/settings/SettingsScreen.kt` · `presentation/theme/ThemeController.kt` ·
@@ -853,7 +853,15 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 
 | 산출물 | 크기 |
 |---|---|
-| (릴리즈 시 확정 — 코디네이터) | |
+| `C:\Users\admin\Downloads\신정승무캘린더_체험판.apk`(release · 덮어쓰기) | 40,552,306 B |
+| `C:\Users\admin\Downloads\신정승무캘린더_v1.7.18.aab` | 40,117,906 B |
+| `C:\Users\admin\Downloads\신정승무캘린더_v1.7.18.zip`(APK 압축) | 39,150,490 B |
+
+`aapt2 dump badging` 확인: `versionCode='129' versionName='1.7.18'` · `application-debuggable` **0건**.
+APK 크기가 **v1.7.16·v1.7.17 과 세 판 연속 똑같은 40,552,306 B** 다 — 우연이고 내용은 다르다
+(SHA-256 `4B1F2094…48ADA0CB` ↔ v1.7.17 `451AD094…C8504A5B`). 코드 변경이 배치 상수 위주라
+압축 결과 길이가 같게 떨어진 것이니 **크기로 빌드가 갱신됐는지 판정하지 말 것** — 해시나 badging 을 봐라.
+zip SHA-256 `47D1C480…8AD05B28`(항목 1개 · `신정승무캘린더_체험판.apk` 40,552,306 B 로 검증).
 
 카스(2026-09-09, v1.7.17 을 폴드7 에서 보고):
 
