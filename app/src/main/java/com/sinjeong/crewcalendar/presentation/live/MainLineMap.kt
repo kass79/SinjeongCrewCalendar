@@ -344,10 +344,23 @@ private const val CLAY_SHADOW_MAX = 15
 
 /**
  * 접힘 세로에서 지도를 왼쪽으로 옮길 수 있는 **한도**(v1.7.14 ⑩ · [mapCenterNudgePx]).
- * 아랫변 역명이 상태바 칩에 닿기 전까지다 — 실측 여유 14px 에 [STATUS_HUG] 21px 을 더한 35px
- * 안쪽으로 잡았다. **보정 손잡이**: 실화면에서 역명이 칩에 닿으면 여기만 줄인다.
+ * 아랫변 역명이 상태바 칩에 닿기 전까지다. **보정 손잡이**: 실화면에서 역명이 칩에 닿으면
+ * 여기만 줄인다.
+ *
+ * ## v1.7.18 — **8dp 는 좁아서 가운데를 못 맞췄다** (카스가 다시 짚은 자리)
+ *
+ * 카스(2026-09-09): *"폴더 접었을때 보면 노선이 전체적으로 **왼쪽으로 좀 더 가야 중앙 위치**가
+ * 맞는거 같은데?"* — [mapCenterNudgePx] 의 산수는 맞았는데(요구 **50.5px**) 이 한도가
+ * 8dp = **21px** 이라 **29.5px 가 남아** 선로 네모가 화면 중심보다 그만큼 오른쪽에 섰다
+ * (스크린샷 실측: 선로 좌우 끝 258..881 → 중심 569.5 ↔ 화면 중심 540).
+ *
+ * v1.7.14 가 8dp 로 잡은 근거는 *"아랫변 역명 왼끝 129px ↔ 칩 오른끝 115px = 여유 14px"*
+ * 였다. 그 뒤 v1.7.17 이 아랫변 거리를 26 → 16dp 로, v1.7.18 이 다시 **12dp** 로 당기면서
+ * 역명이 칩에서 그만큼 물러났다 — **실측 여유 40px**(칩 오른끝 125px · 역명 왼끝 165px).
+ * 그래서 한도를 **20dp(52.5px)** 로 올려 요구값 50.5px 가 그대로 먹게 했다.
+ * 실측 결과 선로 네모 중심 오차 **+29.5 → 0px**.
  */
-private val MAP_NUDGE_MAX = 8.dp
+private val MAP_NUDGE_MAX = 20.dp
 
 /** 상태바 칩 줄을 화면 끝 쪽으로 붙이는 몫(v1.7.14 ⑩) — 터치 최소 48dp 가 남긴 죽은 여백. */
 private val STATUS_HUG = 4.dp
@@ -521,24 +534,7 @@ private const val LOOP_N = TOP_N + RIGHT_N + BOTTOM_N + LEFT_N   // 43
 private const val DIAG = -35f
 
 /**
- * 역 이름이 **선로 중심에서 떨어지는 거리** — 가로 변·세로 변·아랫변이 **한 값**을 쓴다.
- *
- * 카스: *"전체적으로 역명이 노선도에서 너무 떨어져있는듯? 최적화시켜줘."*(v1.7.15 ⑥)
- * v1.6.98~v1.7.14 는 세 자리에 `30.dp` 가 **따로 적혀** 있었다 — 한 곳만 고치면 모서리에서
- * 가로 규칙과 세로 규칙이 어긋나므로 **손잡이는 하나뿐이어야 한다**.
- *
- * ⚠ **하한을 정하는 것은 [layoutLabels] 의 `clear`**(선로 반굵기 + 2dp)다. 기준점이 선로에
- * 너무 가까우면 `inBounds` 가 막아 라벨이 **아래로 한 칸(11dp) 밀리고**, 그 밀림이 곧
- * *"역명이 제 점에서 멀어진다"* 는 이번 피드백의 원인이다. 줄일 때는 **밀린 라벨 수 0**
- * 을 실측으로 확인할 것.
- */
-private val LABEL_GAP = labelGapDp(dual = false, big = false, bottom = false).dp
-
-/** **접힘 × 전체 보기**의 루프 안쪽 거리 — 값과 근거는 [labelGapDp] 한 곳이다. */
-private val LABEL_GAP_DUAL = labelGapDp(dual = true, big = false, bottom = false).dp
-
-/**
- * 폴드 **펼침**([big])에서 **아랫변** 역명 거리([LABEL_GAP])에만 곱하는 배수.
+ * 폴드 **펼침**([big])에서 **아랫변** 역명 거리([labelGapDp])에만 곱하는 배수.
  *
  * 펼침은 역 이름이 폰보다 한 뼘 크다(`labelSp` 16/14 ↔ 폰 13.5/11.5 = 1.19·1.22배).
  * 아랫변 이름은 기준점에서 **왼쪽 아래로 눕는데 밀어내기도 같은 대각선**이라, 한 번 막히면
@@ -554,8 +550,13 @@ private val LABEL_GAP_DUAL = labelGapDp(dual = true, big = false, bottom = false
 private const val LABEL_GAP_OUT_BIG_K = 1.2f
 
 /**
- * 좌·우변 역명이 **한 칸 더 루프 안쪽**으로 물러나는 폭(v1.6.98 모서리 처방 — [layoutLabels]).
- * 가장 긴 세로변 이름(`영등포구청` ≈ 55dp)의 절반이 조금 넘어, 물러나면 종전 자리와 안 겹친다.
+ * 세로 변 이름이 **루프 안쪽으로 물러날 수 있는 한도**(v1.6.98 의 둘째 차선을 v1.7.18 에서
+ * 계단식 회피로 바꾼 값 — [layoutLabels]).
+ *
+ * 세로 변 안쪽 차선에는 **내선 열차**가 선다(v1.7.4). 기관차 상자는 선로 중심에서
+ * `badgeOff + roofHalf` ≈ **30dp** 까지 파고들므로, 그 너머로 물러날 수 있어야 이름이
+ * 기관차 밑에 안 깔린다. 34dp 는 가장 긴 세로변 이름(`영등포구청` ≈ 55dp)의 절반이 조금
+ * 넘어, 물러나도 제 열의 이웃과 안 겹치는 값이다(v1.6.98 실측).
  */
 private val SIDE_LANE2 = 34.dp
 
@@ -1473,8 +1474,6 @@ private fun Chip(
 
 /* ────────────────────────── 둘레 기하 ────────────────────────── */
 
-private const val HALF_PI = (PI / 2.0).toFloat()
-
 /**
  * 둥근 사각형 둘레의 **호길이 매개변수**. 직선 4 + 모서리호 4 = 여덟 구간을 순서대로 잇는다.
  *
@@ -1486,11 +1485,22 @@ private class Loop(
     /** 선로 네모의 경계 — [layoutLabels] 가 **선로 침범**을 이 값으로 판정한다(v1.7.7 D7). */
     val x0: Float, val y0: Float,
     val x1: Float, val y1: Float, private val r: Float,
+    /**
+     * 변 양 끝 역이 **모서리에서 안쪽으로 당겨지는 폭**(v1.7.18 — [cornerInsetPx]).
+     *
+     * ⚠ **안쪽 선로 수치로 한 번 계산해 두 선로에 같은 px 를 넘긴다**([drawCabLoop]).
+     * 두 선로는 동심이라 같은 [k] 의 두 점이 마주 봐야 하는데, 각자 계산하면 호 길이가
+     * 달라 안팎이 어긋난다. 0 이면 v1.7.17 배치와 **한 픽셀도 안 다르다**.
+     */
+    private val inset: Float = 0f,
 ) {
     private val hLen = (x1 - x0 - 2f * r).coerceAtLeast(1f)
     private val vLen = (y1 - y0 - 2f * r).coerceAtLeast(1f)
     private val arc = HALF_PI * r
     val total = 2f * (hLen + vLen) + 4f * arc
+    /** 역이 실제로 늘어서는 길이 — 직선 구간에서 [inset] 을 양쪽으로 뺀 나머지. */
+    private val hFit = (hLen - 2f * inset).coerceAtLeast(1f)
+    private val vFit = (vLen - 2f * inset).coerceAtLeast(1f)
 
     private val rightS = hLen + arc
     private val bottomS = rightS + vLen + arc
@@ -1522,14 +1532,16 @@ private class Loop(
 
     /**
      * 둘레 자리 [k](0..42) 역의 누적 거리. 각 변의 역들은 그 변의 **직선 구간에 균등**
-     * (양끝 포함)하게 놓고, 모서리 호는 변과 변을 잇는 빈 구간으로 남긴다.
+     * (양끝 포함)하게 놓되, **양 끝은 모서리에서 [inset] 만큼 안쪽**이다(v1.7.18).
+     * 모서리 호는 변과 변을 잇는 빈 구간으로 남으므로, 모서리를 사이에 둔 두 역의 거리는
+     * `2·inset + arc` 다 — 그 값을 이웃 간격의 평균으로 맞추는 것이 [cornerInsetPx] 다.
      */
     fun sOf(k: Int): Float = when {
-        k < TOP_N -> k / (TOP_N - 1f) * hLen
-        k < TOP_N + RIGHT_N -> rightS + (k - TOP_N) / (RIGHT_N - 1f) * vLen
+        k < TOP_N -> inset + k / (TOP_N - 1f) * hFit
+        k < TOP_N + RIGHT_N -> rightS + inset + (k - TOP_N) / (RIGHT_N - 1f) * vFit
         k < TOP_N + RIGHT_N + BOTTOM_N ->
-            bottomS + (k - TOP_N - RIGHT_N) / (BOTTOM_N - 1f) * hLen
-        else -> leftS + (k - TOP_N - RIGHT_N - BOTTOM_N) / (LEFT_N - 1f) * vLen
+            bottomS + inset + (k - TOP_N - RIGHT_N) / (BOTTOM_N - 1f) * hFit
+        else -> leftS + inset + (k - TOP_N - RIGHT_N - BOTTOM_N) / (LEFT_N - 1f) * vFit
     }
 
     /**
@@ -1541,7 +1553,9 @@ private class Loop(
         if (p < 0f) p += LOOP_N
         val lo = floor(p).toInt().coerceIn(0, LOOP_N - 1)
         val a = sOf(lo)
-        val b = if (lo == LOOP_N - 1) total else sOf(lo + 1)
+        // ⚠ 마지막 역 다음은 **한 바퀴 돌아 0번 역**이다 — [inset] 이 0 이 아니면 그 자리가
+        //   둘레 0 이 아니라 `sOf(0)` 이라서, 안 더하면 열차가 모서리 앞에서 멈춘다.
+        val b = if (lo == LOOP_N - 1) total + sOf(0) else sOf(lo + 1)
         return a + (p - lo) * (b - a)
     }
 
@@ -1550,7 +1564,7 @@ private class Loop(
         val next = when (corner) {
             0 -> TOP_N; 1 -> TOP_N + RIGHT_N; 2 -> TOP_N + RIGHT_N + BOTTOM_N; else -> LOOP_N
         }
-        return (sOf(next - 1) + (if (next == LOOP_N) total else sOf(next))) / 2f
+        return (sOf(next - 1) + (if (next == LOOP_N) total + sOf(0) else sOf(next))) / 2f
     }
 }
 
@@ -1669,15 +1683,15 @@ private fun overlaps(a: List<Offset>, b: List<Offset>): Boolean {
  * ## 모서리는 **좌·우변이 한 칸 안쪽으로** 물러나 푼다 (v1.6.98)
  *
  * 좌·우변 라벨이 루프 **안**으로 들어오면서 모서리 넷에서 윗·아랫변 대각선 라벨과 정면으로
- * 만난다. 좌·우변은 폭 30dp 짜리 좁은 세로줄에 갇혀 위아래로 ±36dp 밖에 못 움직이는데
- * 대각선은 루프 안쪽 전체를 쓰니, **양보는 좁은 쪽이 아니라 넓은 쪽이 해야** 맞다.
+ * 만난다. v1.6.98~v1.7.17 은 좌·우변을 **가로로** 적었기 때문에 그 만남이 늘 정면충돌이었고,
+ * 처방도 그만큼 복잡했다(둘째 세로줄 `SIDE_LANE2` · 양쪽 번갈아 밀기 · 양 끝 역 예외).
  *
- * 순서를 뒤집어 좌·우변을 먼저 놓아 봤더니 이번엔 대각선이 갇혔다(실측: 왼위 모서리에서
- * `합정` 이 `당산` 위에 올라탔다 — 아래·오른쪽이 이미 `영등포구청`·`문래`·`신도림` 이었다).
- * 그래서 순서는 종전대로(대각선 먼저) 두고, 좌·우변에 **2차 시도**를 준다: 제자리 세로줄이
- * 다 막히면 루프 **안쪽으로 한 칸([SIDE_LANE2]) 물러난 세로줄**에서 다시 찾는다. 물러나도
- * 제 역 점과 **같은 높이 대**라 어느 점의 이름인지가 안 흐려진다(실측: `영등포구청` 하나만
- * 물러나 `홍대입구` 대각선 밑으로 깨끗이 빠졌다).
+ * ## v1.7.18 — 좌·우변도 **같은 기울기**라 모서리가 두 개의 나란한 띠가 된다
+ *
+ * 이제 43개가 전부 −35° 다([labelTilted]). 모서리에서 두 상자는 정면으로 만나는 대신
+ * **평행한 두 띠**로 비껴 앉고, 모서리 간격 자체도 [cornerInsetPx] 가 이웃 간격의 평균까지
+ * 벌려 놓는다. 그래서 위의 처방 세 가지를 다 **지웠다** — 남은 회피는 `제자리 → 변 따라 →
+ * 거울` 한 갈래뿐이고, 그것도 대부분 제자리에서 끝난다.
  */
 private fun DrawScope.layoutLabels(
     tm: TextMeasurer, loop: Loop,
@@ -1714,15 +1728,14 @@ private fun DrawScope.layoutLabels(
     val bandH = (loopIn.y1 - loopIn.y0) - railW
     val flat = sideLaneX != null
     /**
-     * 루프 **안**(윗변·세로 변) 이름의 거리 — [LABEL_GAP_DUAL] 이 걸리는 자리가 여기뿐이다.
+     * 루프 **안**(윗변·세로 변) 이름의 거리 — 값은 [labelGapDp] 한 곳이 정한다.
      * 단독인지는 두 [Loop] 이 **같은 객체**인가로 안다(v1.7.4).
      */
     val base = labelGapDp(dual = loop !== loopIn, big = big, bottom = false).dp.toPx()
     val gap = if (!flat) base else (bandH * 0.20f).coerceIn(9.dp.toPx(), base)
     /**
-     * 아랫변은 루프 **밖**([namePad] 자리)이라 모서리 다툼이 아예 없다 — **늘 [LABEL_GAP]**
-     * 이다(v1.7.17 ②. 종전엔 복선에서 [LABEL_GAP_DUAL] 을 같이 먹어 16역이 10dp 씩 멀었다).
-     * 펼침에서만 [LABEL_GAP_OUT_BIG_K] 배로 더 띄운다(그 KDoc의 실측 근거).
+     * 아랫변은 루프 **밖**([namePad] 자리)이라 모서리 다툼이 아예 없다 — 거리는 위와 같은
+     * [labelGapDp] 한 값이고, 펼침에서만 [LABEL_GAP_OUT_BIG_K] 배로 더 띄운다(그 KDoc 실측).
      */
     val gapOut = labelGapDp(dual = loop !== loopIn, big = big, bottom = true).dp.toPx() *
         (if (big) LABEL_GAP_OUT_BIG_K else 1f)
@@ -1742,9 +1755,8 @@ private fun DrawScope.layoutLabels(
      * 덤으로 짧은 이름은 글자 덩어리의 가운데가 제 점 **바로 밑**으로 온다.
      *
      * ⚠ **접힘은 4dp 그대로다.** 접힘 모서리는 반지름이 9.9dp 뿐이라 `합정` 은 8dp 로도
-     * 선로를 넘고(거울은 그대로), 오른쪽으로 나간 상자가 이번엔 좌변 `당산` 을 밀어
-     * [SIDE_LANE2] 로 **158px** 물러나게 한다(실측 · 8dp 에서 `홍대입구` 153px).
-     * 접힘 최적은 4dp 다(43개 평균 59.7px · 최댓값 75px).
+     * 선로를 넘고(거울은 그대로), 오른쪽으로 나간 상자가 이번엔 좌변 `당산` 을 밀어냈다
+     * (v1.7.17 실측 · 8dp 에서 `홍대입구` 153px). 접힘 최적은 4dp 다.
      */
     val lead = (if (big) 8 else 4).dp.toPx()
     /** 선로 겉면에서 이만큼 떨어져야 "안 닿았다"고 본다(v1.7.7 D7 — 실측 2px 닿음). */
@@ -1820,6 +1832,8 @@ private fun DrawScope.layoutLabels(
         (LOOP_N - LEFT_N until LOOP_N).filterNot { tiltedK(it) },
     )) {
         val ks = edge.sortedBy { dotOf(it).y }
+        // 밖 차선이 아니면 세로 변 다섯이 전부 기울어([labelTilted]) 이 열이 통째로 빈다.
+        if (ks.isEmpty()) continue
         val hs = ks.map { layouts.getValue(it).size.height.toFloat() + pad }
         val need = hs.sum()
         val ys = ks.map { dotOf(it).y }
@@ -1841,32 +1855,48 @@ private fun DrawScope.layoutLabels(
         loop.at(loop.sOf(TOP_N)).first.y - loop.at(loop.sOf(TOP_N + 1)).first.y
     ) / 2f
 
-    // **신도림·성수 먼저** → **세로 변 전부** → 윗변·아랫변(대각선).
+    // **신도림·성수 먼저** → **윗변 양 끝** · **세로 변 전부** → 나머지 가로 변.
     // 먼저 놓는 쪽이 자리를 지킨다 — 두 중요 역은 아무 라벨에도 안 밀리고, 나머지가 피해 간다.
     //
     // ⚠ v1.7.7 M2 — **세로 변은 다섯 개가 다 대각선보다 먼저**다. v1.6.99 는 좌·우변의
-    // *가운데* 역(문래·영등포구청·구의·강변·잠실나루)만 맨 나중으로 미뤘는데, 그 자리는
-    // 위 `sideY` 가 **차례대로 정해 둔 자리**라 늦게 놓을 이유가 없다. 늦게 놓으니 모서리
-    // 대각선(`합정`)이 그 열 한복판에 먼저 내려앉아 순서가 뒤집혀 읽혔다(F08b).
-    // 대각선은 루프 안쪽 전체를 쓸 수 있으니 **양보는 넓은 쪽이 한다** — 이 파일 KDoc 원칙
-    // 그대로다. 대각선이 제자리에서 막히면 아래 **거울**(모서리 반대쪽으로 눕히기)이 받는다.
+    // *가운데* 역만 맨 나중으로 미뤘는데, 늦게 놓으니 모서리 대각선(`합정`)이 그 열 한복판에
+    // 먼저 내려앉아 순서가 뒤집혀 읽혔다(F08b). 대각선은 루프 안쪽 전체를 쓸 수 있으니
+    // **양보는 넓은 쪽이 한다** — 이 파일 KDoc 원칙 그대로다.
     //
     // ⚠ v1.7.15 ⑤ — **윗변 양 끝(`합정`·`성수`)이 세로 변보다 먼저**다. 카스: *"합정,
-    // 홍대입구도 노선도 옆에 넣어줘."* v1.7.7 M2 는 *"양보는 넓은 쪽(대각선)이 한다"* 며
-    // 좌·우변을 먼저 놓았는데, **윗변 양 끝은 넓은 쪽이 아니다** — 기울인 상자가 모서리에서
-    // 어느 쪽으로 눕든 이웃 변의 이름 열을 쓸고 지나가므로 밀리면 **그 열 한복판**까지 간다
-    // (v1.7.14 실측 `합정` 130px · `홍대입구` 193px — 좌변 역처럼 읽혔다).
-    // 반대로 세로 변 **끝 역**은 밀려도 제 열을 따라 아래로 미끄러질 뿐이라(`atEdgeEnd` ·
-    // [alongLimit]) 제 점 옆·제 차례를 지킨다. **양보는 갈 곳이 있는 쪽이 한다.**
+    // 홍대입구도 노선도 옆에 넣어줘."* 윗변 양 끝은 넓은 쪽이 아니다 — 기울인 상자가
+    // 모서리에서 어느 쪽으로 눕든 이웃 변의 이름 열을 쓸고 지나가므로 밀리면 **그 열 한복판**
+    // 까지 간다(v1.7.14 실측 `합정` 130px · `홍대입구` 193px — 좌변 역처럼 읽혔다).
+    // 반대로 세로 변 끝 역은 밀려도 제 열을 따라 미끄러질 뿐이라(위 [alongLimit]) 제 점 옆·
+    // 제 차례를 지킨다. **양보는 갈 곳이 있는 쪽이 한다.**
     // 아랫변 양 끝은 루프 **밖**에 살아 세로 변과 애초에 안 만난다 — 그래서 윗변만이다.
-    val order = (0 until LOOP_N).sortedBy { k ->
-        when {
-            Line2Stations.MAIN[(k + start) % LOOP_N] in KEY_STATIONS -> 0
-            k == 0 || k == TOP_N - 1 -> 0
-            k >= TOP_N + RIGHT_N + BOTTOM_N || k in TOP_N until (TOP_N + RIGHT_N) -> 1
-            else -> 2
-        }
-    }
+    //
+    // ⚠ v1.7.18 — **세로 변은 위에서 아래로** 놓는다. 오른변은 k 가 이미 위→아래지만
+    // **왼변은 거꾸로**(`대림` 38 … `당산` 42)라, k 순서대로 놓으면 위 모서리 역(`당산`)이
+    // **맨 나중**에 온다. 그러면 `합정`(윗변 끝, 왼쪽 아래로 눕는다)과 같은 띠에 앉았을 때
+    // 비켜설 아래쪽 자리가 이미 `영등포구청` 으로 차 있어 **어디에도 못 간다**
+    // (실측: `합정`↔`당산` 상자가 통째로 겹쳤다). 위에서부터 놓으면 모서리에서 멀어지는
+    // 쪽으로 **줄줄이 한 칸씩** 밀려 다섯이 다 제자리를 찾는다 — 오른변이 v1.7.17 부터
+    // 그렇게 풀고 있던 방식 그대로다.
+    val order = (0 until LOOP_N).sortedWith(
+        compareBy(
+            { k ->
+                when {
+                    Line2Stations.MAIN[(k + start) % LOOP_N] in KEY_STATIONS -> 0
+                    k == 0 || k == TOP_N - 1 -> 0
+                    k >= TOP_N + RIGHT_N + BOTTOM_N || k in TOP_N until (TOP_N + RIGHT_N) -> 1
+                    else -> 2
+                }
+            },
+            { k -> if (k >= LOOP_N - LEFT_N) -k else k },
+        )
+    )
+
+    /** 루프 **안**에 사는 이름이 넘으면 안 되는 네 선 — 선로 겉면에서 2dp 바깥이다. */
+    val inLeft = loopIn.x0 + clear
+    val inRight = loopIn.x1 - clear
+    val inTop = loopIn.y0 + clear
+    val inBottom = loopIn.y1 - clear
 
     for (k in order) {
         val layout = layouts.getValue(k)
@@ -1898,34 +1928,67 @@ private fun DrawScope.layoutLabels(
         // 모서리에서 세로 변의 가로 라벨과 정면으로 만난다.
         val awayX = if (p.x < midX) 0.7f else -0.7f
         val labY = sideY[k] ?: p.y
-        val (pivot, push) = when {
+        val (pivot0, push) = when {
             horiz -> Offset(p.x + lead, p.y + (if (onBottom) gapOut else gap)) to
                 Offset(awayX, 0.7f)
-            // 모서리 예외 — 가로 변과 **같은 기울기·같은 거리**로 선로 옆에 붙인다.
-            // 선로가 세로라 여유는 x 로(루프 안쪽), 점을 지나는 4dp 는 y 로(모서리 반대쪽)
-            // 간다. 밀리는 방향도 안쪽·아래 = 모서리에서 멀어지는 쪽이다.
-            // ⚠ 밀리는 방향은 **선로를 따라 아래**다(대각선 아님). 기울인 이웃(`성수`)과
-            //   갈라서는 축은 글자에 수직인 (0.574, 0.819) 인데, 안쪽으로 함께 흘리면
-            //   x 성분이 y 성분을 거의 상쇄해 한 칸에 5px 밖에 못 벌어진다(실측) —
-            //   아래로만 가면 한 칸에 24px 이라 **한 칸이면 끝난다**.
-            cornerTilt -> Offset(p.x - gap, p.y + 4.dp.toPx()) to Offset(0f, 1f)
-            sideLaneX != null ->
-                Offset(if (onRight) sideLaneX.second else sideLaneX.first, labY) to Offset(0f, 0f)
-            onRight -> Offset(p.x - side, labY) to Offset(0f, if (p.y < midY) 1f else -1f)
-            else -> Offset(p.x + side, labY) to Offset(0f, if (p.y < midY) 1f else -1f)
+            // 세로 변 — 가로 변과 **같은 기울기·같은 거리**로 선로 옆에 붙인다(v1.7.18).
+            // 선로가 세로라 여유는 x 로(루프 안쪽), 점을 지나는 4dp 는 y 로 간다.
+            // 좌우가 **대칭**이다: 오른변은 기준점에서 왼쪽 아래로, 왼변은 오른쪽 위로 —
+            // 두 글줄의 각도가 [DIAG] 로 같으므로 43개가 평행하다.
+            // ⚠ 밀리는 방향은 **선로를 따라 그 변의 가운데 쪽** 한 방향이다(대각선 아님).
+            //   기울인 이웃과 갈라서는 축은 글자에 수직인 (0.574, 0.819) 인데, 안쪽으로
+            //   함께 흘리면 x 성분이 y 성분을 거의 상쇄해 한 칸에 5px 밖에 못 벌어진다
+            //   (실측) — 변을 따라서만 가면 한 칸에 24px 이라 한두 칸이면 끝난다.
+            // 점을 지나는 4dp 는 **아래 한 방향**이다 — 평행이동이라 이웃 간격이 한 픽셀도
+            // 안 변하고, 위 모서리 역(`당산`·`건대입구`)이 그만큼 모서리에서 물러난다.
+            // ⚠ 이걸 "변의 가운데 쪽" 으로 갈라 놓으면 안 된다: 변 한복판에서 위아래 이웃이
+            //   서로를 향해 당겨져 간격이 78 → 57px 로 좁아진다(v1.7.18 실측 `신도림`↔`문래`).
+            // ⚠ 가운데 쪽으로 **양 끝 역에만** 주는 것도 재 봤다 — 간격은 늘지만 위 모서리
+            //   역이 덜 물러나 `영등포구청`·`문래` 까지 밀림이 번졌다(실측 문래 38 → 123px).
+            // 반대로 **막혔을 때 미끄러지는 방향**은 그 변의 **가운데 쪽**이라야 한다:
+            // 양 끝 역이 모서리 쪽으로 밀리면 갈 곳이 없다(실측 `잠실` 이 선로를 물었다).
+            cornerTilt -> Offset(p.x + (if (onRight) -gap else gap), p.y + 4.dp.toPx()) to
+                Offset(0f, if (p.y < midY) 1f else -1f)
+            // 세로 변인데 **안 기울이는** 자리는 밖 차선뿐이다([labelTilted]) — 자리는 위
+            // `sideY` 가 차례대로 정해 뒀으니 아래 탐색을 안 돌린다.
+            else -> Offset(
+                if (onRight) sideLaneX?.second ?: (p.x - side)
+                else sideLaneX?.first ?: (p.x + side),
+                labY,
+            ) to Offset(0f, 0f)
         }
         val lab = Lab(
-            layout, pivot,
+            layout, pivot0,
             deg = if (tilt) DIAG else 0f,
-            // 기울인 이름은 늘 기준점에서 **왼쪽 아래**로 눕는다(=false).
-            // 가로로 적는 이름은 안쪽으로 뻗어야 한다 — 오른변은 왼쪽으로(=false),
-            // 왼변은 오른쪽으로(=true). 밖 차선이면 반대다.
+            // 가로 변의 기울인 이름은 늘 기준점에서 **왼쪽 아래**로 눕는다(=false).
+            // 세로 변은 **대칭**이다(v1.7.18) — 오른변은 왼쪽 아래(=false), 왼변은
+            // 오른쪽 위(=true). 각도는 둘 다 [DIAG] 라 평행이 안 깨진다.
+            // 밖 차선의 가로 이름은 차선 쪽으로 뻗는다.
             leftAnchored = when {
+                cornerTilt -> !onRight
                 tilt -> false
                 sideLaneX != null -> onRight
                 else -> !onRight
             },
         )
+
+        /*
+         * ── 세로 변 기준점을 **위아래 모서리 안쪽**으로 되민다 (v1.7.18) ──
+         *
+         * 4dp 내려 앉힌 아래 끝 역(`잠실`·`대림`)의 기울인 상자가 **아래 선로를 물었다**
+         * (실측 접힘 전체 보기: 상자 아랫날 594px ↔ 경계 585px). 탐색에 맡기면 안 된다 —
+         * 안쪽으로 물러나도 y 는 그대로라 안 풀리고, 변을 따라 올라갈 자리에 마침 내선 열차가
+         * 서 있으면 **아무 데도 못 가서 제자리에 그대로 남는다**(= 선로를 문 채로).
+         * 넘은 만큼만 되밀면 한 번에 끝난다.
+         */
+        val pivot = if (!cornerTilt) pivot0 else {
+            val q = lab.quad(0f)
+            val over = (q.maxOf { it.y } - inBottom).coerceAtLeast(0f) -
+                (inTop - q.minOf { it.y }).coerceAtLeast(0f)
+            // 0.5px 은 부동소수 반올림 몫 — 딱 맞추면 판정이 경계에서 갈린다.
+            Offset(pivot0.x, pivot0.y - over - (if (over > 0f) 0.5f else -0.5f))
+        }
+        lab.pivot = pivot
 
         /*
          * 밖 차선에 적는 세로 변 이름은 **자리를 다 정해 놓고 왔다** — 위 `sideY` 가 차례대로
@@ -1935,18 +1998,16 @@ private fun DrawScope.layoutLabels(
         if (sideLaneX != null && !tilt) { placed += lab; continue }
 
         // 겹치면 그 변 안쪽으로 한 칸씩 민다. 대부분 0칸에서 끝난다.
-        // 좌·우변은 위아래 **양쪽**이 비어 있으니 번갈아 밀어 본다(가까운 쪽이 막히면 반대쪽).
-        // 윗변·아랫변은 바깥이 선이라 안쪽 한 방향뿐이다.
         //
-        // ⚠ 좌·우변은 **촘촘히**(6dp) 보되 **역 간격의 절반까지만** 민다(위 [alongLimit]).
-        // ⚠ v1.6.99 — 좌·우변의 **양 끝 역은 모서리 쪽으로 안 민다.** 거기는 이미 이웃 변의
-        // 이름 자리라, 막히면 아래 `lane2`(루프 안쪽 한 칸)로 내려가는 편이 맞다.
-        val alternate = !tilt
-        val edgeFirst = if (onRight) TOP_N else TOP_N + RIGHT_N + BOTTOM_N
-        val edgeLast = edgeFirst + (if (onRight) RIGHT_N else LEFT_N) - 1
-        val atEdgeEnd = alternate && (k == edgeFirst || k == edgeLast)
-        val step = if (alternate) 6.dp.toPx() else 11.dp.toPx()
-        val maxTries = if (!alternate) 48 else if (atEdgeEnd) 6 else 12
+        // ⚠ v1.7.18 — 여기까지 오는 이름은 **전부 기울인 이름**이다([labelTilted] + 위 밖
+        // 차선 early-return). 그래서 v1.6.99~v1.7.17 의 가로 라벨 전용 가지(양쪽 번갈아
+        // 밀기 · 양 끝 역 예외 · 둘째 차선 `SIDE_LANE2`)는 **지웠다** — 세로 변이 기울면서
+        // 도달할 수 없는 코드가 됐다.
+        // 한 칸 — 세로 변은 **3dp 로 촘촘히** 본다. 안쪽 차선에 선 내선 열차 사이의 빈틈도,
+        // 이름 다섯이 줄줄이 밀릴 때 남는 여유도 좁아서 11dp 로는 통째로 건너뛴다
+        // (배율 1.15 실측: 6dp 격자에서 `문래` 가 자리를 못 찾아 172px 밀려났다).
+        val step = (if (cornerTilt) 3 else 11).dp.toPx()
+        val maxTries = 48
         /*
          * ⚠ 잘림 판정은 **돌린 상자의 네 꼭짓점**으로 본다(v1.6.98).
          *
@@ -1956,10 +2017,6 @@ private fun DrawScope.layoutLabels(
          * 전체 보기에서 `성수` 상자의 오른쪽 모서리가 오른변 선로를 **0.25dp 물었다**
          * (실측 F07b — 화면에서 글자 밑동 2px 이 초록에 닿았다).
          */
-        val inLeft = loopIn.x0 + clear
-        val inRight = loopIn.x1 - clear
-        val inTop = loopIn.y0 + clear
-        val inBottom = loopIn.y1 - clear
         fun inBounds(q: List<Offset>): Boolean {
             if (q.any { it.y < 0f || it.y > size.height }) return false
             if (onBottom) return q.all { it.y >= loop.y1 + clear }
@@ -1978,86 +2035,78 @@ private fun DrawScope.layoutLabels(
             var t = 0
             while (t < maxTries) {
                 val q = lab.quad(pad)
-                if (inBounds(q) && placed.none { overlaps(it.quad(pad), q) } &&
+                // ⚠ **선로·캔버스 판정만 여백 없는 상자**로 본다(v1.7.18). [pad] 는 이름끼리
+                //   떼어 놓으려고 붙인 3dp 인데, 그걸 선로 판정에도 쓰면 `clear`(2dp) 위에
+                //   2dp 가 더 붙어 이름이 선로에서 **4dp 넘게** 떨어져야만 통과했다 — 카스가
+                //   되풀이해 짚은 *"역명이 노선에서 뜬다"* 의 산수상 바닥이 거기였다.
+                if (inBounds(lab.quad(0f)) && placed.none { overlaps(it.quad(pad), q) } &&
                     obstacles.none { overlaps(it.quad(), q) }) return true
                 t++
-                // 양 끝 역은 [push] 가 가리키는 **변 안쪽 한 방향**으로만 간다(위 주석).
-                val d = if (alternate && !atEdgeEnd)
-                            (if (t % 2 == 1) 1f else -1f) * ((t + 1) / 2) * step
-                        else t * step
-                if (abs(d) > limit) return false
-                val base = from
+                val d = t * step
+                if (d > limit) return false
                 // ⚠ 가로로 흘리는 건 **모서리 회피용**이지 이동 수단이 아니다 — 세 칸
-                // (`33 × 0.7 ≈ 23dp`)에서 멈춘다. 더 흘리면 이웃 역을 건너뛰어 순서가 뒤집힌다.
-                val dx = if (d > LATERAL_STEPS * step) LATERAL_STEPS * step else d
-                lab.pivot = Offset(base.x + dir.x * dx, base.y + dir.y * d)
+                // (`3 × 11 × 0.7 ≈ 23dp`)에서 멈춘다. 더 흘리면 이웃 역을 건너뛴다.
+                // ⚠ 이 상한은 **변을 따라 내려가며 곁들여 흘릴 때**만이다(`dir.y != 0`).
+                //   순수하게 **안쪽으로 물러나는** 회피(`dir = (±1, 0)`)에까지 걸면 열차 차선
+                //   (선로에서 30dp)을 못 넘어 이름이 기관차 밑에 깔린다(v1.7.18 실측 `대림`).
+                val dx = if (dir.y != 0f && d > LATERAL_STEPS * step) LATERAL_STEPS * step else d
+                lab.pivot = Offset(from.x + dir.x * dx, from.y + dir.y * d)
             }
             return false
         }
-        // 좌·우변은 막히면 **루프 안쪽 한 칸**에서 한 번 더 찾는다(위 KDoc "모서리는 …").
-        // 끝내 못 찾으면 제자리에 둔다 — 43개가 다 적히는 편이 낫다(사용자 확정).
-        val lane2 = Offset(
-            pivot.x + (if (onRight) -1f else 1f) * SIDE_LANE2.toPx(), pivot.y)
         /**
          * 기울인 이름을 **반대쪽으로 눕힌다**(모서리 회피 · v1.7.7 M2·D1).
-         * 기본은 기준점에서 왼쪽 아래, 거울은 오른쪽 아래다.
+         * 제자리는 [Lab.leftAnchored] 가 정한 쪽, 거울은 그 반대쪽 + `+35°` 다
+         * (v1.7.18 — 왼변은 제자리가 `true` 라 기준을 상수로 박으면 안 된다).
          */
+        val baseLeft = lab.leftAnchored
         fun mirror(on: Boolean) {
             lab.deg = if (on) -DIAG else DIAG
-            lab.leftAnchored = on
+            lab.leftAnchored = if (on) !baseLeft else baseLeft
         }
-        var placedOk: Boolean
-        if (tilt) {
-            /*
-             * ── 기울인 이름은 **제자리 → 거울 제자리 → 밀기 → 거울 밀기** (v1.7.15 ⑤) ──
-             *
-             * 종전 차례는 *제자리·밀기(48칸) → 거울* 이었다. 그런데 기울인 상자는 기준점에서
-             * **왼쪽 아래**로 눕기 때문에 변의 **왼쪽 끝**(`합정`)에서는 꼬리가 안쪽 선로를
-             * 넘어(`inBounds`) 제자리가 **늘** 막힌다 — 밀기가 두 칸 만에 "성공"해 버려
-             * 거울에는 닿지도 못했고, 그 두 칸이 이름을 좌변 이름 열 쪽으로 데려갔다
-             * (전체 보기 실측: `합정` 130px · `홍대입구` 130px, 둘 다 정확히 두 칸).
-             * 거울이면 꼬리가 **오른쪽 아래**로 가 제 점 옆 제자리에 그대로 앉는다 —
-             * v1.7.7 M2 가 만들어 둔 장치를 **쓰이는 자리로** 올린 것뿐이다.
-             *
-             * ⚠ 밀기가 거울보다 먼저면 안 된다: 밀기는 **성공해도 이름을 데려간다.**
-             */
-            placedOk = search(pivot, 0f)
-            /*
-             * ⚠ v1.7.17 ② — **거울 앞에 "변을 따라서만" 한 번**.
-             *
-             * 종전은 제자리가 막히면 곧장 거울이었다. 그런데 거울은 **한 번 눕는 방향이
-             * 뒤집히면 이웃까지 줄줄이 뒤집힌다** — 접힘 전체 보기 실측에서 `합정` 이
-             * 거울로 눕자 그 상자가 `홍대입구` 제자리를 물어 `홍대입구` 도, 이어서 `신촌`
-             * 까지 거울이 됐다(윗변 셋만 +35°). 이웃에 막힌 것뿐이라면 **선로에서 안
-             * 멀어지는 방향**(변을 따라 가로로)으로 한두 칸 미끄러지면 기울기를 지킨 채
-             * 풀린다 — `신촌` 이 그렇게 −35° 로 돌아왔고, 오른쪽 위 `성수` 도 선로 경계에
-             * 걸리던 것을 한 칸 미끄러져 89px → 69px 로 붙었다.
-             *
-             * 칸 수가 둘로 갈리는 이유: **선로(경계)에 막힌 것은 한 칸**이면 족하고,
-             * 더 가면 제 점에서 멀어지기만 한다(`합정` 은 두 칸을 가도 안 풀려 거울이
-             * 답이다). **이웃에 막힌 것은 두 칸**까지 준다 — 이웃 상자 한 개 폭이다.
-             */
-            if (!placedOk && !cornerTilt) {
-                lab.pivot = pivot
-                val byRail = !inBounds(lab.quad(pad))
-                placedOk = search(
-                    pivot, (if (byRail) 1 else 2) * step, Offset(push.x, 0f))
+        /*
+         * ── 차례: **제자리 → 변 따라 → 거울 제자리 → 밀기 → 거울 밀기** (v1.7.15 ⑤ · v1.7.17 ②) ──
+         *
+         * 기울인 상자는 기준점에서 비스듬히 눕기 때문에 변의 끝(`합정`)에서는 꼬리가 선로를
+         * 넘어(`inBounds`) 제자리가 막힐 수 있다. 그때 곧장 거울로 뒤집으면 **이웃까지 줄줄이
+         * 옮는다** — 거울 상자가 이웃의 제자리를 물기 때문이다. 이웃에 막힌 것뿐이라면
+         * **선로에서 안 멀어지는 방향**(변을 따라)으로 한두 칸 미끄러지면 기울기를 지킨 채 풀린다.
+         *
+         * 칸 수: **선로(경계)에 막힌 것은 한 칸**이면 족하고 더 가면 제 점에서 멀어지기만 한다.
+         * **이웃에 막힌 것은 두 칸**(이웃 상자 한 개 폭)까지. 세로 변([cornerTilt])은 미끄러짐이
+         * 곧 제 열을 따라 내려가는 것이라 **이웃 역 간격의 절반**([alongLimit])까지 준다 —
+         * 거기까지는 차례가 안 뒤집힌다.
+         */
+        var placedOk = search(pivot, 0f)
+        if (!placedOk) {
+            lab.pivot = pivot
+            /** 선로(경계)에 막혔나 — 아니면 이웃 이름이나 열차에 막힌 것이다. */
+            val byRail = !inBounds(lab.quad(0f))
+            /** 루프 **안쪽**(선로 반대쪽). 열차 차선 너머로 물러나는 방향이다. */
+            val inward = Offset(if (onRight) -1f else 1f, 0f)
+            placedOk = when {
+                // 가로 변 — 변을 따라서만 한두 칸(v1.7.17 ②).
+                !cornerTilt ->
+                    search(pivot, (if (byRail) 1 else 2) * step, Offset(push.x, 0f))
+                /*
+                 * 세로 변은 **변을 따라 → 반대쪽 → 안쪽** 차례다.
+                 *
+                 * 앞의 둘은 제 열(= 제 점과 같은 가로 자리)을 지키므로 어느 점의 이름인지가
+                 * 안 흐려진다. 마지막 안쪽 물러남은 **내선 열차**가 막을 때 쓴다 — 세로 변
+                 * 안쪽 차선에는 내선 열차가 서고(v1.7.4), 기관차 상자가 선로에서 30dp 까지
+                 * 파고들어 기울인 이름 상자(대각선 폭 49px)와 정면으로 겹친다. 변을 따라
+                 * 미끄러져도 그 옆에 또 열차인 자리가 있어([SIDE_LANE2] 실측 `대림`) 그때만
+                 * 차선을 바꾼다.
+                 */
+                else -> search(pivot, 2f * alongLimit) ||
+                    search(pivot, alongLimit, Offset(0f, -push.y)) ||
+                    search(pivot, SIDE_LANE2.toPx(), inward)
             }
-            if (!placedOk) { mirror(true); placedOk = search(pivot, 0f) }
-            if (!placedOk) { mirror(false); placedOk = search(pivot, Float.MAX_VALUE) }
-            if (!placedOk) { mirror(true); placedOk = search(pivot, Float.MAX_VALUE) }
-            if (!placedOk) mirror(false)
-        } else {
-            /*
-             * ⚠ 차례가 **제자리 → 제 열을 따라 더 → lane2 → lane2 를 따라 더** 다(v1.7.15 ⑤).
-             * v1.6.98~v1.7.14 는 `lane2` 가 둘째였다 — 한 칸만 더 미끄러지면 될 이름이
-             * **루프 안쪽으로 89px 물러나** 제 열을 떠났고(`건대입구`·`구의`·`당산` 실측),
-             * 그 물러난 상자가 이번엔 윗변 대각선(`뚝섬`)을 밀어냈다. 미끄러짐은
-             * `maxTries`(≈94px)가 이미 묶고 이웃 이름이 앞을 막으므로 차례는 안 뒤집힌다.
-             */
-            placedOk = search(pivot, alongLimit) || search(pivot, Float.MAX_VALUE) ||
-                search(lane2, alongLimit) || search(lane2, Float.MAX_VALUE)
         }
+        if (!placedOk) { mirror(true); placedOk = search(pivot, 0f) }
+        if (!placedOk) { mirror(false); placedOk = search(pivot, Float.MAX_VALUE) }
+        if (!placedOk) { mirror(true); placedOk = search(pivot, Float.MAX_VALUE) }
+        if (!placedOk) mirror(false)
         if (!placedOk) lab.pivot = pivot
         placed += lab
     }
@@ -2143,18 +2192,39 @@ private fun DrawScope.drawCabLoop(
      * ⚠ 판정은 **재서** 한다(글자배율·펼침·필터가 다 크기를 바꾼다). 여유 30dp 는 안쪽에
      * 적을 때 이름이 선로에서 떨어져 앉는 몫이다 — 그만큼도 못 내면 안에 적을 수 없다.
      */
+    /*
+     * ── 역 이름은 **시스템 글자배율을 안 탄다** (v1.7.18) ──────────
+     *
+     * 카스(2026-09-09): *"**주위 텍스트 크기를 줄이던 해서** 한양대, 뚝섬도 노선도 옆에
+     * 있게 해줘!"* — 카스는 폴드7 을 글자 크게(1.3~1.5) 놓고 쓴다.
+     *
+     * 지도 캔버스는 이미 배율 상한 **1.15** 를 걸어 두었는데([CabScreen]), 그 1.15 배가
+     * 정확히 배치를 무너뜨리는 크기다. 접힘 전체 보기의 **왼쪽 변**이 그 한계다: 세로 변
+     * 다섯 이름이 필요로 하는 세로 길이가 배율 1.0 에서 211px, **1.15 에서 236px** 인데
+     * 쓸 수 있는 자리는 `당산` 이 `합정` 을 비껴선 뒤로 **≈250px** 뿐이고, 그 사이에
+     * `신도림`(KEY — 늘 먼저 놓는다)이 제자리에 박혀 열을 **둘로 자른다**. 위쪽 토막이
+     * 1.15 에서 3px 모자라 `문래` 가 자리를 못 찾고 **165px** 밀려났다(실측).
+     *
+     * 그래서 **이름 크기만** 배율의 역수를 곱해 되돌린다 — 화면에 그려지는 크기가 배율과
+     * 무관해져 **배율 1.0 · 1.3 · 1.5 의 배치가 완전히 같아진다.**
+     * ⚠ **열번·행선판·헤더·상태바는 그대로 배율을 탄다** — 여기서 [labelSp] 만 고친다.
+     * ⚠ 판독 하한 [LABEL_MIN_SP] 은 [labelStyle] 안에서 **되돌리기 전** 값에 걸리므로,
+     *   그려지는 크기의 하한이 된다(배율을 키워도 7.0sp 아래로 안 내려간다).
+     */
+    val nameSp = labelSp / fontScale.coerceAtLeast(1f)
+
     val sideKs = (TOP_N until TOP_N + RIGHT_N) + (LOOP_N - LEFT_N until LOOP_N)
     val sideBoxes = sideKs.map { k ->
         val nm = Line2Stations.MAIN[(k + start) % LOOP_N]
-        tm.measure(nm, labelStyle(nm, labelSp, pal))
+        tm.measure(nm, labelStyle(nm, nameSp, pal))
     }
     val sidePad = 3.dp.toPx()
     val sideNeed = listOf(0 until RIGHT_N, RIGHT_N until RIGHT_N + LEFT_N).maxOf { r ->
         r.sumOf { (sideBoxes[it].size.height + sidePad).toDouble() }.toFloat()
     }
     val bandH0 = size.height - tp - np - 2f * gap - railW
-    // ⚠ 이 30dp 는 [LABEL_GAP] 이 아니다 — **안에 적을 수 있나**를 보수적으로 재는 잣대다.
-    //   [LABEL_GAP] 을 따라 줄이면 가로 복선(띠 ≈74dp)이 안쪽 배치로 넘어가 v1.7.7 D1 의
+    // ⚠ 이 30dp 는 [labelGapDp] 가 아니다 — **안에 적을 수 있나**를 보수적으로 재는 잣대다.
+    //   [labelGapDp] 를 따라 줄이면 가로 복선(띠 ≈74dp)이 안쪽 배치로 넘어가 v1.7.7 D1 의
     //   좌·우변 겹침이 되살아난다. 배치 거리와 **일부러 갈라 둔 값**이다.
     val sideOutside = sideNeed + 30.dp.toPx() > bandH0
     /** 루프 밖 이름 차선의 폭 — 가장 긴 세로 변 이름 + 여백. 안에 적으면 0 이다. */
@@ -2162,12 +2232,24 @@ private fun DrawScope.drawCabLoop(
                     else sideBoxes.maxOf { it.size.width }.toFloat() + 6.dp.toPx()
     val lx = tp + sideLaneW
     val rx = size.width - tp - sideLaneW
+    /*
+     * ── 모서리 간격을 이웃 간격의 평균으로 (v1.7.18 · [cornerInsetPx]) ──
+     * **안쪽 선로 수치로 한 번만** 계산해 두 선로에 같은 px 를 넘긴다 — 두 선로는 동심이라
+     * 같은 역의 두 점이 마주 봐야 하는데, 각자 계산하면 호 길이(반지름)가 달라 어긋난다.
+     * 단독 보기는 반지름이 넉넉해 식이 음수 → **0** 이라 v1.7.17 배치 그대로다.
+     */
+    val inX0 = if (dual) lx + gap else lx
+    val inY0 = if (dual) tp + gap else tp
+    val inX1 = if (dual) rx - gap else rx
+    val inY1 = size.height - np - (if (dual) gap else 0f)
+    val cornerInset = cornerInsetPx(
+        hLen = inX1 - inX0 - 2f * rIn, vLen = inY1 - inY0 - 2f * rIn, r = rIn,
+        nH = TOP_N, nV = RIGHT_N,
+    )
     /** 바깥 선로 = **외선**. 단선이면 이 한 줄뿐이다. */
-    val loop = Loop(lx, tp, rx, size.height - np, rOut)
+    val loop = Loop(lx, tp, rx, size.height - np, rOut, cornerInset)
     /** 안쪽 선로 = **내선**. 단선이면 [loop] 과 같은 객체다(회귀 0의 열쇠). */
-    val loopIn =
-        if (!dual) loop
-        else Loop(lx + gap, tp + gap, rx - gap, size.height - np - gap, rIn)
+    val loopIn = if (!dual) loop else Loop(inX0, inY0, inX1, inY1, rIn, cornerInset)
     /** 루프 밖 이름 차선의 기준 x — 왼쪽은 글자의 **오른끝**, 오른쪽은 **왼끝**이다. */
     val sideLaneX =
         if (!sideOutside) null
@@ -2412,7 +2494,7 @@ private fun DrawScope.drawCabLoop(
     // (모서리에서만 겹칠 수 있어 [trainRects] 는 여전히 장애물로 넘긴다 — `layoutLabels` KDoc.)
     // ⚠ 장애물은 **두 선로를 합쳐** 넘긴다 — 계단만 방향별로 도는 것이지, 이름은 어느 쪽
     // 열차든 물으면 안 된다(복선에서 좌·우변 내선이 루프 안쪽 = 이름 자리로 들어온다).
-    layoutLabels(tm, loop, loopIn, start, labelSp, trainRects + rectsIn, pal, big, railW,
+    layoutLabels(tm, loop, loopIn, start, nameSp, trainRects + rectsIn, pal, big, railW,
         sideLaneX).forEach { draw(it) }
 
     /*

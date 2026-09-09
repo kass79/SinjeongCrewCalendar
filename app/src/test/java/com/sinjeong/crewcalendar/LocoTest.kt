@@ -7,6 +7,8 @@ import com.sinjeong.crewcalendar.presentation.live.LOCO_RING_H
 import com.sinjeong.crewcalendar.presentation.live.LOCO_WHEEL_BOTTOM
 import com.sinjeong.crewcalendar.domain.model.Line2Stations
 import com.sinjeong.crewcalendar.presentation.live.headingFor
+import com.sinjeong.crewcalendar.presentation.live.HALF_PI
+import com.sinjeong.crewcalendar.presentation.live.cornerInsetPx
 import com.sinjeong.crewcalendar.presentation.live.labelGapDp
 import com.sinjeong.crewcalendar.presentation.live.labelTilted
 import com.sinjeong.crewcalendar.presentation.live.locoBelly
@@ -480,69 +482,93 @@ class LocoTest {
     }
 
     /**
-     * **카스가 짚은 역들은 노선도 옆에 기울여 적는다**(v1.7.15 ⑤ · v1.7.17 ②).
+     * **43개 역 이름이 전부 한 기울기다**(v1.7.18 — v1.7.15 ⑤·v1.7.17 ② 규칙을 뒤집는다).
      *
-     * 카스: *"뚝섬이 한양대 텍스트기울기처럼 노선도 옆에 넣어줘야지. 건대입구도 마찬가지,
-     * 합정, 홍대입구도 노선도 옆에 넣어줘."*(v1.7.15) 셋(`합정`·`홍대입구`·`뚝섬`)은 원래
-     * 윗변이라 이미 기울어져 있었고 — 밀려나 있었을 뿐이다 — 규칙이 바뀐 것은 `건대입구` 다.
-     * 이어서 *"홍대입구, **건대입구**, 성수 글꼴을 **기울이거나** 줄여서 최적화 시켜줘!"*
-     * (v1.7.17)에 따라 **오른변 둘째 역 `구의` 까지** 같이 기울여 **한 벌**로 만들었다 —
-     * `건대입구` 혼자 누우면 오른변에서 어색하고, 그 상자가 `구의` 를 아래로 63px 밀어냈다.
+     * 카스(2026-09-09): *"역명과 노선을 더 붙여주고 **구의, 강변, 잠실나루, 잠실, 당산,
+     * 영등포구청, 문래, 신도림, 대림도 전체 텍스트 기울기에 맞게 같이** 하는게 최적화게
+     * 좋지 않을까?"* — v1.7.17 까지는 가로 변 + 오른쪽 위 두 역(`건대입구`·`구의`)만
+     * 기울였고, 그 예외가 곧 *"왜 여기만 누웠나"* 였다.
      *
      * 네 변의 역 목록은 `Line2Test.둘레 네 변 배치가 사진과 같다` 가 이미 잠근다.
      */
     @Test
-    fun `모서리 네 역은 기울여 적고 나머지 세로 변은 가로로 적는다`() {
+    fun `세로 변까지 43개가 모두 기울고 밖 차선일 때만 가로다`() {
         val start = Line2Stations.MAIN.indexOf("합정")
         fun tilted(outside: Boolean) = (0 until 43)
             .filter { labelTilted(it, topN = 17, rightN = 5, bottomN = 16, sideLaneOutside = outside) }
             .map { Line2Stations.MAIN[(it + start) % 43] }
             .toSet()
 
+        // 루프 안쪽에 적는 화면(접힘·펼침 전체 보기, 단독 보기) — **43개 전부**
         val inside = tilted(false)
-        for (n in listOf("합정", "홍대입구", "뚝섬", "건대입구", "구의")) assertTrue(n, n in inside)
-        // 기준으로 든 `한양대`(윗변)도 당연히 기울어져 있다.
-        assertTrue("한양대", "한양대" in inside)
-        // 나머지 세로 변 여덟은 종전대로 **가로**다 — 여기를 열면 이름 열이 통째로 무너진다.
-        for (n in listOf("강변", "잠실나루", "잠실",
+        for (n in listOf("합정", "홍대입구", "뚝섬", "한양대", "건대입구", "구의",
+                         "강변", "잠실나루", "잠실",
                          "대림", "신도림", "문래", "영등포구청", "당산"))
-            assertFalse(n, n in inside)
-        // 윗변 17 + 아랫변 16 + 오른변 위 두 역
-        assertEquals(35, inside.size)
+            assertTrue(n, n in inside)
+        assertEquals(43, inside.size)
 
-        // 가로 × 전체 보기(세로 변 이름이 루프 **밖** 차선) — 예외 없음(v1.7.7 D1 보존).
+        // 가로 × 전체 보기(세로 변 이름이 루프 **밖** 차선) — 세로 변 열은 **가로**다.
+        // v1.7.7 D1 이 실측으로 잡아 둔 배치 — 얇은 띠(폰 세로의 절반)를 대각선이 관통한다.
         val outside = tilted(true)
-        for (n in listOf("건대입구", "구의")) assertFalse(n, n in outside)
+        for (n in listOf("건대입구", "구의", "강변", "잠실나루", "잠실",
+                         "대림", "신도림", "문래", "영등포구청", "당산"))
+            assertFalse(n, n in outside)
         assertEquals(33, outside.size)
         // 가로 변은 두 화면이 똑같다.
-        assertEquals(outside, inside - "건대입구" - "구의")
+        assertEquals(outside, inside.filter { it in outside }.toSet())
     }
 
     /**
-     * **역명↔선로 거리는 16dp 한 값이고, 예외는 접힘 × 전체 보기의 루프 안쪽 하나**
-     * (v1.7.17 ② — [labelGapDp] KDoc 에 근거가 있다).
+     * **역명↔선로 거리는 어느 화면이든 12dp 한 값**이다(v1.7.18 — [labelGapDp] KDoc).
      *
-     * 카스: *"전체보기 해보니 폴더를 접었을때 펼쳤을때 더 최적화 … 역명이 노선도에 좀 더
-     * 붙어야 할거 같애."* v1.7.16 은 **전체 보기 전부** 26dp 였다 — 아랫변 16역과 펼침
-     * 43역이 그 값을 헛되이 물고 있었다(실측 43개 평균 접힘 70.6 → 59.7px ·
-     * 펼침 95.5 → 53.3px).
+     * 카스: *"**역명과 노선을 더 붙여주고** …"* v1.7.17 은 `16dp / 접힘 전체 안쪽만 26dp`
+     * 였다. 그 26dp 예외가 필요했던 이유(왼쪽 위 모서리에서 `합정`↔`당산` 다툼)는
+     * [cornerInsetPx] 와 [labelTilted] 가 없앴다.
      *
      * ⚠ **`Dp` 값 자체는 여기서 못 잰다**(하네스에 Compose 가 없다 — `MapArgb` 가 `Long`
      * 인 것과 같은 사정). 그래서 [labelGapDp] 를 **숫자를 돌려주는 순수 함수**로 빼서
-     * 잠근다. 실제 픽셀 거리는 `docs/project-notes.md` v1.7.17 ② 실측표가 근거다.
+     * 잠근다. 실제 흰 여백(px)은 `docs/project-notes.md` v1.7.18 실측표가 근거다.
      */
     @Test
-    fun `역명 거리는 16dp 이고 접힘 전체 보기 안쪽만 26dp 다`() {
-        // 단독 보기 — 접힘·펼침 · 루프 안팎 넷 다 16dp
-        for (big in listOf(false, true)) for (bottom in listOf(false, true))
-            assertEquals("단독 big=$big bottom=$bottom", 16f,
-                labelGapDp(dual = false, big = big, bottom = bottom), 0f)
-        // 전체 보기 — **접힘 × 루프 안쪽** 한 자리만 26dp
-        assertEquals(26f, labelGapDp(dual = true, big = false, bottom = false), 0f)
-        // 아랫변은 루프 밖이라 모서리 다툼이 없다
-        assertEquals(16f, labelGapDp(dual = true, big = false, bottom = true), 0f)
-        // 펼침은 안쪽 모서리 반지름이 접힘의 두 배라 16dp 로도 갈라선다
-        assertEquals(16f, labelGapDp(dual = true, big = true, bottom = false), 0f)
-        assertEquals(16f, labelGapDp(dual = true, big = true, bottom = true), 0f)
+    fun `역명 거리는 어느 화면이든 한 값이다`() {
+        for (dual in listOf(false, true))
+            for (big in listOf(false, true))
+                for (bottom in listOf(false, true))
+                    assertEquals("dual=$dual big=$big bottom=$bottom", 14f,
+                        labelGapDp(dual = dual, big = big, bottom = bottom), 0f)
+    }
+
+    /**
+     * **모서리 간격은 이웃 두 변 간격의 평균**이 된다(v1.7.18 — [cornerInsetPx]).
+     *
+     * 카스: *"전체를 보면 내선에서 **성수와 건대입구, 합정과 당산 사이가 너무 짧아져서**
+     * 최적화가 안되있는거 같은데? 역사이를 조금 더 늘려주면 좋지!"*
+     *
+     * 값은 실화면 실측 기하로 잠근다(디버그 훅 `LBLPURE` 가 찍은 `loopIn` 좌표·반지름):
+     *  · **접힘 × 전체 보기**(1080×2400 · density 420) 안쪽 선로 `hLen=1723 vLen=362 r=26.2`
+     *  · **펼침 × 전체 보기**(1968×2184 · density 450) 안쪽 선로 `hLen=1395 vLen=734 r=53`
+     *  · **단독 보기**는 선로가 한 줄이라 반지름이 넉넉해 **0** — 배치가 v1.7.17 그대로다.
+     */
+    @Test
+    fun `모서리 간격은 이웃 두 변 간격의 평균이 된다`() {
+        fun check(hLen: Float, vLen: Float, r: Float): Triple<Float, Float, Float> {
+            val i = cornerInsetPx(hLen, vLen, r, nH = 17, nV = 5)
+            val sH = (hLen - 2f * i) / 16f
+            val sV = (vLen - 2f * i) / 4f
+            return Triple(i, 2f * i + HALF_PI * r, (sH + sV) / 2f)
+        }
+        // 접힘 × 전체 보기 — 모서리가 호 41px 뿐이던 것이 91px 로 벌어진다
+        val fold = check(1722.6f, 361.6f, 26.2f)
+        assertEquals(25.0f, fold.first, 0.5f)
+        assertEquals("모서리 = 이웃 평균", fold.third, fold.second, 0.5f)
+
+        // 펼침 × 전체 보기
+        val big = check(1395f, 734f, 53f)
+        assertEquals(22.5f, big.first, 0.5f)
+        assertEquals("모서리 = 이웃 평균", big.third, big.second, 0.5f)
+
+        // 단독 보기(접힘·펼침) — 호가 이미 평균보다 길어 **0**. v1.7.17 배치가 그대로다.
+        assertEquals(0f, cornerInsetPx(1818f, 457f, 73.5f, nH = 17, nV = 5), 0f)
+        assertEquals(0f, cornerInsetPx(1514f, 852f, 112.4f, nH = 17, nV = 5), 0f)
     }
 }
