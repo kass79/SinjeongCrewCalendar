@@ -117,10 +117,12 @@ fun MainCalendarScreen(
     // **달력 탭만** 본다 — 상세시트·근무선택 시트·하단 탭바는 종전 테마 그대로다.
     val calStyle by viewModel.themeController.calendarStyle.collectAsStateWithLifecycle()
     val pal = calendarPalette(calStyle)
-    // v1.7.15 ⑦ — 달력 칸 글꼴 크기 두 단계(날짜 숫자 · 메모). 기본은 `보통`(배수 1f)이라
-    // 안 고른 사람 화면은 v1.7.14 와 픽셀 하나까지 같다. 설정에서 바꾸면 곧바로 따라온다.
+    // v1.7.15 ⑦ · v1.7.18 ③ — 달력 칸 글꼴 크기 세 단계(날짜 숫자 · 메모 · 근무 다이아).
+    // 기본은 `보통`(배수 1f)이라 안 고른 사람 화면은 v1.7.14 와 픽셀 하나까지 같다.
+    // 설정에서 바꾸면 곧바로 따라온다.
     val dateStep by viewModel.themeController.calDateSize.collectAsStateWithLifecycle()
     val memoStep by viewModel.themeController.calMemoSize.collectAsStateWithLifecycle()
+    val dutyStep by viewModel.themeController.calDutySize.collectAsStateWithLifecycle()
     // v1.7.9 ⑦ — 설정에 등록한 출퇴근 역. 비어 있으면 상세시트가 그 줄을 아예 안 그린다.
     /*
      * v1.7.13b ② — 설정의 **전체 스위치**를 끄면 여기서 **빈 목록**을 넘긴다.
@@ -373,6 +375,7 @@ fun MainCalendarScreen(
                         pal = pal,
                         dateStep = dateStep,
                         memoStep = memoStep,
+                        dutyStep = dutyStep,
                         modifier = Modifier.weight(1f),
                     )
                 }
@@ -714,6 +717,8 @@ private fun CalendarGrid(
     dateStep: CalendarTextSize = CalendarTextSize.NORMAL,
     /** 칸 메모 크기 단계(v1.7.15 ⑦) */
     memoStep: CalendarTextSize = CalendarTextSize.NORMAL,
+    /** 칸 근무 다이아 크기 단계(v1.7.18 ③) — 칩 **글자와 폭**이 같이 커진다 */
+    dutyStep: CalendarTextSize = CalendarTextSize.NORMAL,
     modifier: Modifier = Modifier,
 ) {
     val leading = month.atDay(1).dayOfWeek.value % 7
@@ -757,7 +762,10 @@ private fun CalendarGrid(
         // 임계 60dp(v1.6.10) → 34dp(v1.6.11): 사용자가 이름을 날짜 "옆 같은 줄"에 원함.
         // 날짜 6sp + 알약 여백 축소 + HolidayTag 하한 4.5sp면 34dp 칸에도 `광복절`이 들어간다.
         // 34dp 미만(계산상 실기기엔 없음)만 아랫줄 폴백으로 남겨둔다.
-        val nameBelow = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7 < 34.dp
+        // 칸 폭 실측값 — `nameBelow` 판정과 **근무 칩 폭 상한**(v1.7.18 ③)이 같이 본다.
+        // dp 상수를 칩 쪽에 새로 박지 않으려고 여기서 한 번만 잰다.
+        val cellWidth = (maxWidth - 8.dp * 2 - 3.dp * 6) / 7
+        val nameBelow = cellWidth < 34.dp
         LazyVerticalGrid(
             columns = GridCells.Fixed(7),
             modifier = Modifier
@@ -800,6 +808,8 @@ private fun CalendarGrid(
                         pal = pal,
                         dateStep = dateStep,
                         memoStep = memoStep,
+                        dutyStep = dutyStep,
+                        cellWidth = cellWidth,
                         onClick = { onSelect(day.date) },
                         onLongClick = { onLongPress(day.date) },
                     )
@@ -903,6 +913,10 @@ private fun DayCell(
     dateStep: CalendarTextSize,
     /** 메모 크기 단계(v1.7.15 ⑦) */
     memoStep: CalendarTextSize,
+    /** 근무 다이아 크기 단계(v1.7.18 ③) */
+    dutyStep: CalendarTextSize,
+    /** 칸 **실측 폭**(v1.7.18 ③) — 근무 칩이 이 안쪽을 못 넘게 하는 상한이다 */
+    cellWidth: Dp,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
 ) {
@@ -917,20 +931,30 @@ private fun DayCell(
     //
     // v1.7.15 ⑦ — 날짜 숫자·메모만 **사용자가 고른 단계**([CalendarTextSize])를 곱한다.
     // 기본 `보통` 은 배수가 정확히 `1f` 라 종전 값 그대로다(`6f.sp * 1f` === `6.sp`).
-    // 공휴일 이름·근무 칩·출근시각은 **안 건드린다** — 카스가 고른 것은 두 가지뿐이다.
+    // 공휴일 이름·출근시각은 **안 건드린다**(근무 칩은 v1.7.18 ③ 에서 단계가 생겼다).
     val dateSize = dateStep.spOf(
-        if (big) CalendarTextSize.DATE_SP_BIG else CalendarTextSize.DATE_SP, fontScale,
+        if (big) CalendarTextSize.DATE_SP_BIG else CalendarTextSize.DATE_SP,
     ).sp
     val holSize = if (big) 8.sp else 6.5.sp
-    val chipSizeBig = if (big) 13.sp else 11.5.sp
-    val chipSizeSmall = if (big) 11.5.sp else 10.sp
+    // v1.7.18 ③ — 근무 칩도 단계를 탄다(카스: *"그리고 근무 다이아 크기는 없네?"*).
+    // ⚠ **글자만 키우면 안 생긴다** — 칩 폭이 고정이면 `지대11`·`대기충당` 같은 긴
+    // 라벨이 아래 `fitSize` 루프에 도로 7sp 까지 줄어들어 "바꿔도 그대로" 가 된다.
+    val chipSizeBig =
+        dutyStep.spOf(if (big) CalendarTextSize.DUTY_SP_BIG else CalendarTextSize.DUTY_SP).sp
+    val chipSizeSmall =
+        dutyStep.spOf(if (big) CalendarTextSize.DUTY_SP_SMALL_BIG else CalendarTextSize.DUTY_SP_SMALL).sp
+    // 칩 폭 = 기본 폭 × 배수. 상한은 **칸 안쪽 폭**(칸 실측 폭 − 좌우 여백 2dp씩)
+    // — dp 상수를 박지 않고 [CalendarGrid] 의 `BoxWithConstraints` 가 잴 값을 받아 쓴다.
+    // 칩 폭은 글자 수와 무관하게 **통일**이다(v1.6 규칙) — 모든 칩이 같이 커진다.
+    val chipWidth = ((if (big) CalendarTextSize.DUTY_CHIP_DP_BIG else CalendarTextSize.DUTY_CHIP_DP)
+        * dutyStep.factor).dp.coerceAtMost(cellWidth - 4.dp)
     val signOnSize = if (big) 8.sp else 7.sp
     // 메모는 v1.6.99에서 **한 단계 키웠다**(폰 8→9.5 / 펼침 9.5→11sp). 사용자:
     // *"메모 한 내용이 좀 더 보일 수있게 가능?"* — 줄 수 상한도 같이 풀었다(아래 [MEMO_MAX_LINES]).
     // ⚠ 여기서 글자를 키우면 **줄 수는 저절로 준다** — 아래 [MEMO_MAX_LINES] 가 남은 높이에
     // 직접 물어보기 때문이다. 줄 수를 dp 상수로 다시 고정하지 말 것(v1.6.99 가 없앤 자리).
     val memoSize = memoStep.spOf(
-        if (big) CalendarTextSize.MEMO_SP_BIG else CalendarTextSize.MEMO_SP, fontScale,
+        if (big) CalendarTextSize.MEMO_SP_BIG else CalendarTextSize.MEMO_SP,
     ).sp
 
     // 근무 저장된 칸의 연녹색(v1.6.69 사용자 요청 — 참고 앱의 "저장된 근무는 바탕이 연녹색").
@@ -949,12 +973,14 @@ private fun DayCell(
     //   키가 그대로면 줄어든 채 굳는다.
     // **메모가 다 안 보일 때만** 켜지는 점(v1.6.82). 메모 [Text]가 배치될 때 스스로 정한다.
     // 다 보이면 더 볼 것이 없으니 점도 없다 — 점은 "눌러 보면 더 있다"는 뜻이다.
-    var memoCut by remember(day.memo, height, big, fontScale, memoSize to dateSize) {
+    var memoCut by remember(day.memo, height, big, fontScale, memoSize to dateSize, dutyStep) {
         mutableStateOf(false)
     }
     // 칸에 남은 높이가 **근무 칩·출근시각조차** 못 담으면 켜진다(v1.7.7 D4) → 위 취소선(원래
     // 근무)을 접는다. 순서는 사용자 확정: **칩·출근시각이 먼저, 나머지는 남는 만큼.**
-    var tightCell by remember(day.duty.raw, day.originalDutyRaw, height, big, fontScale, dateSize) {
+    var tightCell by remember(
+        day.duty.raw, day.originalDutyRaw, height, big, fontScale, dateSize, dutyStep,
+    ) {
         mutableStateOf(false)
     }
     /** 줄상자가 칸에 안 들어가면 = 이 줄이 잘리면 [tightCell] 을 켠다(한 방향이라 진동하지 않는다) */
@@ -1077,7 +1103,7 @@ private fun DayCell(
                 ) {
                 Box(
                     // 두 줄은 세로 여백을 절반으로 — 줄이 하나 늘어난 만큼 아껴야 한다
-                    Modifier.width(if (big) 42.dp else 34.dp).padding(vertical = if (two) 1.dp else 2.dp),
+                    Modifier.width(chipWidth).padding(vertical = if (two) 1.dp else 2.dp),
                     contentAlignment = Alignment.Center,
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -1091,7 +1117,11 @@ private fun DayCell(
                                 else -> chipSizeBig
                             }
                             // 다이아 텍스트 자동 맞춤: 칩 폭을 넘치면 들어갈 때까지 축소 (시스템 글꼴 확대에도 안 짤림)
-                            var fitSize by remember(label, big, fontScale) { mutableStateOf(baseSize) }
+                            // ⚠ 키에 **단계**가 든다(v1.7.18 ③) — baseSize 는 글자, chipWidth 는 폭을
+                            // 대변한다. 줄이기만 하는 루프라 키가 없으면 단계를 도로 낮춰도 줄어든 채 굳는다.
+                            var fitSize by remember(label, big, fontScale, baseSize, chipWidth) {
+                                mutableStateOf(baseSize)
+                            }
                             Text(
                                 label,
                                 fontSize = fitSize,
@@ -1171,7 +1201,9 @@ private fun DayCell(
         // `_최종점검_v1.7.6\F37b_...` 1일 칸: 남은 높이 14.5dp, 한 줄 17.1dp). 이제 **0줄**까지
         // 내려가 아예 안 그리고 잘림 점만 켠다(v1.7.7 D4).
         if (day.memo.isNotBlank()) {
-            var memoLines by remember(day.memo, height, big, fontScale, memoSize to dateSize) {
+            var memoLines by remember(
+                day.memo, height, big, fontScale, memoSize to dateSize, dutyStep,
+            ) {
                 mutableIntStateOf(MEMO_MAX_LINES)
             }
             if (memoLines > 0) Text(

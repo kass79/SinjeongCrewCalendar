@@ -79,8 +79,10 @@ class ThemeController @Inject constructor(
     }
 
     /**
-     * 달력 칸 **글꼴 크기 두 단계**(v1.7.15 ⑦) — 카스: *"달력숫자,메모 글꼴크기 설정할수 있게 해줘"*.
-     * 위 스타일 둘과 **같은 저장소·같은 방식**(`theme` prefs, 키 `cal_date_size`·`cal_memo_size`).
+     * 달력 칸 **글꼴 크기 세 줄**(v1.7.15 ⑦ · 다이아는 v1.7.18 ③) — 카스:
+     * *"달력숫자,메모 글꼴크기 설정할수 있게 해줘"* · *"그리고 근무 다이아 크기는 없네?"*.
+     * 위 스타일 둘과 **같은 저장소·같은 방식**(`theme` prefs, 키 `cal_date_size`·`cal_memo_size`·
+     * `cal_duty_size`).
      * **기본값은 종전 크기**([CalendarTextSize.NORMAL] = 배수 1f)라 안 고른 사람 화면은 안 바뀐다.
      */
     private val _calDateSize =
@@ -99,6 +101,15 @@ class ThemeController @Inject constructor(
     fun setCalMemoSize(size: CalendarTextSize) {
         _calMemoSize.value = size
         prefs.edit().putString("cal_memo_size", size.name).apply()
+    }
+
+    private val _calDutySize =
+        MutableStateFlow(CalendarTextSize.of(prefs.getString("cal_duty_size", null)))
+    val calDutySize: StateFlow<CalendarTextSize> = _calDutySize
+
+    fun setCalDutySize(size: CalendarTextSize) {
+        _calDutySize.value = size
+        prefs.edit().putString("cal_duty_size", size.name).apply()
     }
 
     /**

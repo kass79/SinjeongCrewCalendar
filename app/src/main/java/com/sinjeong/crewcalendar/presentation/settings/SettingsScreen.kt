@@ -311,8 +311,8 @@ fun SettingsScreen(
             }
 
             /*
-             * 달력 글자 크기 두 줄(v1.7.15 ⑦) — 카스 원문 *"그리고 달력숫자,메모 글꼴크기
-             * 설정할수 있게 해줘"*.
+             * 달력 글자 크기 세 줄(v1.7.15 ⑦ · 다이아는 v1.7.18 ③) — 카스 원문 *"그리고 달력숫자,
+             * 메모 글꼴크기 설정할수 있게 해줘"* · *"그리고 근무 다이아 크기는 없네?"*.
              *
              * **달력 스타일 바로 아래**다 — 셋 다 "달력 탭이 어떻게 보이나"라 한 벌로 읽힌다.
              * 컨트롤은 위 두 줄과 **같은 세그먼트**이고 저장도 같은 저장소(`theme`)다.
@@ -356,6 +356,26 @@ fun SettingsScreen(
                         SegmentedButton(
                             selected = memoStep == s,
                             onClick = { viewModel.themeController.setCalMemoSize(s) },
+                            shape = SegmentedButtonDefaults.itemShape(i, CalendarTextSize.entries.size),
+                        ) { Text(s.label, fontSize = 11.sp, maxLines = 1) }
+                    }
+                }
+            }
+
+            val dutyStep by viewModel.themeController.calDutySize.collectAsStateWithLifecycle()
+            Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                Text("달력 근무 다이아 크기", fontWeight = FontWeight.Bold)
+                Text(
+                    "달력 칸 근무 알약(다이아) 글자와 알약 폭의 크기입니다 (기본 보통)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(6.dp))
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    CalendarTextSize.entries.forEachIndexed { i, s ->
+                        SegmentedButton(
+                            selected = dutyStep == s,
+                            onClick = { viewModel.themeController.setCalDutySize(s) },
                             shape = SegmentedButtonDefaults.itemShape(i, CalendarTextSize.entries.size),
                         ) { Text(s.label, fontSize = 11.sp, maxLines = 1) }
                     }
