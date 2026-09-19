@@ -127,14 +127,16 @@ class SettingsViewModel @Inject constructor(
     fun setCalendarStyle(style: CalendarStyle) = themeController.setCalendarStyle(style)
 
     /**
-     * 휴가 종류 가리기(v1.7.19) — 저장은 테마와 같은 저장소고, **바꾼 순간 이미 올려 둔 기록도
-     * 같이 맞춘다**(재게시). 디버그 빌드에서는 영구 가드로 재게시가 안 돈다
+     * 휴가는 나만 보기(v1.7.19) — 저장은 테마와 같은 저장소고, **바꾼 순간 이미 올려 둔 기록도
+     * 같이 맞춘다**(켜면 지우고, 끄면 다시 올린다). **재게시를 부르는 자리는 여기 한 곳뿐이다** —
+     * 기본이 꺼짐이라 앱 시작 때 도는 자동 1회가 없다.
+     * 디버그 빌드에서는 영구 가드로 재게시가 안 돈다
      * (`FirestoreScheduleRepository.republishMasked` KDoc — 에뮬 계정이 실제 동료라서다).
      */
-    fun setMaskLeave(on: Boolean) {
-        themeController.setMaskLeave(on)
+    fun setHideLeave(on: Boolean) {
+        themeController.setHideLeave(on)
         viewModelScope.launch {
-            (scheduleRepo as? FirestoreScheduleRepository)?.republishMasked(firstRunOnly = false)
+            (scheduleRepo as? FirestoreScheduleRepository)?.republishMasked()
         }
     }
 
@@ -596,19 +598,20 @@ fun SettingsScreen(
             )
             SettingRow(title = "저장 방식", sub = "근무선택·근무변경은 동료와 공유, 메모·과거기록은 이 폰에만 저장")
             /*
-             * 휴가 종류 가리기(v1.7.19) — 카스 원문 *"그냥 설정에서 바꾼내용(휴가)는 안보이게
-             * 하나만 넣으면 어떨까?"* (2026-09-19).
+             * 휴가는 나만 보기(v1.7.19) — 카스 원문 *"설정에 본인이 근무에 휴가를 변경해도
+             * 본인만 볼수있는 그런것만 만들면 되겠지?"* (2026-09-19).
              *
              * 바로 위 `저장 방식` 줄 아래다 — 그 줄이 "근무변경은 동료와 공유"라고 말하는 자리라
-             * **무엇이 나가는지 읽은 바로 그 자리에서 가릴 수 있다.**
+             * **무엇이 나가는지 읽은 바로 그 자리에서 뺄 수 있다.**
              * 충당·교체·지근 같은 **근무성 변경은 종전대로 보인다**(동료가 오늘 누가 뛰는지 알아야 한다).
              */
-            val maskLeave by viewModel.themeController.maskLeave.collectAsStateWithLifecycle()
+            val hideLeave by viewModel.themeController.hideLeave.collectAsStateWithLifecycle()
             SettingRow(
-                title = "휴가 종류 가리기",
-                sub = "켜면 내가 바꾼 연차·병가 등이 동료에게는 '휴가'로만 보입니다. 내 달력에는 그대로 보입니다.",
+                title = "휴가는 나만 보기",
+                sub = "켜면 연차·병가 등 휴가로 바꾼 날이 동료에게 보이지 않습니다" +
+                    "(동료에게는 원래 근무로 보입니다). 내 달력에는 그대로 보입니다. 기본은 꺼짐입니다.",
                 trailing = {
-                    Switch(checked = maskLeave, onCheckedChange = { viewModel.setMaskLeave(it) })
+                    Switch(checked = hideLeave, onCheckedChange = { viewModel.setHideLeave(it) })
                 },
             )
 

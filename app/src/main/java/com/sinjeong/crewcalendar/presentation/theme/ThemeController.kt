@@ -148,22 +148,25 @@ class ThemeController @Inject constructor(
     }
 
     /**
-     * **휴가 종류 가리기**(v1.7.19) — 위 스위치들과 **같은 저장소·같은 방식**(`theme` prefs,
-     * 키 `share_mask_leave`)이고 **기본값은 켜짐**이다.
+     * **휴가는 나만 보기**(v1.7.19) — 위 스위치들과 **같은 저장소·같은 방식**(`theme` prefs,
+     * 키 `share_hide_leave`)이고 **기본값은 꺼짐**이다(카스: *"원하는 사람만 숨기게 설정해"*).
      *
-     * 켜져 있으면 서버로 나가는 근무변경 값에서 연차·병가 등이 `휴가` 두 글자로 덮인다
-     * (`domain/model/SharedDuty.kt` 의 `sharedDutyRaw`). **내 달력은 그대로다** — 로컬 저장값을
-     * 안 건드리므로 달력·위젯·공유 이미지·휴무 개수가 한 글자도 안 바뀐다.
+     * 켜면 연차·병가 등 **휴가로 바꾼 날을 서버에 아예 안 올린다**
+     * (`domain/model/SharedDuty.kt` 의 `sharedDutyRaw` → `null`). 동료 화면에는 **원래 근무**가
+     * 보인다. **내 달력은 그대로다** — 로컬 저장값을 안 건드리므로 달력·위젯·공유 이미지·
+     * 휴무 개수가 한 글자도 안 바뀐다.
      *
+     * ⚠ **꺼짐(기본)은 v1.7.18 과 완전히 같은 동작이다** — `sharedDutyRaw(raw, false) == raw`
+     * 라 안 켠 사람의 서버 기록은 한 글자도 안 바뀐다(`SharedDutyTest` 가 잠근다).
      * ⚠ 값을 바꾸면 `FirestoreScheduleRepository.republishMasked` 가 **이미 올린 기록도 맞춘다**
-     * (디버그 빌드에서는 영구 가드로 안 돈다 — 그 KDoc 참고).
+     * (켜면 지우고, 끄면 다시 올린다 — 디버그 빌드에서는 영구 가드로 안 돈다, 그 KDoc 참고).
      */
-    private val _maskLeave = MutableStateFlow(prefs.getBoolean("share_mask_leave", true))
-    val maskLeave: StateFlow<Boolean> = _maskLeave
+    private val _hideLeave = MutableStateFlow(prefs.getBoolean("share_hide_leave", false))
+    val hideLeave: StateFlow<Boolean> = _hideLeave
 
-    fun setMaskLeave(on: Boolean) {
-        _maskLeave.value = on
-        prefs.edit().putBoolean("share_mask_leave", on).apply()
+    fun setHideLeave(on: Boolean) {
+        _hideLeave.value = on
+        prefs.edit().putBoolean("share_hide_leave", on).apply()
     }
 
     /** 우상단 달 아이콘: 현재 보이는 테마의 반대로 강제 전환 */
