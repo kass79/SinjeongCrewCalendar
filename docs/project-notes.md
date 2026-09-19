@@ -844,13 +844,21 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 
 ## v1.7.19 (130) — **휴가는 나만 보기** 스위치 (켠 사람만, 휴가로 바꾼 날은 서버에 안 올린다)
 
-2026-09-19 작업. `versionCode`·`versionName` 은 **릴리즈 때 코디네이터가 올린다**(작업 시점 코드는
-129/1.7.18 그대로). 테스트 **456 → 461건** 전건 통과(새 `SharedDutyTest` 5건, 회귀 0).
+2026-09-19 작업·릴리즈. `versionCode` **130** · `versionName` **1.7.19**(`app/build.gradle.kts` 두 줄,
+릴리즈 때 코디네이터가 129 → 130 으로 올렸다). 테스트 **456 → 461건** 전건 통과(새 `SharedDutyTest` 5건, 회귀 0).
 바꾼 파일 **7개** — `domain/model/SharedDuty.kt`(신규) · `domain/model/DutyCode.kt` ·
 `data/local/LocalRepositories.kt` · `data/remote/FirestoreRepositories.kt` ·
 `presentation/theme/ThemeController.kt` · `presentation/settings/SettingsScreen.kt` ·
 `app/src/test/.../SharedDutyTest.kt`(신규) · 이 문서.
-**산출물(APK·AAB·zip)은 릴리즈 시 확정** — 이번 회차는 기능 작업까지다.
+
+| 산출물 | 크기 |
+|---|---|
+| `C:\Users\admin\Downloads\신정승무캘린더_체험판.apk`(release · 덮어쓰기) | 40,568,690 B |
+| `C:\Users\admin\Downloads\신정승무캘린더_v1.7.19.aab` | 40,131,806 B |
+| `C:\Users\admin\Downloads\신정승무캘린더_v1.7.19.zip`(APK 압축) | 39,167,186 B |
+
+`aapt2 dump badging` 확인: `versionCode='130' versionName='1.7.19'` · `application-debuggable` **0건**.
+zip SHA-256 `48633BD5…D83439BB`(항목 1개 · `신정승무캘린더_체험판.apk` 40,568,690 B, py -3 로 검증).
 
 ### 무엇을·왜
 
