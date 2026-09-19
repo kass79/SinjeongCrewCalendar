@@ -28,6 +28,8 @@ import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.model.cancelPendingSegments
 import com.sinjeong.crewcalendar.domain.model.pendingSegment
 import com.sinjeong.crewcalendar.data.local.LocalUserRepository
+import com.sinjeong.crewcalendar.data.remote.FirestoreScheduleRepository
+import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
 import com.sinjeong.crewcalendar.domain.repository.SnapshotRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
@@ -102,6 +104,7 @@ fun openPlayStore(context: Context) {
 class SettingsViewModel @Inject constructor(
     private val userRepo: UserRepository,
     private val snapshotRepo: SnapshotRepository,
+    private val scheduleRepo: ScheduleRepository,
     val themeController: ThemeController,
 ) : ViewModel() {
     val user: StateFlow<User?> = userRepo.observeMe()
@@ -122,6 +125,18 @@ class SettingsViewModel @Inject constructor(
 
     /** 달력 스타일(v1.7.6) — 지도 스타일과 같은 저장소·같은 방식이다. */
     fun setCalendarStyle(style: CalendarStyle) = themeController.setCalendarStyle(style)
+
+    /**
+     * 휴가 종류 가리기(v1.7.19) — 저장은 테마와 같은 저장소고, **바꾼 순간 이미 올려 둔 기록도
+     * 같이 맞춘다**(재게시). 디버그 빌드에서는 영구 가드로 재게시가 안 돈다
+     * (`FirestoreScheduleRepository.republishMasked` KDoc — 에뮬 계정이 실제 동료라서다).
+     */
+    fun setMaskLeave(on: Boolean) {
+        themeController.setMaskLeave(on)
+        viewModelScope.launch {
+            (scheduleRepo as? FirestoreScheduleRepository)?.republishMasked(firstRunOnly = false)
+        }
+    }
 
     /** 예약된 교번 변경 취소 — 아직 시작 안 한 구간만 버린다(지난 달력은 그대로) */
     fun cancelScheduledPattern() {
@@ -580,6 +595,22 @@ fun SettingsScreen(
                 sub = "본선 확인일 23.10.04 · 지선 25.03.04 — 전 다이아 열번·근무시간 내장",
             )
             SettingRow(title = "저장 방식", sub = "근무선택·근무변경은 동료와 공유, 메모·과거기록은 이 폰에만 저장")
+            /*
+             * 휴가 종류 가리기(v1.7.19) — 카스 원문 *"그냥 설정에서 바꾼내용(휴가)는 안보이게
+             * 하나만 넣으면 어떨까?"* (2026-09-19).
+             *
+             * 바로 위 `저장 방식` 줄 아래다 — 그 줄이 "근무변경은 동료와 공유"라고 말하는 자리라
+             * **무엇이 나가는지 읽은 바로 그 자리에서 가릴 수 있다.**
+             * 충당·교체·지근 같은 **근무성 변경은 종전대로 보인다**(동료가 오늘 누가 뛰는지 알아야 한다).
+             */
+            val maskLeave by viewModel.themeController.maskLeave.collectAsStateWithLifecycle()
+            SettingRow(
+                title = "휴가 종류 가리기",
+                sub = "켜면 내가 바꾼 연차·병가 등이 동료에게는 '휴가'로만 보입니다. 내 달력에는 그대로 보입니다.",
+                trailing = {
+                    Switch(checked = maskLeave, onCheckedChange = { viewModel.setMaskLeave(it) })
+                },
+            )
 
             // 관리자
             SectionTitle("관리자")

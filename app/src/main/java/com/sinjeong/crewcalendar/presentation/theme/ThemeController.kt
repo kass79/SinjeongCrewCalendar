@@ -147,6 +147,25 @@ class ThemeController @Inject constructor(
         prefs.edit().putString("commute_on", on.toString()).apply()
     }
 
+    /**
+     * **휴가 종류 가리기**(v1.7.19) — 위 스위치들과 **같은 저장소·같은 방식**(`theme` prefs,
+     * 키 `share_mask_leave`)이고 **기본값은 켜짐**이다.
+     *
+     * 켜져 있으면 서버로 나가는 근무변경 값에서 연차·병가 등이 `휴가` 두 글자로 덮인다
+     * (`domain/model/SharedDuty.kt` 의 `sharedDutyRaw`). **내 달력은 그대로다** — 로컬 저장값을
+     * 안 건드리므로 달력·위젯·공유 이미지·휴무 개수가 한 글자도 안 바뀐다.
+     *
+     * ⚠ 값을 바꾸면 `FirestoreScheduleRepository.republishMasked` 가 **이미 올린 기록도 맞춘다**
+     * (디버그 빌드에서는 영구 가드로 안 돈다 — 그 KDoc 참고).
+     */
+    private val _maskLeave = MutableStateFlow(prefs.getBoolean("share_mask_leave", true))
+    val maskLeave: StateFlow<Boolean> = _maskLeave
+
+    fun setMaskLeave(on: Boolean) {
+        _maskLeave.value = on
+        prefs.edit().putBoolean("share_mask_leave", on).apply()
+    }
+
     /** 우상단 달 아이콘: 현재 보이는 테마의 반대로 강제 전환 */
     fun toggle(currentlyDark: Boolean) {
         set(if (currentlyDark) ThemeMode.LIGHT else ThemeMode.DARK)

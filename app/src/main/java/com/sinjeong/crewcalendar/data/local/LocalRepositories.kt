@@ -164,6 +164,12 @@ class LocalScheduleRepository @Inject constructor(
 
     override suspend fun getOverridesFor(uid: String, month: YearMonth): List<Schedule> =
         state.value.values.filter { YearMonth.from(it.date) == month }
+
+    /**
+     * 내 근무변경 **전부** (날짜 → 기록) — v1.7.19 재게시용. 미래는 끝이 없어 월로 못 자른다.
+     * ⚠ 여기 담긴 `uid` 는 전부 `"local"` 이다([loadAll]) — 서버 문서 ID 에 쓰지 말 것(사번은 따로).
+     */
+    fun allOverrides(): Map<LocalDate, Schedule> = state.value
 }
 
 @Singleton

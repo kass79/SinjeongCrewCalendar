@@ -342,6 +342,34 @@ data class DutyCode(
             "주간" to DutyType.MAIN_DAY, "야간" to DutyType.MAIN_NIGHT,
         )
 
+        /**
+         * **휴가류** — [REST_OPTIONS] 에서 **근무성 `운휴` 하나만** 뺀 것(v1.7.19).
+         * `휴가 종류 가리기`([sharedDutyRaw])가 서버로 보낼 때 `휴가` 두 글자로 덮는 낱말들이다.
+         *
+         * ⚠ **낱말을 여기 다시 베끼지 말 것** — [REST_OPTIONS] 파생이라 근무변경 항목이 늘거나
+         * 줄면 자동으로 따라온다(두 벌이 되면 한쪽만 고치는 사고가 난다).
+         * ⚠ `운휴` 를 뺀 이유: 열차가 안 다녀 쉬는 **근무 배정**이라 개인 사정이 아니고,
+         * 휴무 개수 +1·주52 0분 규칙이 이 낱말을 그대로 본다(`Schedule.REST_OVERRIDES`).
+         * `지휴`(지선 휴일)도 같은 이유로 가리지 않는다 — [OVERRIDE_TYPES] 쪽이라 애초에 없다.
+         * ⚠ 패턴 휴무(`휴`·`휴5`)도 없다 — [REST_OPTIONS] 는 **근무변경 낱말**만 든다.
+         */
+        val LEAVE_OPTIONS: Set<String> = REST_OPTIONS - "운휴"
+
+        /**
+         * 앱이 저장할 수 있는 **낱말 근무코드 전부**(번호·다이아가 안 붙는 것들, v1.7.19).
+         * 여기 없고 번호([number])도 다이아([fill])도 없으면 **직접입력**(자유 글자)이다 —
+         * [sharedDutyRaw] 가 그 판정에 쓴다.
+         *
+         * ⚠ `parse` 는 일부러 헐렁하다 — `대전 출장`·`휴가원` 같은 자유 글자도 첫 글자만 보고
+         * `대`(STANDBY)·`휴`(REST)로 떨어진다. 그래서 "타입이 [DutyType.ETC] 냐"로만 자유 글자를
+         * 가르면 **첫 글자가 휴·지·대·주인 직접입력이 그대로 서버로 나간다.** 이 집합이 그 구멍을
+         * 막는다(가리기 기능의 존재 이유가 곧 그 글자다).
+         * ⚠ 전부 **파생**이다 — 목록을 새로 적지 말 것.
+         */
+        val WORD_CODES: Set<String> =
+            CHANGE_OPTIONS.toSet() + REST_OPTIONS + OVERRIDE_TYPES.keys + SHORT_LABELS.keys +
+                setOf("~", "주")
+
         fun parse(raw: String?): DutyCode {
             val s = raw?.trim()?.removeSuffix(".0") ?: return DutyCode("", DutyType.ETC)
             if (s.isEmpty()) return DutyCode("", DutyType.ETC)

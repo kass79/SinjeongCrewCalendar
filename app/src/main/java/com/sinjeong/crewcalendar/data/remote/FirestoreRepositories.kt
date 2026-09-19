@@ -1,5 +1,6 @@
 package com.sinjeong.crewcalendar.data.remote
 
+import android.content.Context
 import android.util.Log
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldPath
@@ -14,9 +15,12 @@ import com.sinjeong.crewcalendar.domain.model.BundledRoster
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
 import com.sinjeong.crewcalendar.domain.model.Notice
+import com.sinjeong.crewcalendar.domain.model.ReviewerAccount
 import com.sinjeong.crewcalendar.domain.model.Schedule
 import com.sinjeong.crewcalendar.domain.model.User
 import com.sinjeong.crewcalendar.domain.model.WeeklyMenu
+import com.sinjeong.crewcalendar.domain.model.republishDates
+import com.sinjeong.crewcalendar.domain.model.sharedDutyRaw
 import com.sinjeong.crewcalendar.domain.repository.AdminWriteResult
 import com.sinjeong.crewcalendar.domain.repository.MenuRepository
 import com.sinjeong.crewcalendar.domain.repository.NoticeRepository
@@ -24,6 +28,8 @@ import com.sinjeong.crewcalendar.domain.repository.RosterEntry
 import com.sinjeong.crewcalendar.domain.repository.RosterRepository
 import com.sinjeong.crewcalendar.domain.repository.ScheduleRepository
 import com.sinjeong.crewcalendar.domain.repository.UserRepository
+import com.sinjeong.crewcalendar.presentation.theme.ThemeController
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,6 +58,12 @@ import javax.inject.Singleton
  * ponytail: 인증 = 익명 로그인(사내 신뢰 기반, 문서 잠금은 필요해지면 추가),
  *           기기 변경 시 본인 메모·과거기록은 이전 안 됨(알려진 한계).
  */
+
+/**
+ * `휴가 종류 가리기` **1회 재게시 완료 표시**(v1.7.19) — `settings` prefs(기기 로컬).
+ * 이름에 `v1` 이 든 이유: 나중에 규칙이 바뀌어 한 번 더 맞춰야 하면 `_v2` 키를 새로 쓴다.
+ */
+private const val MASK_SYNCED_KEY = "share_mask_synced_v1"
 
 /** 익명 인증 보장 — 오프라인 등 실패 시 false (쓰기는 다음 기회에 재시도됨) */
 private suspend fun ensureAuth(): Boolean = runCatching {
@@ -147,29 +159,93 @@ class FirestoreUserRepository @Inject constructor(
 
 @Singleton
 class FirestoreScheduleRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val local: LocalScheduleRepository,
+    private val localUser: LocalUserRepository,
+    /**
+     * 기기 로컬 설정 — `휴가 종류 가리기` 스위치 하나를 읽는다(v1.7.19).
+     * ponytail: 사용자 설정이 전부 여기 사는 바람에 data → presentation 을 한 번 거스른다.
+     *   설정을 두 저장소로 쪼개는 것보다 이 임포트 하나가 낫다고 봤다.
+     */
+    private val theme: ThemeController,
 ) : ScheduleRepository {
     private val db get() = FirebaseFirestore.getInstance()
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // 업데이트 후 첫 실행 1회 — 이미 올라간 휴가류를 지금 설정대로 맞춘다([republishMasked])
+        scope.launch { republishMasked(firstRunOnly = true) }
+    }
 
     // 내 달력 읽기는 전부 로컬 (메모 포함, 오프라인 완전 동작)
     override fun observeOverrides(uid: String, month: YearMonth) = local.observeOverrides(uid, month)
     override suspend fun getOverridesFor(uid: String, month: YearMonth) = local.getOverridesFor(uid, month)
 
     override suspend fun saveOverride(schedule: Schedule) {
-        local.saveOverride(schedule)
+        local.saveOverride(schedule)          // 로컬(내 달력)은 늘 **원본 그대로**
         // 근무변경만 공유 (메모는 서버에 안 올림). 패턴 복귀(dutyRaw 빈값)면 공유 문서 제거
         runCatching {
             if (!ensureAuth()) return@runCatching
-            val doc = db.collection("rosterOverrides").document("${schedule.uid}_${schedule.date}")
-            if (schedule.dutyRaw.isBlank()) doc.delete()
-            else doc.set(
-                mapOf(
-                    "uid" to schedule.uid,
-                    "date" to schedule.date.toString(),
-                    "dutyRaw" to schedule.dutyRaw,
-                    "originalDutyRaw" to (schedule.originalDutyRaw ?: ""),
-                )
+            if (schedule.dutyRaw.isBlank())
+                db.collection("rosterOverrides").document("${schedule.uid}_${schedule.date}").delete()
+            else publishOverride(
+                schedule.uid, schedule.date, schedule.dutyRaw, schedule.originalDutyRaw,
             )
+        }
+    }
+
+    /**
+     * 공유 문서 한 장(`rosterOverrides/{사번_날짜}` · 4키). **서버로 나가는 `dutyRaw` 가
+     * [sharedDutyRaw] 를 거치는 자리는 여기 한 곳뿐이다** — 새 쓰기 경로를 만들면 반드시 이 함수로.
+     *
+     * `originalDutyRaw`(원래 다이아 = `12`·`휴5` …)는 **가리지 않는다** — 휴가 종류가 아니라
+     * 근무표에 이미 다 적혀 있는 값이고, 동료 탭이 "바뀐 날"을 표시하는 근거다.
+     */
+    private fun publishOverride(
+        uid: String,
+        date: LocalDate,
+        dutyRaw: String,
+        originalDutyRaw: String?,
+    ) {
+        db.collection("rosterOverrides").document("${uid}_$date").set(
+            mapOf(
+                "uid" to uid,
+                "date" to date.toString(),
+                "dutyRaw" to sharedDutyRaw(dutyRaw, theme.maskLeave.value),
+                "originalDutyRaw" to (originalDutyRaw ?: ""),
+            )
+        ) // await 안 함 — 오프라인이면 Firestore가 큐잉 후 자동 전송
+    }
+
+    /**
+     * **이미 올라간 내 근무변경을 지금 설정대로 다시 올린다**(v1.7.19).
+     * ⓐ 스위치를 바꾼 순간(`firstRunOnly = false`) ⓑ 업데이트 후 첫 실행 1회([MASK_SYNCED_KEY]).
+     *
+     * 대상은 순수 함수 [republishDates] 가 고른다 — **(오늘−31)~미래** 중 가리기가 값을 바꾸는
+     * 날(휴가류·직접입력)뿐이고 **삭제는 하지 않는다.** 같은 값을 다시 써도 그만이라 **멱등**이고,
+     * 오프라인이면 [ensureAuth] 가 실패해 플래그를 안 남기므로 **다음 실행에 다시 온다.**
+     * 심사 계정([ReviewerAccount])·`visibleToOthers = false` 는 건너뛴다.
+     *
+     * ## ⛔ `BuildConfig.DEBUG` 에서는 절대 돌지 않는다 — **영구 가드**(임시 훅 아님)
+     * 개발용 에뮬레이터에 로그인된 계정은 **실제 동료**이고 그 기기의 로컬 근무변경은 낡은 값이다.
+     * 디버그 빌드가 이 함수를 돌리면 **그 동료의 실제 서버 기록을 낡은 값으로 덮어쓴다** —
+     * 화면 한 장 찍으려고 앱을 켠 순간 남의 근무표가 바뀐다. 이 가드를 빼지 말 것(검증은
+     * 릴리즈 빌드·실기기에서 한다).
+     */
+    suspend fun republishMasked(firstRunOnly: Boolean) {
+        if (BuildConfig.DEBUG) return
+        runCatching {
+            val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+            if (firstRunOnly && prefs.getBoolean(MASK_SYNCED_KEY, false)) return
+            val me = localUser.observeMe().first() ?: return
+            if (!me.visibleToOthers || ReviewerAccount.matches(me.name, me.uid)) return
+            if (!ensureAuth()) return
+            val rows = local.allOverrides()
+            republishDates(rows.mapValues { it.value.dutyRaw }, LocalDate.now()).forEach { date ->
+                val s = rows.getValue(date)
+                publishOverride(me.uid, date, s.dutyRaw, s.originalDutyRaw)
+            }
+            if (firstRunOnly) prefs.edit().putBoolean(MASK_SYNCED_KEY, true).apply()
         }
     }
 
