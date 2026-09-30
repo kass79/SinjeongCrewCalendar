@@ -842,17 +842,22 @@ adminUpsert 재등록, 구간 스키마 위반 7종, **연쇄 공격 시나리�
 > 여기가 먼저 깨진다. 깨지면 규칙이 과하게 조여진 것이니 되돌려라.
 
 
-## v1.7.20 (131) — 본선 지도 **가운데 맞추기**(폴드7·큰 글자) · 내 열차 **지연 알약** · 지선 카드 **내 열차만 황금색** · 위젯 **숫자 키우기** · **남은 휴가 세기** · 지도 **위아래 가운데** · **신도림·성수 역명은 열차 위**
+## v1.7.20 (131) — 본선 지도 **가운데 맞추기**(폴드7·큰 글자) · 내 열차 **지연 알약** · 지선 카드 **내 열차만 황금색** · 위젯 **숫자 키우기** · **남은 휴가 세기** · 지도 **위아래 가운데** · **신도림·성수 역명은 열차 위** · v1.7.19 **휴가는 나만 보기**도 포함(130 미배포)
 
-2026-09-30 작업. `versionCode`·`versionName` 은 **안 올렸다**(릴리즈 때 코디네이터가 130 → 131).
+2026-09-30 작업 + 릴리즈. `versionCode` **131** · `versionName` **1.7.20**(`app/build.gradle.kts` 두 줄 — 130 → 131).
 테스트 **461 → 470건** 전건 통과(회귀 0). 바꾼 파일 — `presentation/live/MainLineMap.kt` ·
 `presentation/live/Loco.kt` · `presentation/live/BranchLive.kt` · `presentation/live/MapStyle.kt` ·
 `presentation/live/LineMap.kt` · `domain/model/BundledTimetable.kt` · `domain/model/Line2Timetable.kt` ·
 `domain/model/MyTrain.kt` · 테스트 `LocoTest.kt` · `BranchLiveTest.kt` · `MyTrainTest.kt` · 이 문서.
 
+**릴리즈 확정(2026-09-30)**: 최종 테스트 **481건** 전건 통과 · `aapt2 dump badging`
+`versionCode='131' versionName='1.7.20'` · `application-debuggable` **0건**.
+
 | 산출물 | 크기 |
 |---|---|
-| 릴리즈 시 확정 | — |
+| `신정승무캘린더_체험판.apk`(release) | 40,601,458 B |
+| `신정승무캘린더_v1.7.20.aab` | 40,170,230 B |
+| `신정승무캘린더_v1.7.20.zip`(SHA-256 `bb9ad733f3291d142e4f75807f191ad2c878f7a6deaaeff1b48f156db39200f3`) | 39,205,735 B |
 
 카스(2026-09-30, 실기기 갤럭시 Z 폴드7 · 시스템 글자 크게):
 
