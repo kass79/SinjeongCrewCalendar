@@ -62,7 +62,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
@@ -201,6 +203,9 @@ import kotlin.math.sin
  * 기본값은 이 앱이 도는 기기(폴드7·에뮬 1080x2400 노치)에서 잰 값이다 — **보정 손잡이**이니
  * 다른 기기에서 잘리거나 남으면 여기만 고치면 된다.
  *
+ * ⚠ 이 값은 **보이는 화면**(상태바 아래 ~ 제스처바 위)의 경계일 뿐, 그대로 여백으로 쓰지 않는다 —
+ * 창이 이미 상태바 아래에서 시작하기 때문이다(v1.7.20 ⑤ · [screenBandPadPx]).
+ *
  * ## 셋째 값 [side] — 가로(기기 회전)에서 창이 어긋나던 원인 (v1.6.88)
  *
  * 이 다이얼로그는 **화면 전체 크기로 재어 놓고**(Compose 가 받은 상자 = 2399x1079)
@@ -229,12 +234,12 @@ private fun decorInsets(ctx: Context, dens: Density): Triple<Dp, Dp, Dp> {
         // 가로로 깎인 총량. 노치가 왼쪽이든(회전 90) 오른쪽이든(270) 창 폭이 그만큼 줄고,
         // 창은 왼쪽 여백만큼 밀려 시작한다 — 그래서 **합만 알면** 오른쪽에 돌려주면 맞는다.
         val side = (f?.systemWindowInsetLeft ?: 0) + (f?.systemWindowInsetRight ?: 0)
-        // ⚠ 제스처 네비게이션은 **덮어쓰는 바**라 `systemWindowInsetBottom` 이 0 으로 온다
-        // (실측: 위는 136px 로 제대로 왔는데 아래가 0 이라 오른쪽 차선이 계속 물렸다).
-        // 그래서 아래는 최소값을 깔아 준다 — 여기가 보정 손잡이다.
-        if (top > 0) return with(dens) {
-            Triple(top.toDp(), bottom.toDp().coerceAtLeast(44.dp), side.toDp())
-        }
+        // ⚠ **v1.7.20 ⑤ 에서 뒤집힘** — 종전엔 아래에 44dp 하한을 깔았다(*"제스처바가 0 으로
+        // 와서 오른쪽 차선이 물렸다"*). 실제로 물린 까닭은 창이 상태바만큼 **화면 밖으로 밀려
+        // 있어서**였고(창 y=136 · 높이 = 화면 높이), 44dp 는 그 136px 를 우연히 거의 메웠다.
+        // 이제 [screenBandPadPx] 가 창의 실제 자리로 여백을 재므로 제스처바는 **그 높이 그대로**다
+        // (에뮬 실측 접힘 63px · 펼침 90px).
+        if (top > 0) return with(dens) { Triple(top.toDp(), bottom.toDp(), side.toDp()) }
     }
     return Triple(54.dp, 44.dp, 0.dp)
 }
@@ -273,6 +278,12 @@ private val KEY_STATIONS = setOf("신도림", "성수")
  * **크기가 아니라 색과 굵기로** 도드라진다.
  */
 private const val KEY_SMALL = "성수"
+
+/**
+ * 신도림·성수 이름 **외곽선 굵기**(v1.7.20 ⑥) — 바탕색([MapPalette.bg])으로 글자 둘레에 깐다.
+ * 선은 글자 윤곽 양쪽으로 반씩 나가므로 글자 밖으로 보이는 테는 1.5dp 다(열차 몸통과 글자를 가른다).
+ */
+private val KEY_HALO = 3.dp
 
 /**
  * **운전취급역** 6곳 — 사용자(기관사) 확정(v1.6.98):
@@ -687,6 +698,8 @@ internal fun MainLineMapDialog(
     val safeBottom = sysIns.second
     /** 가로에서 창이 노치만큼 밀려 잘리는 몫 — [decorInsets] KDoc 의 실측을 보라. */
     val safeSide = sysIns.third
+    /** 지도 기둥(다이얼로그 창 내용)의 **화면** y — 한 번 재면 안 바뀐다(v1.7.20 ⑤). */
+    var boxTop by remember { mutableFloatStateOf(Float.NaN) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -710,7 +723,9 @@ internal fun MainLineMapDialog(
             }
         }
         Surface(Modifier.fillMaxSize(), color = pal.bg) {
-            BoxWithConstraints(Modifier.fillMaxSize()) {
+            BoxWithConstraints(
+                Modifier.fillMaxSize().onGloballyPositioned { boxTop = it.positionOnScreen().y }
+            ) {
                 // 폴드 **펼침(wide)** 에서는 세로 창이어도 90° 로 안 눕히고 **가로 그대로**
                 // 화면을 크게 채운다(v1.7.9 카스 확정: *"눌러서 가로 전체로."*). 접힌 폰 세로
                 // (`screenWidthDp < 600`)만 종전처럼 회전해 연다. 잣대는 이 저장소가 쓰는 wide
@@ -722,14 +737,35 @@ internal fun MainLineMapDialog(
                 // 돌린 뒤의 **내용 크기**. 세로 창이면 가로세로를 맞바꿔 잡는다.
                 val cw = if (portrait) maxHeight else maxWidth
                 val ch = if (portrait) maxWidth else maxHeight
-                // rotationZ = +90 은 내용을 시계로 돌린다 → 내용의 **왼쪽** 변이 화면 위
-                // (상태바), **오른쪽** 변이 화면 아래(제스처바)로 간다. 그래서 시스템바 여백도
-                // 같이 돌려서 준다.
-                // 가로는 창이 노치만큼 밀려 시작하므로 **오른쪽으로 그만큼 좁힌다**
-                // (v1.6.88 — 안 하면 오른쪽 차선 역명과 닫기 X 가 화면 밖으로 나간다).
+                /*
+                 * ── 보이는 화면 띠에 맞춘다 (v1.7.20 ⑤ — [screenBandPadPx]) ─────────
+                 * 카스(접힘 실기기 캡처): 지도 위쪽 빈 띠 ≈117 · 아래 ≈35 표시px — *"같이 맞춰"*.
+                 * 창은 상태바 **아래**에서 시작하는데 크기는 화면 전체라, 종전처럼 상태바 높이를
+                 * 위 여백으로 또 빼면 빈 띠가 생기고 아래는 화면 밖으로 136px 나간다. 이제
+                 * 창이 **실제로 놓인 자리**([boxTop])와 보이는 화면(상태바 아래 ~ 제스처바 위)으로
+                 * 위/아래 몫을 잰다. 재기 전 첫 프레임은 "창이 상태바 바로 아래"(실측)로 둔다.
+                 *
+                 * rotationZ = +90 은 내용을 시계로 돌린다 → 내용의 **왼쪽** 변이 화면 위
+                 * (상태바), **오른쪽** 변이 화면 아래(제스처바)로 간다. 그래서 여백도
+                 * 같이 돌려서 준다(`start` = 화면 위 · `end` = 화면 아래).
+                 * 가로는 창이 노치만큼 밀려 시작하므로 **오른쪽으로 그만큼 좁힌다**
+                 * (v1.6.88 — 안 하면 오른쪽 차선 역명과 닫기 X 가 화면 밖으로 나간다).
+                 */
+                val visTop = with(dens) { safeTop.toPx() }
+                val visBottom = with(dens) {
+                    @Suppress("DEPRECATION")
+                    val realH = view.display?.let { d -> android.graphics.Point().also { d.getRealSize(it) }.y }
+                    (realH?.toFloat() ?: (visTop + maxHeight.toPx())) - safeBottom.toPx()
+                }
+                val (padTop, padBottom) = with(dens) {
+                    screenBandPadPx(if (boxTop.isNaN()) visTop else boxTop,
+                        maxHeight.toPx(), visTop, visBottom).let { (a, b) -> a.toDp() to b.toDp() }
+                }
                 val inset =
-                    if (portrait) PaddingValues(start = safeTop, end = safeBottom)
-                    else PaddingValues(top = safeTop, bottom = safeBottom, end = safeSide)
+                    if (portrait) PaddingValues(start = padTop, end = padBottom)
+                    else PaddingValues(top = padTop, bottom = padBottom, end = safeSide)
+                /** 보이는 화면의 세로 가운데(화면 y) — 가로 그림의 가운데 맞추기(㉥)가 쓴다. */
+                val visMid = (visTop + visBottom) / 2f
 
                 if (portrait) {
                     Box(
@@ -743,14 +779,14 @@ internal fun MainLineMapDialog(
                         // ⚠ **회전각을 안으로 내려 준다**(v1.6.91). 캔버스는 자기가 돌아간
                         // 줄 모르므로, 열번·행선판 글자를 화면 기준으로 바로 세우려면
                         // 그리는 쪽이 이 값을 알아야 한다([locoTextDeg]).
-                        CabScreen(ch, inset, now, snap.recptnDt, snap.recptnAtMillis,
+                        CabScreen(ch, inset, visMid, now, snap.recptnDt, snap.recptnAtMillis,
                             shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
                             snap.error, picked, { picked = it }, eff, { filter = it },
                             userPicked = filter != null, onRefresh = refresh, onDismiss = onDismiss,
                             mapDeg = 90f, pal = pal)
                     }
                 } else {
-                    CabScreen(ch, inset, now, snap.recptnDt, snap.recptnAtMillis,
+                    CabScreen(ch, inset, visMid, now, snap.recptnDt, snap.recptnAtMillis,
                         shown, mine, mineMark, mineRoute, mineNos, mineBoards, candidates,
                         snap.error, picked, { picked = it }, eff, { filter = it },
                         userPicked = filter != null, onRefresh = refresh, onDismiss = onDismiss,
@@ -782,7 +818,10 @@ internal fun Modifier.shrinkHeight(h: Dp) = layout { measurable, constraints ->
 /** 상단바 + 지도 + 하단 상태바. 세로 창에서는 통째로 90도 돌아간다. */
 @Composable
 private fun CabScreen(
-    ch: Dp, inset: PaddingValues, nowMillis: Long,
+    ch: Dp, inset: PaddingValues,
+    /** 보이는 화면(상태바 아래 ~ 제스처바 위)의 세로 가운데 — **화면** y(px). 가로 그림(㉥)만 쓴다. */
+    visMidY: Float,
+    nowMillis: Long,
     /** ③ 응답의 **기준 시각**과 그것을 처음 본 시각 — 헤더가 폰 시계 대신 적는다(v1.7.16). */
     recptnDt: String, recptnAtMillis: Long,
     trains: List<MainTrainMark>, mine: MyTrain?, mineMark: MainTrainMark?,
@@ -961,7 +1000,6 @@ private fun CabScreen(
     /** (가로 그림일 때) 기둥 윗날의 **화면** y — 상태바 아래 보이는 자리의 가운데를 잡는 데 쓴다. */
     var colTopOnScreen by remember { mutableFloatStateOf(Float.NaN) }
     val dens = LocalDensity.current
-    val view = LocalView.current
     /**
      * 상태바 칩 줄이 **시작하는 자리**(v1.7.20). 접힘(회전)에서는 아랫변 왼쪽 끝 역명
      * `구로디지털단지`(아랫변에서 가장 깊이 내려오는 이름 — 긴 이름 판독 하한 7.0sp 가 배율을 타
@@ -1041,18 +1079,14 @@ private fun CabScreen(
                             lm.sideNeed - 8f).toInt()),
                     )
                 } else {
-                    // 가로 그림(펼침·가로 폰) — 화면 세로축. 잣대는 **상태바 아래 보이는 자리**의
-                    // 가운데다(맨 위 상태바는 지도 화면이 아니다). 캔버스는 칸 안에서만 옮기고
-                    // 루프는 안 줄인다(가로 폰은 얇은 띠라 줄이면 안 되는 자리 — v1.7.7 D1).
-                    @Suppress("DEPRECATION")
-                    val screenH = view.display?.let { dp ->
-                        android.graphics.Point().also { dp.getRealSize(it) }.y
-                    }
-                    if (colTopOnScreen.isNaN() || screenH == null || headPx == 0) MapFit(0) else {
+                    // 가로 그림(펼침·가로 폰) — 화면 세로축. 잣대는 **보이는 화면**(상태바 아래 ~
+                    // 제스처바 위 — v1.7.20 ⑤ 에서 제스처바도 뺐다)의 가운데다. 캔버스는 칸 안에서만
+                    // 옮기고 루프는 안 줄인다(가로 폰은 얇은 띠라 줄이면 안 되는 자리 — v1.7.7 D1).
+                    if (colTopOnScreen.isNaN() || headPx == 0) MapFit(0) else {
                         val boxH = maxHeight.toPx()
                         val mh = mapH.toPx()
                         val blockMid = headPx + (boxH - mh) / 2f + (tpPx - laneOut + mh - npPx + railHalf) / 2f
-                        val target = (inset.calculateTopPadding().toPx() + screenH) / 2f - colTopOnScreen
+                        val target = visMidY - colTopOnScreen
                         val room = ((boxH - mh) / 2f).toInt()
                         mapCenterFit((target - blockMid).roundToInt(), room, room, canShrink = false)
                     }
@@ -2547,13 +2581,19 @@ private fun DrawScope.drawCabLoop(
 
     // 라벨 글자 크기는 [labelSp] 하나가 정한다(보통 역은 [LABEL_STEP] 만큼 더 작다 — v1.6.96
     // 사용자 요청). 좁아도 더 줄이지 않고 **겹침 회피로만** 푼다.
-    fun draw(lab: Lab) = rotate(lab.deg, pivot = lab.pivot) {
+    // [halo] = 바탕색 외곽선을 먼저 깐다(신도림·성수 — 아래 ⑥).
+    fun draw(lab: Lab, halo: Boolean = false) = rotate(lab.deg, pivot = lab.pivot) {
         val x = if (lab.leftAnchored) lab.pivot.x else lab.pivot.x - lab.layout.size.width
         val y = lab.pivot.y - lab.layout.size.height / 2f
-        drawText(lab.layout, topLeft = Offset(x, y))
+        if (halo) drawText(lab.layout, color = pal.bg, topLeft = Offset(x, y),
+            drawStyle = Stroke(width = KEY_HALO.toPx(), join = StrokeJoin.Round))
+        // ⚠ `Fill` 을 **꼭 적는다** — 안 적으면(null = 레이아웃 그대로) 바로 앞 외곽선 호출이 바꿔 둔
+        //   글자 붓(Stroke)을 그대로 물려받아 글자가 굵은 테 덩어리로 그려진다(실측).
+        drawText(lab.layout, topLeft = Offset(x, y), drawStyle = if (halo) Fill else null)
     }
     // 역 이름은 **자리를 고정**하고 먼저 그린다 — 열차는 장애물이 아니고 나중에 그려져 지나가며
-    // 이름을 잠깐 덮는다(v1.7.18 ②-b · `layoutLabels` KDoc).
+    // 이름을 잠깐 덮는다(v1.7.18 ②-b · `layoutLabels` KDoc). **신도림·성수 둘만** 열차 뒤에
+    // 다시 그린다(v1.7.20 ⑥ — 아래 열차 그리기 끝). 자리·크기·색은 여기서 정한 그대로다.
     val labs = layoutLabels(tm, loop, loopIn, start, nameSp, pal, big, railW, sideLaneX)
     // 아랫변 역명(바깥 선로 **아래**에 사는 이름)이 가장 깊이 내려간 곳 — 가운데 맞추기가
     // 역명↔상태바 칩 여유를 재는 값이다(v1.7.20 · [mapPosRoomPx]).
@@ -2568,7 +2608,8 @@ private fun DrawScope.drawCabLoop(
             fails = labs.count { it.failed },
         ))
     }
-    labs.forEach { draw(it) }
+    val (keyLabs, plainLabs) = labs.partition { it.layout.layoutInput.text.text in KEY_STATIONS }
+    plainLabs.forEach { draw(it) }
 
     /*
      * ── 계단으로 올라간 열차의 **받침선** (v1.6.98) ────────────
@@ -2660,6 +2701,17 @@ private fun DrawScope.drawCabLoop(
      * 게다가 왼쪽 상태 칩이 같은 문장을 이미 말해 **한 화면에 두 번** 나왔다.
      * 빈 상태는 [mainEmptyReason] → [CabStatusBar] 칩 **한 줄**이 전담한다.
      */
+
+    /*
+     * ── **신도림·성수 역명은 열차 위에** (v1.7.20 ⑥) ─────────────────
+     * 카스(2026-09-30, 선택지 B): *"신도림·성수만 위로"*. 두 역은 지선이 갈라지는 기준점인데
+     * 열차가 늘 서는 역이라 v1.7.18 ②-b(라벨 먼저·열차 나중) 뒤로 이름이 자주 가려졌다.
+     * 그래서 **이 둘만** 열차 뒤에 그린다 — 뒤 열차와 글자가 섞이지 않게 **바탕색 외곽선**
+     * ([KEY_HALO])을 먼저 깐다. **자리는 안 움직인다**(열차는 여전히 라벨 배치의 장애물이
+     * 아니다 — 역명 자리 고정 규칙 그대로). 나머지 41개는 종전대로 열차 밑이다.
+     * 탭 판정([hits])은 열차 중심만 보므로 이름이 끼어들 일이 없고, 툴팁은 이 뒤에 그려 늘 맨 위다.
+     */
+    keyLabs.forEach { draw(it, halo = true) }
 
     // ── 탭한 열차의 툴팁 (열차보다 나중에 그려 위에 얹힌다) ──
     picked?.let { no -> centers[no]?.let { c ->

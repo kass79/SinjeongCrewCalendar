@@ -26,6 +26,7 @@ import com.sinjeong.crewcalendar.presentation.live.firstFitting
 import com.sinjeong.crewcalendar.presentation.live.mapCenterFit
 import com.sinjeong.crewcalendar.presentation.live.mapCenterNeedPx
 import com.sinjeong.crewcalendar.presentation.live.mapPosRoomPx
+import com.sinjeong.crewcalendar.presentation.live.screenBandPadPx
 import com.sinjeong.crewcalendar.presentation.live.mineRest
 import com.sinjeong.crewcalendar.presentation.live.mineTitle
 import com.sinjeong.crewcalendar.presentation.live.noMineText
@@ -511,6 +512,23 @@ class LocoTest {
         assertEquals(MapFit(-30), mapCenterFit(-100, 30, 30, canShrink = false))
         // 여유가 음수로 잡혀도(칩이 이미 역명에 닿은 화면) 거꾸로 밀지 않는다.
         assertEquals(MapFit(0, shrinkHeadPx = 20), mapCenterFit(10, -5, 0, canShrink = true))
+    }
+
+    /**
+     * **보이는 화면 띠에 맞추는 여백**(v1.7.20 ⑤) — 창이 놓인 자리로 잰다. 값은 에뮬 실측이다.
+     * ⚠ v1.6.x~v1.7.20 첫 판은 상태바 높이를 위 여백으로 **또** 빼고 아래는 44dp 하한을 뺐다 —
+     * 접힘 선로가 보이는 화면 가운데보다 110px 아래였고 아래 열차가 제스처바 밑에 들어갔다.
+     */
+    @Test
+    fun `지도 기둥은 상태바 아래부터 제스처바 위까지만 쓴다`() {
+        // 접힘 1080×2520 · 420: 창 y=136 · 높이 2520(화면 전체) · 상태바 136 · 제스처바 63.
+        assertEquals(0f to 199f, screenBandPadPx(136f, 2520f, 136f, 2520f - 63f))
+        // 펼침 1968×2184 · 450: 창 y=124 · 높이 2185 · 제스처바 90.
+        assertEquals(0f to 215f, screenBandPadPx(124f, 2185f, 124f, 2184f - 90f))
+        // 창이 상태바 뒤까지 덮는 기기(창 y=0) — 위는 상태바만큼, 아래는 제스처바만큼.
+        assertEquals(136f to 63f, screenBandPadPx(0f, 2520f, 136f, 2457f))
+        // 창이 이미 보이는 자리 안에 있으면 뺄 것이 없다(음수로 넓히지 않는다).
+        assertEquals(0f to 0f, screenBandPadPx(150f, 2200f, 136f, 2457f))
     }
 
     /* ── v1.7.20 헤더 — 내 열차 토막 · 사다리 ─────────────────────────────── */

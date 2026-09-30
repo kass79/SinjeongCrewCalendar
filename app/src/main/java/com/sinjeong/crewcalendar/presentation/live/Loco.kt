@@ -275,6 +275,25 @@ internal fun mapPosRoomPx(
     statBandPx: Int, pillPx: Int, hugPx: Int, namePadPx: Int, nameDepthPx: Int, gapPx: Int,
 ): Int = (statBandPx - pillPx) / 2 + hugPx + (namePadPx - nameDepthPx) - gapPx
 
+/**
+ * 지도 기둥이 **보이는 화면 띠**(상태바 아래 ~ 제스처바 위)를 정확히 채우게 하는 여백(px) —
+ * `(화면 위쪽 끝에서 뺄 몫, 화면 아래쪽 끝에서 뺄 몫)` (v1.7.20 ⑤).
+ *
+ * 이 다이얼로그 창은 **상태바 아래에서 시작하는데 크기는 화면 전체**다(에뮬 실측: 접힘 창 y=136 ·
+ * 높이 2520 = 화면 높이, 펼침 y=124 · 2185). 종전엔 상태바 높이를 위 여백으로 **한 번 더** 빼고
+ * 아래는 제스처바 대신 44dp 하한을 뺐다 — 위에 빈 띠 136px 가 생기고 아래는 화면 밖(136px)을
+ * 여백으로 쓰는 셈이라 접힘 선로가 보이는 화면 가운데보다 **110px 아래**, 아래쪽 열차는
+ * 제스처바 밑에 들어갔다. 여기서는 창이 **실제로 놓인 자리**([boxTopPx], 화면 y)와 크기로 잰다 —
+ * 창이 상태바 뒤까지 덮는 기기(창 y = 0)나 창이 제스처바 위에서 끝나는 기기도 같은 식으로 맞는다.
+ *
+ * 세로(접힘)에서는 기둥이 90° 돌아 있어도 화면 세로 범위가 창과 같다(`requiredSize(cw = 창 높이)`
+ * 를 창 가운데에 놓고 돌리므로) — 그래서 두 값은 회전과 무관하게 **화면 위/아래** 몫이다.
+ */
+internal fun screenBandPadPx(
+    boxTopPx: Float, boxHPx: Float, visTopPx: Float, visBottomPx: Float,
+): Pair<Float, Float> =
+    (visTopPx - boxTopPx).coerceAtLeast(0f) to (boxTopPx + boxHPx - visBottomPx).coerceAtLeast(0f)
+
 /* ───────────── 본선 지도 헤더 한 줄 — 문구와 사다리 (v1.7.20 · 순수 함수) ───────────── */
 
 /**
