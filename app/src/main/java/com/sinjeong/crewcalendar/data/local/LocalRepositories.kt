@@ -170,6 +170,9 @@ class LocalScheduleRepository @Inject constructor(
      * ⚠ 여기 담긴 `uid` 는 전부 `"local"` 이다([loadAll]) — 서버 문서 ID 에 쓰지 말 것(사번은 따로).
      */
     fun allOverrides(): Map<LocalDate, Schedule> = state.value
+
+    /** 내 근무변경 전부의 흐름 — 남은 휴가 세기(v1.7.20 ④)가 근무변경·취소를 곧바로 따라가게 */
+    fun observeAll(): Flow<Map<LocalDate, Schedule>> = state
 }
 
 @Singleton

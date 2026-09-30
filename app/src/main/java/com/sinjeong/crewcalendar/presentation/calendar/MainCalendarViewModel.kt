@@ -2,6 +2,7 @@ package com.sinjeong.crewcalendar.presentation.calendar
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.sinjeong.crewcalendar.data.local.LocalScheduleRepository
 import com.sinjeong.crewcalendar.domain.model.Bundled
 import com.sinjeong.crewcalendar.domain.model.CrewGroup
 import com.sinjeong.crewcalendar.domain.model.CrewRole
@@ -120,7 +121,17 @@ class MainCalendarViewModel @Inject constructor(
     menuRepo: MenuRepository,
     noticeRepo: NoticeRepository,
     val themeController: ThemeController,
+    localSchedules: LocalScheduleRepository,
 ) : ViewModel() {
+
+    /**
+     * 내 근무변경 전부(날짜 → `dutyRaw`) — **남은 휴가 세기**(v1.7.20 ④)가 "앱에서 쓴 날"을 센다.
+     * 카운터를 따로 두지 않고 매번 여기서 세므로 근무변경을 취소·변경하면 곧바로 맞는다.
+     * 읽기만 한다(로컬 저장소 — 서버를 안 거친다).
+     */
+    val leaveOverrides: StateFlow<Map<LocalDate, String>> = localSchedules.observeAll()
+        .map { all -> all.mapValues { it.value.dutyRaw } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
 
     /**
      * 구내식당 주간식단표 (v1.6.80) — 주 시작일(월) → 한 주치.

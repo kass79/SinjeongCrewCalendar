@@ -47,7 +47,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -494,11 +496,17 @@ fun MainCalendarScreen(
     // 근무변경: 이 날짜 하루만
     state.changeDate?.let { date ->
         state.days.firstOrNull { it.date == date }?.let { day ->
+            // 남은 휴가(v1.7.20 ④) — **고치는 날짜의 해** 개수를 쓴다(12월에 내년 1월을 고치면 내년 것).
+            val quotas by viewModel.themeController.leaveQuotas.collectAsStateWithLifecycle()
+            val leaveOv by viewModel.leaveOverrides.collectAsStateWithLifecycle()
             DutyChangeSheet(
                 day = day,
                 onChange = { viewModel.changeDuty(date, it) },
                 onRevert = { viewModel.changeDuty(date, null) },
                 onDismiss = viewModel::closeDutyChange,
+                leaveQuotas = quotas[date.year].orEmpty(),
+                leaveOverrides = leaveOv,
+                onSetLeaveQuota = { code, q -> viewModel.themeController.setLeaveQuota(date.year, code, q) },
             )
         }
     }
@@ -2264,8 +2272,17 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
  * 4글자(`대기충당`·`돌봄휴가`)가 한 줄로 들어가야 하는데 411dp 폭 기준 칸이 89dp라
  * fs 1.3에서도(4 x 12.5 x 1.3 = 65dp) 남는다.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChangeGrid(codes: List<String>, selected: String?, onPick: (String) -> Unit) {
+private fun ChangeGrid(
+    codes: List<String>,
+    selected: String?,
+    /** 휴가 칩 옆 숫자(남은 개수) — 받은 개수를 안 적은 휴가는 null = 종전 그대로 (v1.7.20 ④) */
+    leftOf: (String) -> Int? = { null },
+    /** 휴가 칩 길게 누르기 → 개수 적기. 휴가가 아닌 칩(충당·운휴·지휴·묶음…)엔 안 걸린다 */
+    onLongPick: ((String) -> Unit)? = null,
+    onPick: (String) -> Unit,
+) {
     val duty = LocalDutyColors.current
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
@@ -2279,20 +2296,61 @@ private fun ChangeGrid(codes: List<String>, selected: String?, onPick: (String) 
             // 묶음 이름은 근무코드가 아니라 parse가 ETC(투명)로 떨군다 → 화면에서만 휴가색으로 고정
             val ct = if (code == DutyCode.ETC_GROUP) DutyType.REST else DutyCode.parse(code).colorType
             val (bg, fg) = dutyCellColors(ct, duty, MaterialTheme.colorScheme.onSurfaceVariant)
+            // 짧게 누르기는 종전 그대로(그날 근무를 이 칩으로). 길게 누르기는 **휴가 칩에만**(v1.7.20 ④) —
+            // `Surface(onClick)` 은 길게 누르기를 못 받아 글자 쪽에 `combinedClickable` 을 단다(물결은 칩 모양 안).
+            val long = onLongPick?.takeIf { code in DutyCode.LEAVE_OPTIONS }
+            val left = leftOf(code)
             Surface(
-                onClick = { onPick(code) },
                 color = bg, contentColor = fg,
                 shape = RoundedCornerShape(9.dp),
                 border = if (code == selected) BorderStroke(2.dp, MaterialTheme.colorScheme.primary) else null,
             ) {
-                Text(
+                val tap = Modifier.fillMaxWidth()
+                    .combinedClickable(onClick = { onPick(code) }, onLongClick = long?.let { f -> { f(code) } })
+                    .padding(vertical = 11.dp, horizontal = 2.dp)
+                if (left == null) Text(
                     code,
-                    modifier = Modifier.padding(vertical = 11.dp, horizontal = 2.dp).fillMaxWidth(),
+                    modifier = tap,
                     textAlign = TextAlign.Center,
                     fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold, maxLines = 1,
-                )
+                ) else LeaveChipText(code, left, tap)
             }
         }
+    }
+}
+
+/**
+ * 받은 개수를 적은 휴가 칩 글자 `연차 12`(v1.7.20 ④). 남은 개수는 한 단 작게(0.88em), **음수는 빨간 알약**
+ * (휴가 칩 글자가 이미 붉어서 글자색만 바꾸면 안 보인다). 칸에 안 들어가면(`돌봄휴가 12` · 큰 글자배율)
+ * **실제로 재서** 글자를 줄인다 — 줄바꿈으로 숫자가 칩 밖으로 사라지던 것(`maxLines = 1` 은 빈칸에서 접는다).
+ */
+@Composable
+private fun LeaveChipText(code: String, left: Int, modifier: Modifier) {
+    val err = MaterialTheme.colorScheme.error
+    val onErr = MaterialTheme.colorScheme.onError
+    val text = androidx.compose.ui.text.buildAnnotatedString {
+        append(code); append("\u00A0") // 줄 안 바뀌는 빈칸
+        withStyle(
+            androidx.compose.ui.text.SpanStyle(
+                fontSize = 0.88.em,
+                color = if (left < 0) onErr else androidx.compose.ui.graphics.Color.Unspecified,
+                background = if (left < 0) err else androidx.compose.ui.graphics.Color.Unspecified,
+            ),
+        ) { append(if (left < 0) "\u2009${com.sinjeong.crewcalendar.domain.model.leaveCountText(left)}\u2009" else "$left") }
+    }
+    BoxWithConstraints(modifier) {
+        val tm = androidx.compose.ui.text.rememberTextMeasurer()
+        val maxW = constraints.maxWidth
+        val k = listOf(1f, 0.92f, 0.85f, 0.78f, 0.7f).firstOrNull { k ->
+            tm.measure(
+                text, androidx.compose.ui.text.TextStyle(fontSize = 12.5.sp * k, fontWeight = FontWeight.ExtraBold),
+                softWrap = false, maxLines = 1,
+            ).size.width <= maxW
+        } ?: 0.7f
+        Text(
+            text, Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+            fontSize = 12.5.sp * k, fontWeight = FontWeight.ExtraBold, maxLines = 1, softWrap = false,
+        )
     }
 }
 
@@ -2320,7 +2378,33 @@ private fun DutyChangeSheet(
     onChange: (String) -> Unit,
     onRevert: () -> Unit,
     onDismiss: () -> Unit,
+    /** 이 날짜의 해에 적어 둔 휴가 개수(v1.7.20 ④) */
+    leaveQuotas: Map<String, com.sinjeong.crewcalendar.domain.model.LeaveQuota> = emptyMap(),
+    /** 내 근무변경 전부(날짜 → dutyRaw) — "앱에서 쓴 날"을 센다 */
+    leaveOverrides: Map<LocalDate, String> = emptyMap(),
+    onSetLeaveQuota: (String, com.sinjeong.crewcalendar.domain.model.LeaveQuota?) -> Unit = { _, _ -> },
 ) {
+    val year = day.date.year
+    fun usedOf(code: String) = com.sinjeong.crewcalendar.domain.model.leaveUsedInApp(leaveOverrides, code, year)
+    val leftOf: (String) -> Int? = { code ->
+        leaveQuotas[code]?.let { com.sinjeong.crewcalendar.domain.model.leaveLeft(it, usedOf(code)) }
+    }
+    var editLeave by remember { mutableStateOf<String?>(null) }
+    editLeave?.let { code ->
+        LeaveQuotaDialog(
+            code = code, year = year, quota = leaveQuotas[code], usedInApp = usedOf(code),
+            onSave = { onSetLeaveQuota(code, it); editLeave = null },
+            onDismiss = { editLeave = null },
+        )
+    }
+    // 아무 개수도 안 적은 동안만 한 줄 안내 — 길게 누르기는 눈에 안 보이는 기능이라서
+    val leaveHint: @Composable () -> Unit = {
+        if (leaveQuotas.isEmpty()) Text(
+            "휴가 칩을 길게 누르면 남은 개수를 적을 수 있어요",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
     var manualMode by remember { mutableStateOf(false) }
     var manualText by remember { mutableStateOf("") }
     // 충당·대기충당·교체·지근은 "그 다이아를 뛰는 근무"라 다이아를 함께 받는다 → 소속 → 다이아 2단계.
@@ -2410,7 +2494,8 @@ private fun DutyChangeSheet(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            ChangeGrid(DutyCode.CHANGE_ETC, day.duty.raw, onChange)
+            leaveHint()
+            ChangeGrid(DutyCode.CHANGE_ETC, day.duty.raw, leftOf, { editLeave = it }, onChange)
             TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.End)) { Text("닫기") }
             return@Column
         }
@@ -2459,9 +2544,12 @@ private fun DutyChangeSheet(
             // 1단계 13칸(4열 4줄). 저장된 게 기타휴가 9종 중 하나면 **묶음 칩**에 선택 테두리가 걸린다
             // — 안 그러면 어디에 들어 있는지 화면에서 알 길이 없다.
             val cur = day.duty.fill ?: day.duty.raw
+            leaveHint()
             ChangeGrid(
                 DutyCode.CHANGE_TOP,
                 if (cur in DutyCode.CHANGE_ETC) DutyCode.ETC_GROUP else cur,
+                leftOf,
+                { editLeave = it },
             ) { code ->
                 when {
                     code == DutyCode.ETC_GROUP -> etcMode = true

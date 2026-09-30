@@ -1,6 +1,9 @@
 package com.sinjeong.crewcalendar.presentation.theme
 
 import android.content.Context
+import com.sinjeong.crewcalendar.domain.model.LeaveQuota
+import com.sinjeong.crewcalendar.domain.model.decodeLeaveQuotas
+import com.sinjeong.crewcalendar.domain.model.encodeLeaveQuotas
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarStyle
 import com.sinjeong.crewcalendar.presentation.calendar.CalendarTextSize
 import com.sinjeong.crewcalendar.presentation.live.COMMUTE_MAX
@@ -167,6 +170,32 @@ class ThemeController @Inject constructor(
     fun setHideLeave(on: Boolean) {
         _hideLeave.value = on
         prefs.edit().putBoolean("share_hide_leave", on).apply()
+    }
+
+    /**
+     * **남은 휴가 세기**(v1.7.20 ④) — 휴가별 `받은 개수·앱 밖에서 쓴 개수`, **해마다 키가 따로**
+     * (`leave_quota_2026` = `연차:15:3;대휴:2:0`). 위 설정들과 **같은 저장소·같은 방식**이라
+     * **폰에만** 있다 — 서버로 나가는 경로가 없다(`domain/model/LeaveBalance.kt`).
+     * 새해엔 그 해 키가 없으니 빈칸에서 시작한다.
+     */
+    private val _leaveQuotas = MutableStateFlow(
+        prefs.all.keys.filter { it.startsWith(LEAVE_KEY) }.mapNotNull { k ->
+            k.removePrefix(LEAVE_KEY).toIntOrNull()?.let { it to decodeLeaveQuotas(prefs.getString(k, null)) }
+        }.toMap()
+    )
+    val leaveQuotas: StateFlow<Map<Int, Map<String, LeaveQuota>>> = _leaveQuotas
+
+    /** [quota] null = 그 휴가 개수 지우기. 그 해가 비면 키도 지운다 */
+    fun setLeaveQuota(year: Int, code: String, quota: LeaveQuota?) {
+        val m = _leaveQuotas.value[year].orEmpty().let { if (quota == null) it - code else it + (code to quota) }
+        _leaveQuotas.value = if (m.isEmpty()) _leaveQuotas.value - year else _leaveQuotas.value + (year to m)
+        prefs.edit().apply {
+            if (m.isEmpty()) remove("$LEAVE_KEY$year") else putString("$LEAVE_KEY$year", encodeLeaveQuotas(m))
+        }.apply()
+    }
+
+    private companion object {
+        const val LEAVE_KEY = "leave_quota_"
     }
 
     /** 우상단 달 아이콘: 현재 보이는 테마의 반대로 강제 전환 */

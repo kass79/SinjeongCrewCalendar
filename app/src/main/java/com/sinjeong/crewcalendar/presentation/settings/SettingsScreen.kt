@@ -47,6 +47,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -106,7 +107,13 @@ class SettingsViewModel @Inject constructor(
     private val snapshotRepo: SnapshotRepository,
     private val scheduleRepo: ScheduleRepository,
     val themeController: ThemeController,
+    localSchedules: com.sinjeong.crewcalendar.data.local.LocalScheduleRepository,
 ) : ViewModel() {
+    /** 내 근무변경 전부(날짜 → dutyRaw) — `휴가 개수` 표의 "앱에서 쓴 날"(v1.7.20 ④). 읽기만 한다 */
+    val leaveOverrides: StateFlow<Map<java.time.LocalDate, String>> = localSchedules.observeAll()
+        .map { all -> all.mapValues { it.value.dutyRaw } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyMap())
+
     val user: StateFlow<User?> = userRepo.observeMe()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -178,6 +185,7 @@ fun SettingsScreen(
     val mode by viewModel.themeController.mode.collectAsStateWithLifecycle()
     val savedMonths by viewModel.savedMonths.collectAsStateWithLifecycle()
     var confirmLogout by remember { mutableStateOf(false) }
+    var showLeave by remember { mutableStateOf(false) }
     var askAdminPw by remember { mutableStateOf(false) }
     /** 암호를 통과한 뒤 어디로 갈지 — 대리등록 / 식단표 / 공지 세 곳이 같은 잠금을 쓴다 */
     var afterUnlock by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -237,6 +245,14 @@ fun SettingsScreen(
                     },
                 )
             }
+
+            // 남은 휴가 세기(v1.7.20 ④) — 근무변경 칩을 길게 누르는 것과 같은 값을 한 표로 본다.
+            SettingRow(
+                title = "휴가 개수",
+                sub = "올해 받은 휴가를 적으면 근무변경 칩에 남은 개수가 보입니다 · 이 폰에만 저장",
+                onClick = { showLeave = true },
+                trailing = { TextButton(onClick = { showLeave = true }) { Text("열기") } },
+            )
 
             // 아래 여러 절이 같이 쓰는 값이라 화면 맨 앞으로 끌어올렸다(v1.6.68) — 파일은 하나뿐이다.
             val ctx = LocalContext.current
@@ -688,6 +704,16 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showLeave) {
+        val quotas by viewModel.themeController.leaveQuotas.collectAsStateWithLifecycle()
+        val overrides by viewModel.leaveOverrides.collectAsStateWithLifecycle()
+        com.sinjeong.crewcalendar.presentation.calendar.LeaveTableDialog(
+            quotas = quotas, overrides = overrides,
+            onSet = viewModel.themeController::setLeaveQuota,
+            onDismiss = { showLeave = false },
+        )
     }
 
     if (askAdminPw) com.sinjeong.crewcalendar.presentation.admin.AdminPasswordDialog(
