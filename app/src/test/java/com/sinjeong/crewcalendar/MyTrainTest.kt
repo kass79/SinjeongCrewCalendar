@@ -1,6 +1,10 @@
 package com.sinjeong.crewcalendar
 
 import com.sinjeong.crewcalendar.domain.model.Bundled
+import com.sinjeong.crewcalendar.domain.model.BundledTimetable
+import com.sinjeong.crewcalendar.domain.model.Line2Timetable
+import com.sinjeong.crewcalendar.domain.model.branchMineNos
+import com.sinjeong.crewcalendar.domain.model.drivesBranch
 import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.MainLegs
 import com.sinjeong.crewcalendar.domain.model.NightCombo
@@ -294,5 +298,44 @@ class MyTrainTest {
         assertNull(myTrainAt(DutyCode.parse("지12비"), THU, at(THU, "08:00")))
         // 번호 없는 옛 비번은 종전 그대로 아무것도 없다.
         assertNull(myTrainAt(DutyCode.parse("~"), THU, at(THU, "08:00")))
+    }
+
+    /* ── v1.7.20 지선 카드 — 노란 열차는 **내 열차 한 대**(지선 근무 = 모는 열차 · 본선 = 편승 열차) ── */
+
+    /**
+     * 편승 시각은 **알람과 같은 계산**에서 나온다 — 알람 칩이 말하는 열차와 지도가 칠하는 열차가 같다.
+     * 실측(2026-09-30 수 · 전 근무 355칸 대조): 본선 주간 `12` = 전반 7:53 · 후반 16:40 편승,
+     * 야간 `38` 은 전반 19:41 하나(후반은 **익일**), 비번 `37비` 는 전날 야간의 후반 6:37.
+     */
+    @Test
+    fun `편승 시각은 그날 타는 편만 — 야간 후반은 다음 날 비번 쪽이다`() {
+        val wed = LocalDate.parse("2026-09-30")
+        assertEquals(listOf(LocalTime.of(7, 53), LocalTime.of(16, 40)),
+            BundledTimetable.ridesOn(DutyCode.parse("12"), wed))
+        assertEquals(listOf(LocalTime.of(19, 41)), BundledTimetable.ridesOn(DutyCode.parse("38"), wed.plusDays(1)))
+        assertEquals(listOf(LocalTime.of(6, 37)), BundledTimetable.ridesOn(DutyCode.parse("37비"), wed))
+        // 지선 근무(모는 열차)·대기·휴무는 편승이 없다.
+        assertTrue(BundledTimetable.ridesOn(DutyCode.parse("지5"), wed).isEmpty())
+        assertTrue(BundledTimetable.ridesOn(DutyCode.parse("대3"), wed).isEmpty())
+        // 편승 시각은 알람 칩 문구의 그 시각이다.
+        assertTrue(BundledTimetable.advise(DutyCode.parse("12"), wed).text.startsWith("양천구청역 7:53 편승"))
+    }
+
+    @Test
+    fun `노란 열차 후보 — 지선 근무는 그 열번, 본선은 편승 열차, 없으면 아무것도 안 칠한다`() {
+        val wed = LocalDate.parse("2026-09-30")
+        // 양천구청(44) 신도림행(외선 2) 평일 07:53:00 · 16:40:00 에 떠나는 두 열차 — 자산 실값.
+        val tt = Line2Timetable.parse("1,2,44,5523,28350,28380\n1,2,44,5629,60000,60000\n1,2,44,5521,27800,27830")
+        assertEquals(listOf("5523", "5629"), branchMineNos(DutyCode.parse("12"), wed, tt))
+        // 지선을 모는 근무는 종전대로 그 근무 열번 전부다(시간표와 무관).
+        val branch = DutyCode.parse("지5")
+        assertTrue(drivesBranch(branch, wed))
+        assertEquals(dutyTrainNumbers(branch, wed), branchMineNos(branch, wed, null))
+        // 편승이 없거나(대기) 시간표를 아직 못 읽었거나 근무가 없으면 노란 열차가 **없다**.
+        assertTrue(branchMineNos(DutyCode.parse("대3"), wed, tt).isEmpty())
+        assertTrue(branchMineNos(DutyCode.parse("12"), wed, null).isEmpty())
+        assertTrue(branchMineNos(null, wed, tt).isEmpty())
+        // 그 분에 떠나는 열차가 시간표에 없으면 그 편은 뺀다(아무 열차나 안 칠한다).
+        assertTrue(branchMineNos(DutyCode.parse("12"), wed, Line2Timetable.parse("1,2,44,5521,27800,27830")).isEmpty())
     }
 }

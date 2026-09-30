@@ -67,9 +67,10 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sinjeong.crewcalendar.domain.model.DutyCode
-import com.sinjeong.crewcalendar.domain.model.DutyType
 import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.domain.model.LiveRef
+import com.sinjeong.crewcalendar.domain.model.branchMineNos
+import com.sinjeong.crewcalendar.domain.model.drivesBranch
 import com.sinjeong.crewcalendar.domain.model.dutyTrainNumbers
 import com.sinjeong.crewcalendar.domain.model.pickRun
 import com.sinjeong.crewcalendar.domain.model.sameRun
@@ -132,6 +133,13 @@ import kotlin.math.floor
  *
  * ## v1.6.96 — 신도림행은 **노랑**, 역 이름은 **아래 선로 밑**(사용자 확정)
  *
+ * ⚠ **v1.7.20 에서 뒤집힘 — 노랑은 이제 "내 열차 한 대"뿐이다.** 카스(2026-09-30):
+ * *"지선열차는 내열차만 황금색으로"* · *"실시간 편승에서 지선열차는 내 편승열차만 황금색으로"*.
+ * 남의 신도림행은 본선 일반 열차와 같은 `otherBody` 다. 방향은 **차선**(아래 = 신도림행 ·
+ * 위 = 까치산행)과 **기관차 머리**가 말한다. 노란 열차 후보는 `branchMineNos` 한 곳이 정한다
+ * (지선 근무 = 그 근무 열번 / 본선 근무 = 그날 타는 **편승 열차** — 편승 알람과 같은 계산).
+ * 아래 v1.6.96 서술 중 *"신도림행 열차는 전부 `mineBody`"* 는 그 시점 기록이다.
+ *
  * > *"신정지선도 신도림행이 중요하니까 역이름을 신도림행 쪽으로 넣고,, 신도림행으로 가는
  * > 열차를 본선과 마찬가지로 트렌디한 노란색으로 해줘!"*
  *
@@ -170,8 +178,6 @@ import kotlin.math.floor
  */
 private val KEY_STATIONS = setOf("신도림", "양천구청")
 
-/** 지선 열차를 **실제로 잡는** 근무 — 운휴(`지휴`)·대기(`지대`)는 여기 없다. */
-private val DRIVING_BRANCH = setOf(DutyType.BRANCH, DutyType.BRANCH_NIGHT)
 
 /**
  * 카드 한 단계 **축소**(v1.6.98) — 사용자: *"신정지선 에큘레이터 조금 더 작게 해줘서
@@ -365,7 +371,7 @@ internal fun BranchLiveMap(
      * 오늘 근무가 잡는 열번 후보 — **지선 열차를 실제로 잡는 근무일 때만** 이 카드가 말한다
      * (사용자 확정: 지선 근무가 아니면 내 열차 줄을 아예 생략).
      *
-     * ⚠ [DRIVING_BRANCH] 는 **중복 필터가 아니다.** 운휴(`지휴5`)·대기(`지대2`)를 걸러 내는
+     * ⚠ [drivesBranch] 는 **중복 필터가 아니다.** 운휴(`지휴5`)·대기(`지대2`)를 걸러 내는
      * 일은 v1.6.88에서 [dutyTrainNumbers] 안으로 옮겼지만(같은 함수를 부르는 본선 지도·달력
      * 헤더가 함께 틀렸던 자리), 이 카드는 오늘 근무가 **본선이어도** 그려진다 —
      * 여기를 지우면 본선 주간 근무의 열번이 지선 지도 위에서 내 열차로 잡힌다.
@@ -376,8 +382,7 @@ internal fun BranchLiveMap(
      *   야간이 본선이라 여기서 그대로 걸러진다.
      */
     val candidates = remember(duty, date) {
-        duty?.takeIf { d -> (DutyCode.effectiveNight(d, date)?.first ?: d).type in DRIVING_BRANCH }
-            ?.let { dutyTrainNumbers(it, date) }.orEmpty()
+        duty?.takeIf { d -> drivesBranch(d, date) }?.let { dutyTrainNumbers(it, date) }.orEmpty()
     }
 
     /*
@@ -387,6 +392,12 @@ internal fun BranchLiveMap(
     val tt by produceState<Line2Timetable?>(null) {
         value = withContext(Dispatchers.IO) { Line2TimetableLoader.get(ctx) }
     }
+    /**
+     * **노랗게 칠할 열차 후보**(v1.7.20) — 지선 근무면 위 [candidates] 와 같고, 본선 근무면 그날
+     * **타는 편승 열차**다([branchMineNos] 한 곳 · 편승 알람 칩과 같은 계산). 편승이 없는 날은
+     * 비어서 노란 열차가 **없다**. 글줄(`내 열차 …`)은 종전대로 지선 근무만 말한다.
+     */
+    val goldNos = remember(duty, date, tt) { branchMineNos(duty, date, tt) }
     val inbound = remember(snap.inbound, tt, now / 30_000) {
         val (d, sec) = Line2Timetable.serviceClock(LocalDateTime.now())
         BranchLive.refineInbound(snap.inbound, tt, Line2Timetable.weekTagOf(d), sec)
@@ -428,6 +439,7 @@ internal fun BranchLiveMap(
         trains = snap.trains,
         inbound = inbound,
         candidates = candidates,
+        goldNos = goldNos,
         fetchedAtMillis = snap.fetchedAtMillis,
         nowMillis = now,
         // ③ 헤더가 폰 시계 대신 적을 **응답의 기준 시각**(v1.7.16).
@@ -460,6 +472,8 @@ private fun LineMapCard(
     trains: List<TrainMark>,
     inbound: List<InboundTrain>,
     candidates: List<String>,
+    /** 노란 몸통 후보(v1.7.20 — [branchMineNos]). 이 중 **살아 있는** 한 대만 노랗다. */
+    goldNos: List<String>,
     fetchedAtMillis: Long,
     nowMillis: Long,
     /** ③ 응답의 기준 시각과 **그것을 처음 본 시각** — 헤더가 이 둘로 나이를 잰다(v1.7.16). */
@@ -494,12 +508,16 @@ private fun LineMapCard(
     // ⚠ 잣대는 [pickRun] — 같은 운행이 다른 접두로 뜨고(v1.7.2), 같은 몸통이 둘 뜨면
     // 하나만 고른다(v1.7.3, 본선 지도와 같은 함수). 지선 후보(`5xxx`)는 [sameRun] 이
     // **정확히 같은 번호만** 받으므로 종전 동작 그대로다.
-    val mine = run {
+    fun livePick(nos: List<String>): TrainMark? {
         val lives = trains.map { LiveRef(it.trainNo) }
-        candidates.firstNotNullOfOrNull { no ->
+        return nos.firstNotNullOfOrNull { no ->
             pickRun(no, lives)?.let { l -> trains.first { it.trainNo == l.trainNo } }
         }
     }
+    /** 글줄(`내 열차 …`)이 말하는 열차 — 지선 근무만(종전 그대로). */
+    val mine = livePick(candidates)
+    /** **노란 몸통** 한 대(v1.7.20) — 지선 근무면 [mine] 과 같고, 본선이면 오늘의 편승 열차. */
+    val gold = livePick(goldNos)
 
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -913,7 +931,7 @@ private fun LineMapCard(
                         }
                         // **내 열차부터** 자리를 잡는다(제 선로에 붙은 행을 먼저 가져간다).
                         // ⚠ 위 차선 = **까치산행**이므로 `up = !toSindorim` 이다(v1.6.95 복선).
-                        val mineNo = mine?.trainNo
+                        val mineNo = gold?.trainNo
                         val spots = animated.sortedByDescending { it.first.trainNo == mineNo }
                             .map { (t, pos, _) ->
                                 Triple(t, pos, place(
@@ -926,12 +944,12 @@ private fun LineMapCard(
 
                         /**
                          * 자리를 못 잡은 열차 — 그래도 **어디 있는지는** 제 선로 위 점으로 남긴다.
-                         * 색도 제 차선 몸통색이다(v1.6.96 — 신도림행은 노랑).
+                         * 색도 제 차선 몸통색이다(v1.7.20 — 신도림행도 일반 열차 색. 노랑은 내 열차뿐).
                          */
                         // ⚠ 클레이는 **열번색**으로 찍는다 — 흰 몸통 점은 크림 바탕에서 안 보인다
                         // (v1.7.0. 본선 지도의 접힌 열차 점과 같은 처방).
                         fun dotOnly(x: Float, up: Boolean) = drawCircle(
-                            if (pal.clay) pal.wheel else if (up) pal.softBody else pal.mineBody,
+                            if (pal.clay) pal.wheel else if (up) pal.softBody else pal.otherBody,
                             2.5.dp.toPx(), Offset(x, if (up) upLineY else lineY))
                         /**
                          * 기관차 한 대. **머리 = 진행 방향** — 신도림이 오른쪽 끝이라 신도림행은
@@ -985,19 +1003,18 @@ private fun LineMapCard(
                             }
                         }
                         /*
-                         * 남의 열차 — **신도림행은 전부 노란 몸통 + 남색 열번**(v1.6.96 사용자
-                         * 확정: *"신도림행으로 가는 열차를 본선과 마찬가지로 트렌디한 노란색으로
-                         * 해줘!"*). 색이 곧 **어느 방향인가**를 말한다: 노랑 = 신도림행(주),
-                         * 물러난 하늘 = 까치산행, 회색 = 기지 회송.
+                         * 남의 열차 — **신도림행은 본선 일반 열차와 같은 `otherBody`**, 까치산행은
+                         * 물러난 `softBody`, 기지 회송은 회색(v1.7.20).
                          *
-                         * ⚠ 내 열차도 노란 몸통이라 **구분은 몸통색이 아니다**(아래) — 흰 테두리 +
-                         * 지붕 위 행선판 + **빨간** 열번 셋이 맡는다. 남의 신도림행 열번은
-                         * `otherInk` 남색이라 한눈에 갈린다(노랑 위 남색 대비 12:1).
+                         * ⚠ **v1.7.20 에서 뒤집힘**: v1.6.96~v1.7.19 는 신도림행이 **전부 노랑**
+                         * (색 = 방향)이었다. 카스: *"지선열차는 내열차만 황금색으로"* — 이제 노랑은
+                         * **내 열차 한 대**(지선 근무 = 모는 열차 · 본선 근무 = 오늘 타는 편승 열차)뿐이고,
+                         * 방향은 차선(아래 = 신도림행)과 기관차 머리가 말한다.
                          */
                         spots.filter { it.first.trainNo != mineNo }.forEach { (t, pos, c) ->
                             if (c == null) dotOnly(xOf(pos), !t.toSindorim)
                             else loco(c, t.trainNo, t.toSindorim,
-                                if (t.toSindorim) pal.mineBody else pal.softBody, pal.otherInk)
+                                if (t.toSindorim) pal.otherBody else pal.softBody, pal.otherInk)
                         }
                         // ⚠ **내 열차는 맨 나중에** 그린다 — 다른 표시에 가리면 "표시가 안 된다"는 말이 된다.
                         spots.firstOrNull { it.first.trainNo == mineNo }?.let { (t, pos, c) ->

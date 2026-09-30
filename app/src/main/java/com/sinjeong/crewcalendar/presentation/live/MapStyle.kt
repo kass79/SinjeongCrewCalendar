@@ -61,6 +61,12 @@ internal object MapArgb {
     val CabFail = 0xFFE9A23BL
     /** 툴팁 바탕 */
     val CabTip = 0xFF0A1E33L
+    /**
+     * 헤더 **지연 알약**(v1.7.20) — 5분 이상 = [CabFail] 바탕 위 글자. 대비 **7.62:1**.
+     * 1~4분(`fail` α0.18 위 `fail` 글자 4.92:1)·정시(`info` α0.12 위 `info` 글자 8.12:1)는
+     * 기존 값에 알파만 얹는다([CAB_PALETTE]).
+     */
+    val CabBadgeAlertInk = 0xFF0A2036L
 
     /* ── 클레이(CLAY) — 사용자가 확인한 시안 값 ─────────────────────────────── */
     val ClayBg = 0xFFF6F1E7L
@@ -107,6 +113,11 @@ internal object MapArgb {
     val ClayChipInk = 0xFF2E9A5EL
     val ClayInfo = 0xFF5C7A66L
     val ClayFail = 0xFFD9722BL
+    /** 헤더 지연 알약(v1.7.20) — 5분 이상 [ClayFail] 바탕 위 글자. 흰 글자는 3.29:1 이라 못 쓴다 → **5.24:1**. */
+    val ClayBadgeAlertInk = 0xFF2B1606L
+    /** 1~4분 알약 바탕 — 달력 클레이 `충당` 파스텔과 같은 값. 위 글자 [ClayBadgeWarnInk] **5.22:1**. */
+    val ClayBadgeWarnBg = 0xFFFADCBBL
+    val ClayBadgeWarnInk = 0xFF8A4A10L
 }
 
 /**
@@ -184,6 +195,16 @@ internal data class MapPalette(
     val fail: Color,
     /** 툴팁 바탕 */
     val tipBg: Color,
+    /**
+     * 헤더 **지연 알약**(v1.7.20 — [delayLevel]). 5분 이상은 [fail] 바탕에 [badgeAlertInk],
+     * 1~4분은 [badgeWarnBg]/[badgeWarnInk], 정시·빠름은 [badgeCalmBg]/[badgeCalmInk].
+     * ⚠ 대비는 **알약 위에서** 잰다(알파가 있으면 남색·크림에 섞인 색 기준) — 표는 v1.7.20 절.
+     */
+    val badgeAlertInk: Color,
+    val badgeWarnBg: Color,
+    val badgeWarnInk: Color,
+    val badgeCalmBg: Color,
+    val badgeCalmInk: Color,
 ) {
     /** 클레이인가 — 그림자·하이라이트 같은 **클레이 전용 획**을 켜는 스위치다. */
     val clay: Boolean get() = style == MapStyle.CLAY
@@ -243,6 +264,11 @@ internal val CAB_PALETTE = MapPalette(
     info = Color(MapArgb.CabInfo),
     fail = Color(MapArgb.CabFail),
     tipBg = Color(MapArgb.CabTip),
+    badgeAlertInk = Color(MapArgb.CabBadgeAlertInk),
+    badgeWarnBg = Color(MapArgb.CabFail).copy(alpha = 0.18f),
+    badgeWarnInk = Color(MapArgb.CabFail),
+    badgeCalmBg = Color(MapArgb.CabInfo).copy(alpha = 0.12f),
+    badgeCalmInk = Color(MapArgb.CabInfo),
 )
 
 /** 클레이 — 크림 바탕·민트 튜브·흰 클레이 열차. **배치는 [CAB_PALETTE] 와 똑같다.** */
@@ -286,6 +312,11 @@ internal val CLAY_PALETTE = MapPalette(
     info = Color(MapArgb.ClayInfo),
     fail = Color(MapArgb.ClayFail),
     tipBg = Color(MapArgb.ClayStation),
+    badgeAlertInk = Color(MapArgb.ClayBadgeAlertInk),
+    badgeWarnBg = Color(MapArgb.ClayBadgeWarnBg),
+    badgeWarnInk = Color(MapArgb.ClayBadgeWarnInk),
+    badgeCalmBg = Color(MapArgb.ClayStation),
+    badgeCalmInk = Color(MapArgb.ClayLabel),
 )
 
 internal fun paletteOf(style: MapStyle) = if (style == MapStyle.CLAY) CLAY_PALETTE else CAB_PALETTE

@@ -183,45 +183,193 @@ internal fun mainTrainSide(
 }
 
 /**
- * **접힘 세로에서 지도를 화면 가운데로 옮기는 거리**(px · v1.7.14 ⑩) — 캔버스를 통째로 민다.
+ * **본선 지도 가운데 맞추기**(v1.7.14 ⑩ · **v1.7.20 개정**) — 무엇을 가운데에 두나.
  *
- * 세로 창에서는 지도가 `rotationZ = 90f` 로 돌아 **`Column` 의 세로축이 화면 가로**가 된다.
- * 그래서 화면 좌우 여백을 정하는 것은 양 끝에 붙는 **띠 두 벌**이다(실측 접힘 1080×2400 ·
- * density 420): 왼쪽 = 상태바 줄 142px + 아랫변 역명 `namePad` 147px = **289px**,
- * 오른쪽 = 헤더 줄 96px + 윗변 열차 `trainPad` 91px = **188px**. 절반인 **50px** 이 카스가 본
- * *"노선도가 약간 오른쪽으로 위치해있는거 같은데?"* 다.
+ * ## 잣대 = **바깥 선로 + 삐져나온 열차 차선** 한 덩어리 (v1.7.20)
  *
- * ## ⚠ **줄이는 게 아니라 옮긴다** — 줄이면 라벨이 겹친다
+ * 카스(2026-09-30, 폴드7 커버 · 글자 크게): *"본선전체보기하면 중간으로 안되어있고, 약간
+ * 오른쪽으로 되어있는듯해"*. 실기기 캡처를 재 보니 **선로 네모 자체는 화면 가운데(오차 0)** 였다.
+ * 그런데 가로 변 열차는 늘 **선로 위**(보조설비 규칙)라, 접힘(90° 회전) 화면에서 **오른쪽 변의
+ * 열차는 바깥 선로 밖으로 삐져나오고 왼쪽 변의 열차는 두 선로 사이에 숨는다.** 눈이 보는 색
+ * 덩어리(선로 + 열차)는 그만큼 오른쪽이었다(실측 ≈ +23px ≈ 9dp).
  *
- * 헤더 쪽에 여백을 **채워서**(padding) 맞추면 루프 안이 그만큼 좁아진다. 실측: 101px 를 다
- * 채우면 가운데는 맞지만(−1px) `합정` 이 `당산` 과 겹치고, **절반(46px)만 채워도 글자배율
- * 1.5 에서 겹쳤다**(23px 도 마찬가지 — 세로 변 이름 열 사이 틈이 그만큼 좁아져 `합정` 이
- * 비집고 들어갈 자리가 없어진다). 그래서 캔버스는 **크기 그대로 두고 통째로 민다** —
- * 루프 안은 한 픽셀도 안 좁아지므로 43개 라벨 배치가 v1.7.13 과 **완전히 같다.**
+ * 그래서 가운데에 두는 것은 `[열차 차선 바깥 끝 ↔ 반대쪽 바깥 선로 바깥 끝]` 의 한가운데다.
+ * 차선 폭([laneOutPx])은 **0단 남의 열차 상자**로 잰다 — 열차가 한 대도 없어도 자리가 같다
+ * (열차 유무·계단으로 지도가 움직이면 안 된다). 역 이름·칩·헤더는 잣대에 안 든다.
  *
- * ## 얼마나 밀 수 있나 — 아랫변 역명이 상태바 칩에 닿기 전까지
+ * 세로 창(접힘)에서는 지도가 `rotationZ = 90f` 로 돌아 **`Column` 의 세로축이 화면 가로**다.
+ * 화면 왼쪽 = 상태바 줄 + 아랫변 역명 `namePad`([leftBandPx]), 오른쪽 = 헤더 줄 + 윗변 열차
+ * `trainPad`([rightBandPx]). 선로 가운데가 화면 가운데가 되는 이동은 `(왼 − 오)/2` 이고
+ * (v1.7.14 ⑩), 덩어리 잣대는 거기에 `(차선 − 선로 반굵기)/2` 를 **왼쪽으로 더** 민다.
  *
- * 미는 만큼 아랫변 역명이 상태바 칩 쪽으로 다가온다. 실측 여유는 **14px**(역명 왼끝 129px ·
- * 칩 오른끝 115px)뿐이라, 칩 줄을 화면 끝으로 8dp 더 붙여([CabStatusBar] 의 `offset`) 여유를
- * **35px** 로 벌린 뒤 그 안에서만 민다. [maxPx] 가 그 한도이고 **보정 손잡이**다 —
- * 실화면에서 역명이 칩에 닿으면 여기만 줄이면 된다.
+ * ## ⚠ **v1.7.20 에서 뒤집힘** — 한도가 상수(20dp)가 아니고, 음수도 된다
  *
- * ⚠ **회전할 때만**(`rotated`) 먹인다. 가로(펼침·기기 회전)는 이 축이 화면 세로라
- * v1.7.9·v1.7.13 확정 화면이 그대로여야 한다.
- * ⚠ **음수는 0**이다(헤더 쪽이 더 두꺼운 화면에서 거꾸로 밀지 않는다) · 아직 안 잰 줄(0)도 0.
+ * v1.7.14~v1.7.19 는 `((왼 − 오)/2).coerceIn(0, MAP_NUDGE_MAX 20dp)` 였다. 두 가지가 틀렸다:
+ *  1. **배율 2.0** 에서는 상태바 칩 알약이 48dp 터치 줄보다 커져 줄이 54 → 63dp 로 두꺼워지고
+ *     필요한 이동(63px)이 한도(53px)를 넘어 **남은 9.5px 만큼 오른쪽**에 섰다(실측).
+ *  2. 반대로 **배율 1.5 에서는 20dp 도 너무 많았다** — 칩이 커지면서 `2호선` 칩이
+ *     `구로디지털단지` 에 **닿았다**(실측 여유 −1px · 1.3 에서 0.7px). 한도가 상수라 칩이
+ *     자라는 것을 몰랐다.
+ * 이제 한도는 **실제 여유**로 잰다([posRoomPx] — 역명↔칩, [negRoomPx] — 열차↔헤더).
  *
- * 순수 함수 — [LocoTest] 가 잠근다(`MainLineMap.kt` 는 최상위 `Color(...)` 때문에 하네스에서
- * 터진다 — [mainTrainSide] 가 여기 사는 것과 같은 사정이다).
+ * ## 여유가 모자라면 **루프를 줄인다**(치우치는 것보다 낫다)
+ *
+ * 필요한 이동이 여유를 넘으면 여유만큼 옮기고, 남은 몫의 **두 배를 반대쪽 끝에서 깎는다**
+ * — 루프가 그만큼 작아지는 대신 덩어리 가운데는 정확히 화면 가운데다([MapFit.shrinkHeadPx]).
+ * v1.7.14 는 깎으면 `합정`·`당산` 이 겹쳐서 옮기기만 했는데, v1.7.18 의 모서리 간격·43개 기울임
+ * 뒤로는 겹치지 않는다(v1.7.20 실측 — 43개 전수 0).
+ * [canShrink] 가 거짓이면(가로·펼침) 깎지 않고 여유 안에서만 옮긴다 — 거기는 캔버스 위아래에
+ * 빈자리가 넉넉하고, 가로 폰의 얇은 띠(v1.7.7 D1)는 루프를 줄이면 안 되는 자리다.
+ * [maxShrinkPx] 는 **깎을 수 있는 끝** — 세로 변 이름이 루프 안에 머무는 띠 높이까지다.
+ * 거기서 멈추면 남은 몫만큼은 치우친다(배율 1.7·2.0 — 칩 알약이 너무 커서. 알고 둔 한계).
+ *
+ * @param needPx 옮겨야 할 거리(+ = 상태바 쪽 · − = 헤더 쪽). [mapCenterNeedPx] 가 잰다.
+ * @param posRoomPx 상태바 쪽으로 옮길 수 있는 한도(아랫변 역명이 칩과 [gap] 을 남길 때까지)
+ * @param negRoomPx 헤더 쪽으로 옮길 수 있는 한도(열차 차선이 헤더를 안 물 때까지)
+ */
+internal data class MapFit(
+    /** 캔버스를 통째로 옮기는 거리(px, + = 상태바 쪽). 크기는 안 바뀐다. */
+    val nudgePx: Int,
+    /** 헤더 쪽 끝에서 깎는 캔버스 높이(px) — 상태바 쪽 여유가 모자랄 때만. */
+    val shrinkHeadPx: Int = 0,
+    /** 상태바 쪽 끝에서 깎는 캔버스 높이(px) — 헤더 쪽 여유가 모자랄 때만. */
+    val shrinkStatPx: Int = 0,
+)
+
+internal fun mapCenterFit(
+    needPx: Int, posRoomPx: Int, negRoomPx: Int, canShrink: Boolean,
+    maxShrinkPx: Int = Int.MAX_VALUE,
+): MapFit {
+    val pos = posRoomPx.coerceAtLeast(0)
+    val neg = negRoomPx.coerceAtLeast(0)
+    val cap = if (canShrink) maxShrinkPx.coerceAtLeast(0) else 0
+    return when {
+        needPx > pos -> MapFit(pos, shrinkHeadPx = minOf(2 * (needPx - pos), cap))
+        needPx < -neg -> MapFit(-neg, shrinkStatPx = minOf(2 * (-neg - needPx), cap))
+        else -> MapFit(needPx)
+    }
+}
+
+/**
+ * 접힘(회전) 화면에서 **덩어리 가운데를 화면 가운데로** 옮길 거리(px, + = 상태바 쪽).
  *
  * @param leftBandPx 화면 왼쪽 띠 = 상태바 줄 높이 + `namePad`
  * @param rightBandPx 화면 오른쪽 띠 = 헤더 줄 높이 + `trainPad`
- * @param maxPx 아랫변 역명이 칩에 닿기 전까지 밀 수 있는 한도
+ * @param laneOutPx 윗변 열차 차선이 바깥 선로 **중심**에서 밖으로 먹는 깊이(0단 남의 열차 지붕까지)
+ * @param railHalfPx 선로 반굵기 — 반대쪽 끝은 선로 **바깥 가장자리**다
  */
-internal fun mapCenterNudgePx(
-    rotated: Boolean, leftBandPx: Int, rightBandPx: Int, maxPx: Int,
-): Int =
-    if (!rotated || leftBandPx <= 0 || rightBandPx <= 0) 0
-    else ((leftBandPx - rightBandPx) / 2).coerceIn(0, maxPx.coerceAtLeast(0))
+internal fun mapCenterNeedPx(
+    leftBandPx: Int, rightBandPx: Int, laneOutPx: Float, railHalfPx: Float,
+): Int = kotlin.math.round(((leftBandPx - rightBandPx) + (laneOutPx - railHalfPx)) / 2f).toInt()
+
+/**
+ * 상태바 쪽으로 옮길 수 있는 한도(px) — 아랫변 역명과 상태바 칩 알약 사이에 [gapPx] 를 남긴다.
+ *
+ * 캔버스 아랫날(= 상태바 줄 윗날)에서 알약까지 `(줄 − 알약)/2 + hug`, 가장 깊은 아랫변 역명
+ * 아래로 캔버스 끝까지 `namePad − 깊이` 가 비어 있다. 둘을 더하고 틈을 빼면 한도다.
+ * **실제로 잰다** — 배율이 커지면 알약이 자라 한도가 준다(v1.7.20 ②).
+ *
+ * @param nameDepthPx 가장 깊은 아랫변 역명이 바깥 선로 중심에서 내려가는 깊이(그린 자리에서 잰다)
+ */
+internal fun mapPosRoomPx(
+    statBandPx: Int, pillPx: Int, hugPx: Int, namePadPx: Int, nameDepthPx: Int, gapPx: Int,
+): Int = (statBandPx - pillPx) / 2 + hugPx + (namePadPx - nameDepthPx) - gapPx
+
+/* ───────────── 본선 지도 헤더 한 줄 — 문구와 사다리 (v1.7.20 · 순수 함수) ───────────── */
+
+/**
+ * 후보 열번 줄이기 — 지선 다이아는 한 근무가 **스무 개 넘는 열번**을 잡아서 그대로 이으면
+ * 헤더 한 줄을 통째로 먹는다(실측: `5668·5669·…·5527` 20개가 화면 세로를 다 채웠다).
+ * 몇 개를 적든 `외 N개` 가 총수를 지키므로 정보는 안 사라진다. [take] 는 사다리 손잡이다.
+ * (v1.7.20 에 `MainLineMap.shortNos` 를 여기로 옮겼다 — 테스트 하네스가 볼 수 있게.)
+ */
+internal fun nosBrief(nos: List<String>, take: Int = 2): String =
+    nos.take(take).joinToString("·") + if (nos.size > take) " 외 " + (nos.size - take) + "개" else ""
+
+/**
+ * **내 열차 토막** — `내 열차 8340(행로표 2340) · 외선 · 홍대입구행`. 헤더에서 **가장 큰 글자**
+ * (접힘 13.5sp · 펼침 17sp ExtraBold, 나머지의 약 1.4배)로 쓰고, [HEAD_LADDER] 가 **줄이지도
+ * 자르지도 않는다**(v1.7.20 — 카스 *"본인열차 +지연 된다는 정보를 좀 더 크게"*).
+ *
+ * 열번은 **API 번호 그대로**고 행로표와 다를 때만 괄호로 같이 적는다(v1.7.2). [dest] 는
+ * `myDestination` 이 확실히 알 때만 온다(v1.7.5) — ⚠ API 행선(`destName`)을 쓰지 말 것.
+ */
+internal fun mineTitle(trainNo: String, route: String?, inner: Boolean, dest: String?): String =
+    "내 열차 " + trainNo +
+        (route?.takeIf { it != trainNo }?.let { "(행로표 $it)" }.orEmpty()) +
+        " · " + (if (inner) "내선" else "외선") +
+        dest?.let { " · $it" }.orEmpty()
+
+/**
+ * 내 열차가 있을 때 **지연 알약 뒤의 작은 글자** — `(외선 화면에 있음) · 다음 역 3분 후 · 신림 진입`.
+ * 폭이 모자라면 [HEAD_LADDER] 가 **현재 역·상태 → 다음 역** 순으로 덜어 낸다(현재 역은 지도의
+ * 빨간 점이 이미 말한다). **숨김 안내([hidden])는 안 덜어 낸다** — 지도에 내 열차가 없는 이유다.
+ * ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(`MyTrain` KDoc).
+ */
+internal fun mineRest(
+    inner: Boolean, nextSec: Int?, status: String, hidden: Boolean, spec: HeadSpec,
+): String = listOfNotNull(
+    if (hidden) "(${if (inner) "내선" else "외선"} 화면에 있음)" else null,
+    nextSec?.takeIf { spec.next }?.let { if (it <= 0) "곧 도착" else "다음 역 ${(it + 59) / 60}분 후" },
+    status.takeIf { spec.status && it.isNotBlank() },
+).joinToString(" · ")
+
+/**
+ * 내 열차가 **없을 때**의 헤더 뒤 글자 — 종전 그대로(`내 열차 미검출(운행 전/후) · 오늘 열번 …`).
+ * 후보 열번조차 없으면 null(날짜·시계만 남는다).
+ */
+internal fun noMineText(candidates: List<String>, take: Int): String? =
+    if (candidates.isEmpty()) null
+    else "내 열차 미검출(운행 전/후) · 오늘 열번 " + nosBrief(candidates, take)
+
+/**
+ * 헤더 한 줄의 **한 칸**(사다리 한 단). [HEAD_LADDER] 가 위에서부터 [CabHeader] 로 재 보고
+ * 처음으로 폭에 들어가는 칸을 쓴다. 필드가 **내 열차 토막·지연 알약을 가리키지 않는다** —
+ * 그 둘은 어느 칸에서도 그대로다(구조로 못 박았다).
+ *
+ * @param k 내 열차 토막·알약을 **뺀** 나머지 글자의 배수(마지막 칸만 [HEAD_MIN_K]).
+ */
+internal data class HeadSpec(
+    val title: Boolean = true, val date: Boolean = true, val seconds: Boolean = true,
+    val take: Int = 2, val status: Boolean = true, val next: Boolean = true, val k: Float = 1f,
+    val clock: Boolean = true,
+)
+
+/** 나머지 글자 축소 하한 — 이 밑으로는 안 줄인다(작아서 못 읽으면 잘린 것과 같다). */
+internal const val HEAD_MIN_K = 0.88f
+
+/**
+ * 헤더 한 줄에서 **무엇을 먼저 덜어 낼지** — v1.7.20 에서 차례를 고쳤다.
+ *
+ * 확정 우선순위 *"내 열차 상태 > 오늘 열번 > 날짜·시계"* 대로 **제목 → 날짜(요일 포함) → 초 →
+ * 오늘 열번 목록(한 개로) → 현재 역·상태 → 다음 역 → 나머지 글자 0.88배 → 기준 시각** 순이다.
+ * 기준 시각까지 덜어 내는 칸(⑧)은 **펼침 × 배율 2.0** 처럼 내 열차 토막(17sp × 2)과 알약만으로
+ * 줄이 거의 차는 화면에서만 쓰인다(실측: 그 칸이 없으면 알약 `+7분 지연` 끝이 잘렸다).
+ * **내 열차 토막과 지연 알약은 어느 칸에서도 안 줄고 안 잘린다.** 각 칸은 앞 칸의 부분집합이라
+ * 되돌아가지 않는다. 말줄임표로 끝나면 실패다(v1.6.94).
+ *
+ * ⚠ **v1.7.20 에서 뒤집힘**: v1.6.94~v1.7.19 는 **글자 전체를 0.88 배로 먼저** 줄이고
+ * (내 열차 글자까지) 요일 → 초 → 열번 → 날짜 → 제목 순으로 덜었다. 이제 제목·날짜가 먼저
+ * 빠지고, 축소는 맨 끝에 **내 열차를 뺀 글자에만** 건다.
+ */
+internal val HEAD_LADDER: List<HeadSpec> = listOf(
+    HeadSpec(),
+    HeadSpec(title = false),                                                   // ① 제목
+    HeadSpec(title = false, date = false),                                     // ② 날짜·요일
+    HeadSpec(title = false, date = false, seconds = false),                    // ③ 시계 초
+    HeadSpec(title = false, date = false, seconds = false, take = 1),          // ④ 오늘 열번 목록
+    HeadSpec(title = false, date = false, seconds = false, take = 1, status = false),  // ⑤ 현재 역
+    HeadSpec(title = false, date = false, seconds = false, take = 1, status = false,
+        next = false),                                                         // ⑥ 다음 역
+    HeadSpec(title = false, date = false, seconds = false, take = 1, status = false,
+        next = false, k = HEAD_MIN_K),                                         // ⑦ 나머지 글자 축소
+    HeadSpec(title = false, date = false, seconds = false, take = 1, status = false,
+        next = false, k = HEAD_MIN_K, clock = false),                          // ⑧ 기준 시각
+)
+
+/** 사다리에서 **처음 들어가는 칸** — 하나도 안 들어가면 마지막 칸(가장 짧은 칸). */
+internal fun <T> firstFitting(ladder: List<T>, fits: (T) -> Boolean): T =
+    ladder.firstOrNull(fits) ?: ladder.last()
 
 /**
  * 역 이름을 **기울여**(−35°) 선로 옆에 적는 둘레 자리인가 — 순수 함수, `LocoTest` 가 잠근다.

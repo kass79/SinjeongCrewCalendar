@@ -192,3 +192,30 @@ private fun assignOf(duty: DutyCode, date: LocalDate): TrainAssignment? {
         else -> null
     }
 }
+
+/**
+ * **지선 카드의 내 열차**(노란 몸통) 후보 — v1.7.20 에 판정을 여기 **한 곳**으로 모았다.
+ *
+ * 카스(2026-09-30): *"지선열차는 내열차만 황금색으로"* · *"실시간 편승에서 지선열차는 내
+ * 편승열차만 황금색으로"*. v1.6.96~v1.7.19 는 **신도림행 전부**가 노랑이었다(색 = 방향).
+ *  · 지선을 **모는** 근무([drivesBranch]) → 그 근무 열번 전부([dutyTrainNumbers]) — 종전과 같다.
+ *  · 그 밖(본선) → 그날 **타는 편승 열차**([BundledTimetable.rideTrainNos]) — 편승 알람 칩과
+ *    **같은 계산**이라 칩이 말하는 열차와 지도가 칠하는 열차가 같다.
+ *  · 편승이 없는 날·시간표를 아직 못 읽었으면 빈 목록 = **노란 열차가 없다**(아무 열차나 안 칠한다).
+ * 실제로 칠하는 것은 이 후보 중 API 에 **살아 있는** 열차뿐이다(`pickRun` — 아직 안 뜬 시각엔 없다).
+ */
+fun branchMineNos(duty: DutyCode?, date: LocalDate, tt: Line2Timetable?): List<String> = when {
+    duty == null -> emptyList()
+    drivesBranch(duty, date) -> dutyTrainNumbers(duty, date)
+    tt == null -> emptyList()
+    else -> BundledTimetable.rideTrainNos(duty, date, tt)
+}
+
+/**
+ * 지선 열차를 **실제로 모는** 근무인가 — 지선 주간·야간. 운휴(`지휴`)·대기(`지대`)는 아니다.
+ * ⚠ 비번(`지11~`)은 전날 야간의 이어짐이라 그 야간으로 본다([DutyCode.effectiveNight] · v1.6.95).
+ */
+fun drivesBranch(duty: DutyCode, date: LocalDate): Boolean =
+    (DutyCode.effectiveNight(duty, date)?.first ?: duty).type.let {
+        it == DutyType.BRANCH || it == DutyType.BRANCH_NIGHT
+    }

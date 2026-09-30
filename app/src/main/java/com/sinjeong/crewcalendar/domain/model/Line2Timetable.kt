@@ -21,6 +21,21 @@ class Line2Timetable private constructor(private val rows: Map<Key, List<Stop>>)
 
     fun stops(weekTag: Int, inout: Int, trainNo: String): List<Stop> = rows[Key(weekTag, inout, trainNo)].orEmpty()
 
+    /**
+     * [stationIdx] 를 [sec] 초가 든 **그 분**에 떠나는 열번(v1.7.20 — 지선 카드의 편승 열차).
+     * 같은 분에 둘이면 먼저 떠나는 쪽. 없으면 null.
+     */
+    fun trainLeaving(weekTag: Int, inout: Int, stationIdx: Int, sec: Int): String? {
+        val minute = sec / 60
+        return rows.entries.asSequence()
+            .filter { (k, _) -> k.weekTag == weekTag && k.inout == inout }
+            .mapNotNull { (k, st) ->
+                st.firstOrNull { it.stationIdx == stationIdx && it.leftSec >= 0 && it.leftSec / 60 == minute }
+                    ?.let { k.trainNo to it.leftSec }
+            }
+            .minByOrNull { it.second }?.first
+    }
+
     /** `(주중구분, 내외선, 뒤 세 자리)` → 그 운행으로 적힌 자산 열번들. [runStops] 의 색인. */
     private val byRun: Map<Triple<Int, Int, String>, List<String>> =
         rows.keys.groupBy({ Triple(it.weekTag, it.inout, runKey(it.trainNo)) }, { it.trainNo })

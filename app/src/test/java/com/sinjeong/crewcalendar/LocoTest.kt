@@ -18,7 +18,18 @@ import com.sinjeong.crewcalendar.presentation.live.locoFlip
 import com.sinjeong.crewcalendar.presentation.live.locoHalf
 import com.sinjeong.crewcalendar.presentation.live.locoTextDeg
 import com.sinjeong.crewcalendar.presentation.live.mainTrainSide
-import com.sinjeong.crewcalendar.presentation.live.mapCenterNudgePx
+import com.sinjeong.crewcalendar.presentation.live.HEAD_LADDER
+import com.sinjeong.crewcalendar.presentation.live.HEAD_MIN_K
+import com.sinjeong.crewcalendar.presentation.live.HeadSpec
+import com.sinjeong.crewcalendar.presentation.live.MapFit
+import com.sinjeong.crewcalendar.presentation.live.firstFitting
+import com.sinjeong.crewcalendar.presentation.live.mapCenterFit
+import com.sinjeong.crewcalendar.presentation.live.mapCenterNeedPx
+import com.sinjeong.crewcalendar.presentation.live.mapPosRoomPx
+import com.sinjeong.crewcalendar.presentation.live.mineRest
+import com.sinjeong.crewcalendar.presentation.live.mineTitle
+import com.sinjeong.crewcalendar.presentation.live.noMineText
+import com.sinjeong.crewcalendar.presentation.live.nosBrief
 // ⚠ `mainTrainSide` 는 MainLineMap 이 아니라 **Loco** 에 산다 — MainLineMap 최상위의
 // `Color(...)` 가 이 하네스(Compose 미포함)에서 클래스 초기화를 터뜨리기 때문이다.
 import org.junit.Assert.assertEquals
@@ -461,26 +472,108 @@ class LocoTest {
     }
 
     /**
-     * **접힘 세로 지도 가운데 맞추기**(v1.7.14 ⑩) — 카스: *"노선도가 전체적으로 약간 오른쪽으로
-     * 위치해있는거 같은데? … 약간 왼쪽으로 밀면 될꺼같은데?"*
+     * **접힘 세로 지도 가운데 맞추기**(v1.7.14 ⑩ · **v1.7.20 개정**) — 잣대는 선로 + 열차 차선 덩어리,
+     * 한도는 실제 여유, 모자라면 루프를 깎는다(`mapCenterFit` KDoc).
      *
-     * 실측(접힘 1080×2400 · density 420): 왼쪽 띠 289px(상태바 142 + namePad 147) ·
-     * 오른쪽 띠 188px(헤더 96 + trainPad 91) → 치우침 **50px**. 한도(31px) 안에서만 민다 —
-     * 캔버스를 **줄이지 않고 옮기는** 값이라 루프 안이 안 좁아진다.
+     * 값은 전부 **에뮬 실측**이다(접힘 1080×2520 · density 420 · 전체 보기):
+     * 상태바 142 · namePad 147 · 헤더 95 · trainPad 91 · 차선 51.7 · 선로 반굵기 9.84px.
+     * ⚠ v1.7.14~v1.7.19 의 `coerceIn(0, 20dp)` 는 **뒤집혔다**(배율 2.0 에서 9.5px 치우침 ·
+     * 배율 1.5 에서 칩이 역명을 물었다).
      */
     @Test
-    fun `접힘 세로에서만 한도 안에서 지도를 왼쪽으로 민다`() {
-        // 실측 두 띠 → 치우침 50px, 한도 31px 에 걸린다.
-        assertEquals(31, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 188, maxPx = 31))
-        // 한도가 넉넉하면 치우침의 절반을 그대로 민다.
-        assertEquals(50, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 188, maxPx = 99))
-        // 가로(펼침·기기 회전)는 v1.7.9·v1.7.13 확정 화면 — 한 픽셀도 안 민다.
-        assertEquals(0, mapCenterNudgePx(false, leftBandPx = 289, rightBandPx = 188, maxPx = 31))
-        // 헤더 쪽이 더 두꺼우면 **거꾸로 밀지 않는다**.
-        assertEquals(0, mapCenterNudgePx(true, leftBandPx = 188, rightBandPx = 289, maxPx = 31))
-        // 아직 안 잰 줄(첫 프레임)은 손대지 않는다 — 지도가 튀면 안 된다.
-        assertEquals(0, mapCenterNudgePx(true, leftBandPx = 0, rightBandPx = 188, maxPx = 31))
-        assertEquals(0, mapCenterNudgePx(true, leftBandPx = 289, rightBandPx = 0, maxPx = 31))
+    fun `가운데 맞추기는 선로와 열차 차선 덩어리를 가운데에 둔다`() {
+        // 선로만 가운데면 (289 − 186)/2 = 51.5 — 덩어리는 차선 몫 (51.7 − 9.84)/2 = 20.9 를 더 민다.
+        assertEquals(72, mapCenterNeedPx(142 + 147, 95 + 91, laneOutPx = 51.7f, railHalfPx = 9.84f))
+        // 차선이 선로 반굵기와 같으면 v1.7.14 식(선로 가운데)과 같다.
+        assertEquals(52, mapCenterNeedPx(289, 186, laneOutPx = 9.84f, railHalfPx = 9.84f))
+    }
+
+    @Test
+    fun `옮길 한도는 칩 알약과 아랫변 역명 사이 실제 여유다`() {
+        // 배율 1.3 실측: 알약 104 · hug 11 · 모서리 뺀 역명 깊이 104 · 틈 8 → (142−104)/2 + 11 + 43 − 8
+        assertEquals(65, mapPosRoomPx(142, 104, 11, 147, 104, 8))
+        // 배율이 커져 알약이 자라면 한도가 준다(배율 2.0: 줄 165 · 알약 149).
+        assertEquals(54, mapPosRoomPx(165, 149, 11, 147, 104, 8))
+    }
+
+    @Test
+    fun `여유 안이면 옮기기만 하고 모자라면 남은 몫의 두 배를 깎는다`() {
+        assertEquals(MapFit(40), mapCenterFit(40, posRoomPx = 65, negRoomPx = 0, canShrink = true))
+        // 배율 1.3 실측 — 65 옮기고 (72 − 65) × 2 = 14 를 헤더 쪽에서 깎는다.
+        assertEquals(MapFit(65, shrinkHeadPx = 14), mapCenterFit(72, 65, 0, canShrink = true))
+        // 깎는 끝(역명이 서는 데까지)에 걸리면 거기서 멈춘다 — 남은 몫은 치우친다(배율 2.0).
+        assertEquals(MapFit(54, shrinkHeadPx = 12), mapCenterFit(84, 54, 0, true, maxShrinkPx = 12))
+        // 헤더 쪽(음수)도 같은 규칙이다 — 여유만큼 옮기고 상태바 쪽에서 깎는다.
+        assertEquals(MapFit(-4, shrinkStatPx = 12), mapCenterFit(-10, 50, 4, canShrink = true))
+        assertEquals(MapFit(-3), mapCenterFit(-3, 50, 4, canShrink = true))
+        // 가로 그림(펼침)은 깎지 않고 여유 안에서만 옮긴다.
+        assertEquals(MapFit(30), mapCenterFit(100, 30, 30, canShrink = false))
+        assertEquals(MapFit(-30), mapCenterFit(-100, 30, 30, canShrink = false))
+        // 여유가 음수로 잡혀도(칩이 이미 역명에 닿은 화면) 거꾸로 밀지 않는다.
+        assertEquals(MapFit(0, shrinkHeadPx = 20), mapCenterFit(10, -5, 0, canShrink = true))
+    }
+
+    /* ── v1.7.20 헤더 — 내 열차 토막 · 사다리 ─────────────────────────────── */
+
+    @Test
+    fun `내 열차 토막은 번호 방향 행선이고 행로표 번호는 다를 때만 괄호`() {
+        assertEquals("내 열차 2489 · 외선 · 홍대입구행", mineTitle("2489", "2489", false, "홍대입구행"))
+        assertEquals("내 열차 8340(행로표 2340) · 내선", mineTitle("8340", "2340", true, null))
+    }
+
+    @Test
+    fun `뒤 토막은 사다리가 현재 역부터 덜고 숨김 안내는 남긴다`() {
+        val full = HeadSpec()
+        assertEquals("다음 역 3분 후 · 신림 진입", mineRest(false, 150, "신림 진입", false, full))
+        assertEquals("곧 도착 · 신림 도착", mineRest(false, 0, "신림 도착", false, full))
+        assertEquals("(외선 화면에 있음) · 다음 역 3분 후 · 신림 진입",
+            mineRest(false, 150, "신림 진입", true, full))
+        assertEquals("(내선 화면에 있음) · 다음 역 3분 후",
+            mineRest(true, 150, "신림 진입", true, HeadSpec(status = false)))
+        assertEquals("(내선 화면에 있음)",
+            mineRest(true, 150, "신림 진입", true, HeadSpec(status = false, next = false)))
+        // 모르는 값은 조용히 빠진다(지어내지 않는다).
+        assertEquals("신림 진입", mineRest(false, null, "신림 진입", false, full))
+    }
+
+    @Test
+    fun `내 열차가 없는 날의 글줄은 종전 그대로다`() {
+        assertEquals("내 열차 미검출(운행 전/후) · 오늘 열번 2401·2425 외 2개",
+            noMineText(listOf("2401", "2425", "2009", "2011"), take = 2))
+        assertEquals("내 열차 미검출(운행 전/후) · 오늘 열번 2401 외 3개",
+            noMineText(listOf("2401", "2425", "2009", "2011"), take = 1))
+        assertEquals(null, noMineText(emptyList(), take = 2))
+        assertEquals("5668·5669", nosBrief(listOf("5668", "5669")))
+    }
+
+    /**
+     * 사다리 차례 = **제목 → 날짜 → 초 → 오늘 열번 목록 → 현재 역 → 다음 역 → 나머지 글자 축소 → 기준 시각**.
+     * 각 칸은 앞 칸의 부분집합이고, 필드 어디에도 내 열차 토막·지연 알약이 없다(구조로 못 박음).
+     * ⚠ v1.6.94~v1.7.19 는 **글자 전체 0.88배가 첫 칸**이었다(내 열차까지 줄었다) — v1.7.20 에서 뒤집힘.
+     */
+    @Test
+    fun `헤더 사다리는 제목 날짜 초 열번 순으로 덜고 축소는 맨 끝이다`() {
+        val l = HEAD_LADDER
+        assertEquals(9, l.size)
+        assertEquals(HeadSpec(), l[0])
+        assertFalse(l[1].title); assertTrue(l[1].date)
+        assertFalse(l[2].date); assertTrue(l[2].seconds)
+        assertFalse(l[3].seconds); assertEquals(2, l[3].take)
+        assertEquals(1, l[4].take); assertTrue(l[4].status)
+        assertFalse(l[5].status); assertTrue(l[5].next)
+        assertFalse(l[6].next); assertEquals(1f, l[6].k, 0f)
+        assertEquals(HEAD_MIN_K, l[7].k, 0f); assertTrue(l[7].clock)
+        assertFalse(l[8].clock)                                // ⑧ 기준 시각 — 맨 끝
+        // 앞 칸의 부분집합 — 한 번 덜어 낸 것은 다시 안 나온다.
+        for (i in 1 until l.size) {
+            val a = l[i - 1]; val b = l[i]
+            assertTrue(i.toString(), (!b.title || a.title) && (!b.date || a.date) && (!b.seconds || a.seconds) &&
+                b.take <= a.take && (!b.status || a.status) && (!b.next || a.next) && b.k <= a.k &&
+                (!b.clock || a.clock))
+        }
+        // 하나도 안 들어가면 가장 짧은 칸.
+        assertEquals(l.last(), firstFitting(l) { false })
+        assertEquals(l[3], firstFitting(l) { !it.seconds })
     }
 
     /**

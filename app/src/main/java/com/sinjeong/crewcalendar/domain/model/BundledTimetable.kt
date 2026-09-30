@@ -38,12 +38,17 @@ object BundledTimetable {
      * [nextDay]는 **이 알람이 근무일이 아니라 익일에 울린다**는 표시다(v1.6.73) — 야간 근무의
      * 후반사업은 사업소에서 자고 다음날 아침에 나가므로 예약 날짜가 하루 뒤여야 한다.
      * 사유만 있는 (at = null) 경우에도 붙여 두어 칩이 "(익일)"을 일관되게 적을 수 있다.
+     *
+     * [board]는 **양천구청에서 타는 편승 열차의 출발 시각**이다(v1.7.20) — 편승 알람일 때만 있다
+     * (지선 승무 시작·기지 출고·알람 없음은 null). 지선 카드가 이 시각으로 **그 열차 한 대**를
+     * 찾아 노랗게 칠한다([rideTrainNos]).
      */
     data class Advice(
         val at: LocalTime?,
         val text: String,
         val depot: Boolean = false,
         val nextDay: Boolean = false,
+        val board: LocalTime? = null,
     )
 
     /**
@@ -236,7 +241,8 @@ object BundledTimetable {
                     "${WINDOW_LATE_MIN}~${WINDOW_EARLY_MIN}분 전 구간에 없습니다. 행로표를 확인하세요.",
             )
         val alarm = board.minusMinutes(BOARD_EARLY_MIN)
-        return Advice(alarm, "양천구청역 ${hm(board)} 편승 (신도림 ${hm(start)} 출발) · 알림 ${hm(alarm)}")
+        return Advice(alarm, "양천구청역 ${hm(board)} 편승 (신도림 ${hm(start)} 출발) · 알림 ${hm(alarm)}",
+            board = board)
     }
 
     /** 기지 출고 알람 (v1.6.34) — 출고시각 [DEPOT_EARLY_MIN]분 전. 전반·후반이 이 한 곳을 같이 쓴다. */
@@ -351,6 +357,37 @@ object BundledTimetable {
         // 야간표는 평/휴가 아니라 조합으로 갈리는 한 벌이고 `46 휴평` 후반 7:48이 스캔상
         // **신도림**으로 확인돼 있다(v1.6.29 주석) — 즉 야간표 값은 신도림 출발이다.
         return deadhead(start, Bundled.isHolidayTimetable(date.plusDays(1))).copy(nextDay = true)
+    }
+
+    /**
+     * 그 날 [date] 에 **양천구청에서 타는 편승 열차**의 출발 시각 — 전반·후반 따로(v1.7.20).
+     *
+     * 카스(2026-09-30): *"실시간 편승에서 지선열차는 내 편승열차만 황금색으로"*. 알람과 **같은
+     * 계산**([advise])에서 나온 시각이라 알람 칩이 말하는 열차와 지도가 칠하는 열차가 같다.
+     *  · 오늘 근무의 **전반** 편승 · **후반** 편승(주간 — 같은 날)
+     *  · 오늘이 **비번**(`N~`)이면 전날 야간의 **후반** 편승 — 익일 아침이라 오늘이다([DutyCode.effectiveNight])
+     *  · 오늘 **야간**의 후반 편승은 **내일**이라 여기 없다
+     * 지선 근무·기지 출고·대기·운휴는 편승이 없어 빈 목록이다.
+     */
+    fun ridesOn(duty: DutyCode, date: LocalDate): List<LocalTime> {
+        val post = DutyCode.effectiveNight(duty, date)
+        if (post != null) return listOfNotNull(advise(post.first, post.second, second = true).board)
+        return listOf(advise(duty, date, second = false), advise(duty, date, second = true))
+            .filter { !it.nextDay }.mapNotNull { it.board }
+    }
+
+    /**
+     * [ridesOn] 의 시각을 **열번**으로 — 양천구청을 그 분에 떠나는 신도림행 열차(시간표 자산).
+     *
+     * 이 표([ROWS])는 자산 CSV 의 양천구청 신도림행과 **분 단위로 전부 같다**(v1.7.20 전수 대조:
+     * 평일 105 · 토 105 · 휴일 105칸이 하나도 안 빠지고 자산에 있다). 못 찾으면 그 편은 뺀다 —
+     * **아무 열차나 칠하지 않는다.**
+     */
+    fun rideTrainNos(duty: DutyCode, date: LocalDate, tt: Line2Timetable): List<String> {
+        val station = Line2Timetable.stationIdx("양천구청")
+        val week = Line2Timetable.weekTagOf(date)
+        // 신정지선 신도림행은 시간표 태그가 **외선(2)** 이다(BranchLive `branchInout` KDoc).
+        return ridesOn(duty, date).mapNotNull { tt.trainLeaving(week, 2, station, it.toSecondOfDay()) }
     }
 
     /** 네 자리 열번만 골라내는 잣대 — 인수인계 주석 토큰을 버리는 데 쓴다. */

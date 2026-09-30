@@ -230,6 +230,38 @@ internal const val DELAY_ALERT_MIN = 5
 internal fun bigDelay(delay: Int?): Boolean = delay != null && delay >= DELAY_ALERT_MIN
 
 /**
+ * 본선 지도 헤더의 **지연 알약** 글자(v1.7.20) — `+3분 지연` · `정시` · `2분 빠름`. 모르면 null.
+ *
+ * 카스(2026-09-30): *"본인열차 +지연 된다는 정보를 좀 더 크게 해도 될거같아"* — 알약으로 따로
+ * 세우면서 **자리가 생겨 `지연` 낱말을 되살렸다**(v1.7.16 이 한 줄 헤더를 아끼려고 뗐던 두 글자).
+ * 지선 카드 한 줄은 종전대로 [delayText](`+3분`)다 — 그 줄은 여전히 자원이다.
+ */
+internal fun delayBadgeText(delay: Int?): String? = when {
+    delay == null -> null
+    delay > 0 -> "+${delay}분 지연"
+    delay < 0 -> "${-delay}분 빠름"
+    else -> "정시"
+}
+
+/** 지연 알약의 **세기** — 색 한 벌을 고르는 잣대다([MapPalette] 의 `badge*`). */
+internal enum class DelayLevel {
+    /** [DELAY_ALERT_MIN] 분 이상 — `fail` 바탕(종전 [bigDelay] 규칙 그대로). */
+    ALERT,
+    /** 1 ~ [DELAY_ALERT_MIN]−1 분 — 눈에 띄되 경고보다 약하게(옅은 바탕 + 진한 글자). */
+    WARN,
+    /** 정시·빠름 — 차분하게. 빠른 것은 경고가 아니다. */
+    CALM,
+}
+
+/** [delayBadgeText] 와 같은 판정 — 모르면 null(알약을 안 세운다). */
+internal fun delayLevel(delay: Int?): DelayLevel? = when {
+    delay == null -> null
+    bigDelay(delay) -> DelayLevel.ALERT
+    delay > 0 -> DelayLevel.WARN
+    else -> DelayLevel.CALM
+}
+
+/**
  * 신정지선 열차의 **시간표 내외선 태그**(v1.7.16 ④) — 본선과 **반대로 읽힌다**.
  *
  * 자산 전수 확인(2026-09-08 `assets/timetable/line2.csv`):

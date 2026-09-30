@@ -43,6 +43,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
@@ -67,13 +68,14 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextMeasurer
@@ -126,6 +128,7 @@ import kotlin.math.cos
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /*
@@ -307,7 +310,7 @@ private const val LABEL_DROP = 2
  * 확정 표가 허용하는 길(*"더 줄이려면 **긴 역명만** 줄이고 보통 역은 두지 말 것"*)이 이것뿐이다.
  * 한 단(1.5sp) 더 내리면 아랫변 최장 `구로디지털단지` 가 선로 중심에서 나가는 깊이가
  * **182 → 166px**(실측 계산)로 줄어 [namePad] 안쪽으로 들어오고, 그만큼 지도를 왼쪽으로
- * 옮길 자리가 생긴다([mapCenterNudgePx] ⑩).
+ * 옮길 자리가 생긴다([mapCenterFit] ⑩).
  *
  * ⚠ **판독 하한 [LABEL_MIN_SP] 7.0sp 는 [labelStyle] 이 지킨다** — 전체 보기(기준 11.5sp)는
  * 이미 7.0sp 라 **한 픽셀도 안 바뀐다**(11.5 − 1.5×4 = 5.5 → 7.0 으로 되올린다).
@@ -350,24 +353,15 @@ private const val TAG = "BranchLive"
 private const val CLAY_SHADOW_MAX = 15
 
 /**
- * 접힘 세로에서 지도를 왼쪽으로 옮길 수 있는 **한도**(v1.7.14 ⑩ · [mapCenterNudgePx]).
- * 아랫변 역명이 상태바 칩에 닿기 전까지다. **보정 손잡이**: 실화면에서 역명이 칩에 닿으면
- * 여기만 줄인다.
+ * 아랫변 역명과 상태바 칩 알약 사이에 **늘 남기는 틈**(v1.7.20 · [mapPosRoomPx]).
  *
- * ## v1.7.18 — **8dp 는 좁아서 가운데를 못 맞췄다** (카스가 다시 짚은 자리)
- *
- * 카스(2026-09-09): *"폴더 접었을때 보면 노선이 전체적으로 **왼쪽으로 좀 더 가야 중앙 위치**가
- * 맞는거 같은데?"* — [mapCenterNudgePx] 의 산수는 맞았는데(요구 **50.5px**) 이 한도가
- * 8dp = **21px** 이라 **29.5px 가 남아** 선로 네모가 화면 중심보다 그만큼 오른쪽에 섰다
- * (스크린샷 실측: 선로 좌우 끝 258..881 → 중심 569.5 ↔ 화면 중심 540).
- *
- * v1.7.14 가 8dp 로 잡은 근거는 *"아랫변 역명 왼끝 129px ↔ 칩 오른끝 115px = 여유 14px"*
- * 였다. 그 뒤 v1.7.17 이 아랫변 거리를 26 → 16dp 로, v1.7.18 이 다시 **12dp** 로 당기면서
- * 역명이 칩에서 그만큼 물러났다 — **실측 여유 40px**(칩 오른끝 125px · 역명 왼끝 165px).
- * 그래서 한도를 **20dp(52.5px)** 로 올려 요구값 50.5px 가 그대로 먹게 했다.
- * 실측 결과 선로 네모 중심 오차 **+29.5 → 0px**.
+ * ⚠ **v1.7.20 에서 뒤집힘** — v1.7.14~v1.7.19 는 여기 `MAP_NUDGE_MAX`(8 → 20dp) 라는
+ * **옮기는 한도 상수**가 있었다. 칩 알약은 글자배율을 타고 자라는데 한도는 그대로라
+ * 배율 1.5 부터 `2호선` 칩이 `구로디지털단지` 를 물었고(실측 −1px), 배율 2.0 에서는 반대로
+ * 한도에 걸려 지도가 9.5px 오른쪽에 섰다. 이제 한도는 **재서** 구하고([mapPosRoomPx]),
+ * 여기는 그때 남길 틈 하나만 정한다.
  */
-private val MAP_NUDGE_MAX = 20.dp
+private val MAP_NAME_CHIP_GAP = 3.dp
 
 /** 상태바 칩 줄을 화면 끝 쪽으로 붙이는 몫(v1.7.14 ⑩) — 터치 최소 48dp 가 남긴 죽은 여백. */
 private val STATUS_HUG = 4.dp
@@ -798,7 +792,7 @@ private fun CabScreen(
     mineNos: Set<String>,
     /**
      * 내 열차 **행선판 글자**(v1.7.5) — `API 열번 → "홍대입구행"`. **없으면 안 단다**
-     * ([myDestination] — API 행선은 못 믿는다). 헤더도 같은 값을 말한다([mineHead]).
+     * ([myDestination] — API 행선은 못 믿는다). 헤더도 같은 값을 말한다([mineTitle]).
      */
     mineBoards: Map<String, String>,
     candidates: List<String>,
@@ -917,7 +911,7 @@ private fun CabScreen(
      *
      * 가르는 것은 [userPicked] 다. **기본 화면**(아직 아무 칩도 안 누른 상태)은 종전대로
      * 내 열차 방향을 따라가고 전체 보기도 그대로다 — 사용자가 **고른 것만** 절대 규칙이다.
-     * 헤더의 `내 열차 …` 문구는 필터와 무관하게 남고, 숨은 상태면 한 토막이 붙는다([mineHead]).
+     * 헤더의 `내 열차 …` 문구는 필터와 무관하게 남고, 숨은 상태면 한 토막이 붙는다([mineRest]).
      *
      * ⚠ 여기서 한 번만 거른다(v1.6.94). 상태바가 "왜 비었는지"를 말하려면 **거른 뒤**가
      * 비었는지(이 방향만 없다)와 **거르기 전**이 비었는지(진짜 없다)를 둘 다 알아야 한다.
@@ -932,32 +926,59 @@ private fun CabScreen(
     val mineHidden = mineMark != null && drawn.none { it.trainNo == mineMark.trainNo }
 
     /*
-     * ── 접힘 세로에서 루프를 **화면 가운데로** (v1.7.14 ⑩) ─────────
+     * ── 지도 덩어리를 **화면 가운데로** (v1.7.14 ⑩ · **v1.7.20 개정**) ─────────
      *
-     * 카스: *"폴더를 접었을때 보면 노선도가 전체적으로 **약간 오른쪽으로 위치**해있는거 같은데?
-     * … 약간 왼쪽으로 밀면 될꺼같은데?"*
+     * 카스(v1.7.13): *"폴더를 접었을때 보면 노선도가 전체적으로 약간 오른쪽으로"* · (v1.7.19)
+     * *"본선전체보기하면 중간으로 안되어있고, 약간 오른쪽으로 되어있는듯해"*.
      *
      * ⚠ **[inset] 탓이 아니다.** 세로에서 지도는 `rotationZ = 90f` 로 도는데, 그러면 이 [Column]
      * 의 **세로축(자식 쌓이는 방향)이 화면 가로**가 된다. [inset] 의 `start`/`end`(= [safeTop] ·
      * [safeBottom])는 Column 의 **가로축**이라 화면에서는 **위아래** 여백이다 — 좌우와 무관하다.
-     * 화면 좌우를 정하는 것은 **양 끝 띠 두 벌**이고, 그 산수·한도·왜 줄이지 않고 미는지는
-     * [mapCenterNudgePx] KDoc 에 실측과 함께 적어 두었다.
+     * 잣대(선로 + 열차 차선 덩어리)·한도(실제 여유)·모자랄 때 루프 줄이기는 [mapCenterFit] KDoc.
      *
-     * 줄 높이는 **재서** 쓴다(상수로 박지 말 것) — 글자배율이 커지면 칩 줄도 같이 커진다.
+     * 재는 값은 전부 **실측**이다(상수로 박지 말 것 — 글자배율이 칩·헤더를 키운다):
+     * 헤더 줄 · 상태바 줄 · 칩 알약 높이 · 역명 치수([LabelMetrics] — 그린 자리에서) ·
+     * (펼침) 기둥의 화면 위치.
      */
     var headPx by remember { mutableStateOf(0) }
     var statPx by remember { mutableStateOf(0) }
+    /** 상태바 `2호선` 알약의 **보이는** 높이 — 터치 48dp 가 아니라 그려지는 알약이다. */
+    var pillPx by remember { mutableStateOf(0) }
+    /** 캔버스가 그린 역명 치수 — 열차와 무관해 한 번 잡히면 안 바뀐다. */
+    var labelMetrics by remember { mutableStateOf<LabelMetrics?>(null) }
+    /**
+     * 루프를 **깎아도 되는 끝**(px) — 깎은 캔버스에서 역명 하나라도 제자리를 못 찾으면
+     * ([LabelMetrics.fails]) 그 값에서 한 칸씩 **내려가기만** 한다(오르지 않으니 몇 프레임이면 멈춘다).
+     * 실측: 접힘 420 은 40px 안팎까지 43개가 다 선다. **깎아서 역명을 망가뜨리지는 않는다.**
+     */
+    var shrinkCap by remember(filtered) { mutableStateOf(Int.MAX_VALUE) }
+    /**
+     * 깎기 **전**(0px)에 이미 못 선 역명 수 — 깎아서 **더 늘었을 때만** 끝을 내린다. 접힘 450 은
+     * 깎기 전부터 `합정`↔`당산` 하나가 못 갈라진다(v1.7.18 부터 있던 한계) — 그 하나 때문에
+     * 깎기를 통째로 막지는 않는다. `-1` = 아직 모름.
+     */
+    var baseFails by remember(filtered) { mutableStateOf(-1) }
+    /** (가로 그림일 때) 기둥 윗날의 **화면** y — 상태바 아래 보이는 자리의 가운데를 잡는 데 쓴다. */
+    var colTopOnScreen by remember { mutableFloatStateOf(Float.NaN) }
     val dens = LocalDensity.current
-    val nudge = with(dens) {
-        mapCenterNudgePx(
-            rotated = mapDeg == 90f,
-            leftBandPx = if (statPx == 0) 0 else statPx + namePad(big).roundToPx(),
-            rightBandPx = if (headPx == 0) 0 else headPx + trainPad(big).roundToPx(),
-            maxPx = MAP_NUDGE_MAX.roundToPx(),
-        ).toDp()
+    val view = LocalView.current
+    /**
+     * 상태바 칩 줄이 **시작하는 자리**(v1.7.20). 접힘(회전)에서는 아랫변 왼쪽 끝 역명
+     * `구로디지털단지`(아랫변에서 가장 깊이 내려오는 이름 — 긴 이름 판독 하한 7.0sp 가 배율을 타
+     * 다른 이름보다 21px 깊다)가 **칩 위에 오지 않게** 그 이름 끝 뒤에서 시작한다. 그러면 칩과
+     * 다투는 깊이가 125 → 104px 로 줄어 그만큼 지도를 더 옮길 수 있다(실측 배율 1.3). 가로 그림은
+     * 종전 12dp.
+     */
+    val statusStart = with(dens) {
+        val lm = labelMetrics
+        if (mapDeg != 90f || lm == null) 12.dp
+        else maxOf(12.dp, (lm.cornerEndX + MAP_NAME_CHIP_GAP.toPx()).toDp())
     }
 
-    Column(Modifier.fillMaxSize().padding(inset)) {
+    Column(
+        Modifier.fillMaxSize().padding(inset)
+            .onGloballyPositioned { if (mapDeg == 0f) colTopOnScreen = it.positionOnScreen().y }
+    ) {
         Box(Modifier.onSizeChanged { headPx = it.height }) {
             CabHeader(nowMillis, recptnDt, recptnAtMillis,
                 mineMark, mineRoute, mineBoards[mineMark?.trainNo], candidates,
@@ -988,6 +1009,55 @@ private fun CabScreen(
         ) {
             val mapH = minOf(maxHeight, maxWidth * LOOP_MAX_H)
             val d = LocalDensity.current
+            /*
+             * 가운데 맞추기(v1.7.20 — [mapCenterFit]). 잣대는 **바깥 선로 + 윗변 열차 차선** 덩어리.
+             * 차선 폭은 **0단 남의 열차 상자**(바퀴는 선로 겉면 · 지붕까지)라 열차가 없어도 같다.
+             */
+            val fit = with(d) {
+                val tpPx = trainPad(big).toPx()
+                val npPx = namePad(big).toPx()
+                val laneOut = (badgeOff(big, otherK) +
+                    (LOCO_BOX_H / 2f * locoScale(big) * otherK).dp).toPx()
+                val railHalf = railW(big).toPx() / 2f
+                if (mapDeg == 90f) {
+                    // 접힘(회전) — 기둥 세로축 = 화면 가로. 한가운데 = 기둥 한가운데(가로 여백 없음).
+                    val lm = labelMetrics
+                    if (headPx == 0 || statPx == 0 || pillPx == 0 || lm == null) MapFit(0)
+                    else mapCenterFit(
+                        needPx = mapCenterNeedPx(
+                            statPx + npPx.roundToInt(), headPx + tpPx.roundToInt(), laneOut, railHalf),
+                        posRoomPx = mapPosRoomPx(
+                            statPx, pillPx, STATUS_HUG.roundToPx(), npPx.roundToInt(),
+                            // 칩 줄은 모서리 역명(`구로디지털단지`) 뒤에서 시작하므로(`statusStart`)
+                            // 그 이름은 칩 위에 없다 — 나머지 아랫변 이름의 깊이만 본다.
+                            lm.depth.roundToInt(), MAP_NAME_CHIP_GAP.roundToPx()),
+                        // 헤더 쪽 여유 0 — 계단 오른 열차는 캔버스 윗날까지 쓴다(그 너머는 헤더다).
+                        negRoomPx = 0, canShrink = true,
+                        // 루프를 줄여도 세로 변 이름 띠([drawCabLoop] `bandH0`)가 `sideNeed` 밑으로는
+                        // 안 가게 — 넘으면 이름이 밖 차선으로 나가 배치가 통째로 바뀐다(실측 배율 2.0).
+                        // 8px 는 반올림으로 경계에서 갈리지 않게 두는 몫이다.
+                        maxShrinkPx = minOf(shrinkCap, (mapH.toPx() - tpPx - npPx -
+                            (if (filtered) 0f else 2f * laneGap(big).toPx()) - railW(big).toPx() -
+                            lm.sideNeed - 8f).toInt()),
+                    )
+                } else {
+                    // 가로 그림(펼침·가로 폰) — 화면 세로축. 잣대는 **상태바 아래 보이는 자리**의
+                    // 가운데다(맨 위 상태바는 지도 화면이 아니다). 캔버스는 칸 안에서만 옮기고
+                    // 루프는 안 줄인다(가로 폰은 얇은 띠라 줄이면 안 되는 자리 — v1.7.7 D1).
+                    @Suppress("DEPRECATION")
+                    val screenH = view.display?.let { dp ->
+                        android.graphics.Point().also { dp.getRealSize(it) }.y
+                    }
+                    if (colTopOnScreen.isNaN() || screenH == null || headPx == 0) MapFit(0) else {
+                        val boxH = maxHeight.toPx()
+                        val mh = mapH.toPx()
+                        val blockMid = headPx + (boxH - mh) / 2f + (tpPx - laneOut + mh - npPx + railHalf) / 2f
+                        val target = (inset.calculateTopPadding().toPx() + screenH) / 2f - colTopOnScreen
+                        val room = ((boxH - mh) / 2f).toInt()
+                        mapCenterFit((target - blockMid).roundToInt(), room, room, canShrink = false)
+                    }
+                }
+            }
             // 지도 안 글자배율 상한 — 그림은 dp, 글자만 sp라 배율을 키우면 역 이름이 넘친다.
             // ⚠ TextMeasurer 는 반드시 이 안에서 만든다(지선 지도와 같은 처방).
             CompositionLocalProvider(
@@ -1053,9 +1123,13 @@ private fun CabScreen(
                 Canvas(
                     // ⚠ 세로는 [mapH](= 가로 × [LOOP_MAX_H] 상한)다 — `fillMaxSize` 로 되돌리면
                     //   펼침에서 루프가 다시 정사각형이 된다(v1.7.13 ⑥가).
-                    // ⚠ [nudge] 는 **옮기기**다(크기를 안 줄인다 — [mapCenterNudgePx] ⑩).
-                    //   `padding` 으로 바꾸면 루프 안이 좁아져 배율 1.5 에서 라벨이 겹친다.
-                    Modifier.fillMaxWidth().height(mapH).offset(y = nudge).pointerInput(Unit) {
+                    // ⚠ [fit] 은 **먼저 옮기고**(크기 그대로), 여유가 모자랄 때만 한쪽 끝을 깎는다
+                    //   ([mapCenterFit]). 가운데 정렬 칸이라 깎은 높이의 절반은 저절로 옮겨지므로
+                    //   남은 절반만 `offset` 에 더한다.
+                    Modifier.fillMaxWidth()
+                        .height(mapH - with(d) { (fit.shrinkHeadPx + fit.shrinkStatPx).toDp() })
+                        .offset(y = with(d) { (fit.nudgePx + (fit.shrinkHeadPx - fit.shrinkStatPx) / 2f).toDp() })
+                        .pointerInput(Unit) {
                         detectTapGestures { tap ->
                             fun dist(o: Offset) =
                                 hypot((o.x - tap.x).toDouble(), (o.y - tap.y).toDouble())
@@ -1080,17 +1154,26 @@ private fun CabScreen(
                     // 전체 보기만 **복선**이다(v1.7.4). 방향 필터를 켜면 한 방향뿐이라
                     // 선로도 한 줄 — v1.7.3 화면 그대로다.
                     hit = drawCabLoop(tm, placed, mineNos, mineBoards, big, picked,
-                        labelSp, otherK, phase, mapDeg, pal, dual = !filtered)
+                        labelSp, otherK, phase, mapDeg, pal, dual = !filtered) { m ->
+                        // 바뀔 때만 쓴다(데이터 클래스 같음) — 캔버스는 연기 위상 때문에 매 프레임
+                        // 다시 그려진다.
+                        if (m != labelMetrics) labelMetrics = m
+                        // 깎은 캔버스에서 역명이 못 서면 깎는 끝을 한 칸(3dp) 내린다(오르지 않는다).
+                        val cut = fit.shrinkHeadPx + fit.shrinkStatPx
+                        if (cut == 0 && baseFails < 0) baseFails = m.fails
+                        if (m.fails > baseFails.coerceAtLeast(0) && cut > 0 && cut <= shrinkCap)
+                            shrinkCap = (cut - 3.dp.toPx().roundToInt()).coerceAtLeast(0)
+                    }
                 }
             }
         }
-        // ⚠ `offset` 은 **신고 높이를 안 바꾼다** — 칩 알약만 화면 끝 쪽으로 8dp 붙여
-        //   아랫변 역명이 다가올 자리를 벌어 준다(⑩ · [mapCenterNudgePx] KDoc).
+        // ⚠ `offset` 은 **신고 높이를 안 바꾼다** — 칩 알약만 화면 끝 쪽으로 붙여
+        //   아랫변 역명이 다가올 자리를 벌어 준다(⑩ · [mapPosRoomPx] 가 이 몫을 센다).
         //   세로에서 Column 의 아래쪽이 곧 화면 **왼쪽 끝**이다.
         Box(Modifier.onSizeChanged { statPx = it.height }
             .offset(y = if (mapDeg == 90f) STATUS_HUG else 0.dp)) {
             CabStatusBar(mine, mineMark, candidates, emptyMsg, error != null && trains.isEmpty(),
-                big, pal, eff, onFilter)
+                big, pal, eff, onFilter, start = statusStart) { pillPx = it }
         }
     }
 }
@@ -1131,136 +1214,39 @@ internal fun mainEmptyReason(
 private val WEEKDAYS = listOf("월", "화", "수", "목", "금", "토", "일")
 
 /**
- * 후보 열번 줄이기 — 지선 다이아는 한 근무가 **스무 개 넘는 열번**을 잡아서 그대로 이으면
- * 헤더 한 줄을 통째로 먹는다(실측: `5668·5669·…·5527` 20개가 화면 세로를 다 채웠다).
+ * 헤더 **한 줄** (v1.6.88 · **v1.7.20 개정**) —
+ * `2호선 실시간 · 09/30(화) 11:41:45 · `**`내 열차 2489 · 외선 · 홍대입구행`**` [+3분 지연] ·
+ * 다음 역 3분 후 · 신림 진입`, 오른쪽 끝에 ↻ · 닫기 X.
  *
- * v1.6.88 에서 헤더·상태바가 **한 줄**이 되며 넷 → 둘로 줄였다. 넘쳐서 `Ellipsis` 가 걸리면
- * 뒤의 `외 N개` 부터 잘려 **몇 대인지도 모르게** 되기 때문이다.
+ * ## v1.7.20 — 내 열차 토막을 **1.4배**, 지연은 **알약**으로 따로 세운다
  *
- * [take] 는 헤더가 폭에 안 들어갈 때 **한 개로 더 줄이는** 손잡이다(v1.6.94 [HEAD_LADDER]).
- * 몇 개를 적든 `외 N개` 가 총수를 지키므로 정보는 안 사라진다.
- */
-private fun shortNos(nos: List<String>, take: Int = 2): String =
-    nos.take(take).joinToString("·") + if (nos.size > take) " 외 " + (nos.size - take) + "개" else ""
-
-/**
- * 헤더 한 줄의 **앞 토막** — 잘리면 안 되는 것들. `null` = 후보 열번조차 없다.
+ * 카스(2026-09-30): *"본인열차 +지연 된다는 정보를 좀 더 크게 해도 될거같아"*. 종전엔 한 줄이
+ * 전부 같은 9.5sp(펼침 12sp)라 내 열차가 날짜·시계에 묻혔다. 이제 네 토막이다:
+ *  1. **앞**(제목 · 날짜 · 기준 시각) — 종전 크기.
+ *  2. **내 열차**([mineTitle]) — 접힘 13.5sp · 펼침 17sp **ExtraBold**. 사다리가 안 건드린다.
+ *  3. **지연 알약**([delayBadgeText]) — `+3분 지연`·`정시`·`2분 빠름`. 5분 이상은 `fail` 바탕
+ *     (종전 [bigDelay] 규칙), 1~4분은 옅은 바탕 + 진한 글자, 정시·빠름은 차분하게.
+ *     대비는 **알약 위에서** 남색·클레이 다 4.5:1 이상([MapPalette] `badge*`).
+ *  4. **뒤**([mineRest] / [noMineText]) — 종전 크기. 다음 역 · 현재 역 상태.
+ * 내 열차가 없는 날은 종전과 같은 글줄이다(알약 없음).
  *
- * 열번·방향·지연·다음 역을 앞에 둔다(사용자 요청: *"노선 공간을 조금 더"* → 헤더가 한 줄이
- * 되면서 넘칠 수 있는데, 잘려도 되는 건 **현재 역·상태**뿐이다 — 그건 지도에 빨간 점으로도
- * 나온다).
+ * ⚠ **v1.7.20 에서 뒤집힘** — 종전엔 내 열차가 5분 이상 늦으면 **글줄 전체**가 `fail` 색이었다.
+ * 이제 경고는 **알약 하나**가 말하고 내 열차 글자는 늘 내 열차 색이다(한 줄이 통째로 주황이면
+ * 알약이 안 보인다).
  *
- * [delay]·[nextSec] 는 [Line2Timetable] 이 준 값이고 **시간표에 열번이 없으면 null** 이라
- * 그 두 토막만 조용히 빠진다(없는 값을 지어내지 않는다 — [MyTrain] KDoc 과 같은 규칙).
+ * ⚠ 줄 높이는 **닫기 단추(36dp)** 가 정하고, 큰 글자가 그보다 커지는 배율(≈1.7 이상)에서만
+ * 헤더가 조금 두꺼워진다 — 지도 가운데 맞추기는 헤더 두께를 **재서** 쓰므로 따라온다.
  *
- * [dest] 도 같은 규칙이다(v1.7.5) — [myDestination] 이 행로표 표지·접두로 **확실히 아는
- * 경우에만** 온다. 지붕 위 행선판과 **같은 값**이라 서로를 확인해 주고, 열차가 계단에 올라
- * 판이 작게 보일 때도 헤더에서 읽힌다.
- * ⚠ **API 행선(`destName`)을 여기 쓰지 말 것** — 타절·입고 열차가 전부 `성수종착` 이다.
- *
- * [hidden] 은 **필터가 내 열차를 숨겼을 때**만 온다(v1.7.5 ⑥) — 사용자가 내선/외선을 직접
- * 고르면 반대 방향인 내 열차는 **안 그린다**. 지도에 없는 이유를 헤더가 한 토막으로 말한다.
- */
-private fun mineHead(
-    mineMark: MainTrainMark?, mineRoute: String?, dest: String?, candidates: List<String>,
-    delay: Int?, nextSec: Int?, hidden: Boolean = false,
-): String? = when {
-    mineMark != null ->
-        // 열번은 **API 번호 그대로**다(`8340`). 행로표와 다를 때만 괄호로 같이 적는다 —
-        // 승무원이 지도에서 보는 숫자와 행로표 숫자가 다른 이유를 화면이 스스로 말해야 한다(v1.7.2).
-        "내 열차 " + mineMark.trainNo +
-            (mineRoute?.takeIf { it != mineMark.trainNo }?.let { "(행로표 $it)" }.orEmpty()) +
-            " · " + (if (mineMark.inner) "내선" else "외선") +
-            dest?.let { " · $it" }.orEmpty() +
-            // ④ v1.7.16 — 문구를 [delayText] 한 곳으로 모았다(지선 카드와 같은 말).
-            //    `+3분 지연` → **`+3분`**: `정시` 와 나란히 서면 두 글자가 없어도 뜻이 살고,
-            //    헤더 한 줄은 [HEAD_LADDER] 가 조각을 버려 가며 지키는 자원이다.
-            delayText(delay)?.let { " · $it" }.orEmpty() +
-            nextSec?.let {
-                if (it <= 0) " · 곧 도착" else " · 다음 역 ${(it + 59) / 60}분 후"
-            }.orEmpty() +
-            // 필터에 가려 지도에 없다 — **한 토막만**(어느 화면에 있는지).
-            if (hidden) " (${if (mineMark.inner) "내선" else "외선"} 화면에 있음)" else ""
-    candidates.isNotEmpty() -> "내 열차 미검출(운행 전/후)"
-    else -> null
-}
-
-/** 헤더 한 줄의 **뒤 토막**. */
-private fun mineTail(mineMark: MainTrainMark?, candidates: List<String>, take: Int = 2): String =
-    when {
-        // ⚠ 도착 예정 **시각은 만들지 않는다** — 그 데이터가 앱에 없다(MyTrain KDoc).
-        // API 가 준 역명(statnNm)과 상태(trainSttus)만 그대로 옮긴다.
-        mineMark != null -> mineMark.statusText
-        candidates.isNotEmpty() -> "오늘 열번 " + shortNos(candidates, take)
-        else -> ""
-    }
-
-/**
- * 헤더 한 줄에서 **무엇을 먼저 버릴지** — 넉넉한 것부터 짧은 것 순. 첫 번째로 **폭에 들어가는**
- * 칸을 쓴다([CabHeader] 가 [TextMeasurer] 로 실제로 재서 고른다).
- *
- * ## v1.6.94 — 잘려서 `…` 로 끝나는 것은 실패다
- *
- * v1.6.93 은 헤더를 한 문장으로 합쳐 `weight(1f)` 하나만 줘서 **닫기 X 를 살렸는데**, 대신
- * 남은 폭을 못 채운 만큼이 `Ellipsis` 로 잘렸다 — 실화면에서 `… · 오늘 열…` 로 끝나
- * **오늘 열번(2501·2523 외 2개)이 통째로 사라졌다.** 단추는 살고 정보가 죽은 것이다.
- *
- * 사용자 확정 우선순위: **내 열차 상태 > 오늘 열번 > 날짜·시계.** 그래서 사다리는 위에서부터
- * ① 글자 한 단계 축소(하한 [HEAD_MIN_K]) ② 요일 ③ 초 ④ 열번 목록 한 개로 ⑤ 날짜 ⑥ 제목
- * 순으로만 덜어 내고, **마지막 칸에도 내 열차 상태와 오늘 열번은 남는다.** 각 칸은 앞 칸의
- * 부분집합이라 되돌아가지 않는다.
- */
-private data class HeadSpec(
-    val title: Boolean = true, val date: Boolean = true, val weekday: Boolean = true,
-    val seconds: Boolean = true, val take: Int = 2, val k: Float = 1f,
-)
-
-/** 글자 축소 하한 — 이 밑으로는 안 줄이고 **조각을 버린다**(작아서 못 읽으면 잘린 것과 같다). */
-private const val HEAD_MIN_K = 0.88f
-
-private val HEAD_LADDER = listOf(
-    HeadSpec(),
-    HeadSpec(k = HEAD_MIN_K),                                        // ① 글자 한 단계
-    HeadSpec(weekday = false, k = HEAD_MIN_K),                       // ② 요일 `(금)`
-    HeadSpec(weekday = false, seconds = false, k = HEAD_MIN_K),      // ③ 시계 초
-    HeadSpec(weekday = false, seconds = false, take = 1, k = HEAD_MIN_K),          // ④ 열번 목록
-    HeadSpec(date = false, weekday = false, seconds = false, take = 1, k = HEAD_MIN_K),   // ⑤ 날짜
-    HeadSpec(title = false, date = false, weekday = false, seconds = false,
-        take = 1, k = HEAD_MIN_K),                                   // ⑥ 제목
-)
-
-/**
- * 헤더 **한 줄** (v1.6.88) — `2호선 실시간 · 09/04(금) 10:08:57 · 내 열차 2039 · 외선 ·
- * +2분 지연 · 다음 역 3분 후 · 동대문역사문화공원 진입`, 오른쪽 끝에 닫기 X.
- *
- * 사용자(기관사) 요청: *"위쪽 헤더는 1줄로, 텍스트 크기를 한 단계씩만 더 줄여서 노선 공간을
- * 조금 더 확보"*. 두 줄(제목+큰 시계 / 내 열차)을 한 줄로 접고 글자를 2sp 씩 내렸다.
- *
- * ⚠ 줄 높이는 이제 **닫기 단추가 정한다** — 기본 [IconButton] 은 48dp 라 글자를 줄여도
- * 높이가 안 줄었다. 36dp 로 묶어 실제로 12dp 를 지도에 돌려준다.
- *
- * ⚠ **늘어나는 토막에 [weight] 를 준다**(v1.6.93 정정). `Row` 는 무게 **없는** 자식을 먼저
- * 순서대로 재면서 남은 폭을 깎아 나가고, 무게 있는 자식이 그 나머지를 나눠 갖는다. v1.6.88 은
- * 이 순서를 거꾸로 적어 놓고 [mineHead] 토막을 **무게 없이** 뒀는데, 그러면 긴 `내 열차 …`
- * 한 줄이 남은 폭을 통째로 먹고 **뒤에 오는 닫기 X 가 폭 0 으로 측정된다**(배율 2.0 근처).
- *
- * ⚠ **줄이는 것과 잘리는 것은 다르다**(v1.6.94). v1.6.93 은 한 문장으로 합쳐 닫기 X 를
- * 살렸지만, 남은 폭을 넘는 몫이 그대로 `Ellipsis` 가 됐다 — 실화면이 `… · 오늘 열…` 로 끝나
- * **오늘 열번이 사라졌다.** 이제 [HEAD_LADDER] 를 위에서부터 [TextMeasurer] 로 **실제로 재서**
- * 처음으로 들어가는 칸을 고른다. 폭은 `weight(1f)` 자리에 놓은 [BoxWithConstraints] 가
- * **Row 가 실제로 준 값**으로 알려 주므로 닫기 X 폭을 추측하지 않는다.
+ * ⚠ **늘어나는 토막에 [weight] 를 준다**(v1.6.93) — 무게 없는 긴 토막이 닫기 X 를 폭 0 으로
+ * 만든 적이 있다. ⚠ **잘리는 것은 실패다**(v1.6.94) — [HEAD_LADDER] 를 위에서부터
+ * [TextMeasurer] 로 **실제로 재서** 처음으로 들어가는 칸을 고른다.
  */
 @Composable
 private fun CabHeader(
     nowMillis: Long,
     /**
      * ③ **기준 시각**(v1.7.16) — 응답의 `recptnDt` 와 그것을 **처음 본 우리 시각**.
-     *
-     * 종전 이 자리는 **폰 시계**였다. 통신이 끊겨도 초가 흘러 화면이 살아 있어 보였는데,
-     * 이제 서버가 자료를 받은 시각이라 **끊기면 멎는다.** 확정 표의 헤더 우선순위
-     * (내 열차 상태 > 오늘 열번 > 날짜·시계)에서 **자리는 종전 시계 그대로**다 —
-     * 새 조각을 늘리지 않았으므로 [HEAD_LADDER] 의 사다리(초 → 열번 → 날짜 → 제목)도
-     * 손댈 것이 없고, 폭이 모자라면 종전처럼 **초부터** 덜어진다.
+     * 통신이 끊기면 멎는다(붉은 색 + `멈춤`). 자리는 종전 시계 그대로다.
      */
     recptnDt: String, recptnAtMillis: Long,
     mineMark: MainTrainMark?, mineRoute: String?,
@@ -1268,7 +1254,7 @@ private fun CabHeader(
     mineDest: String?,
     candidates: List<String>,
     delay: Int?, nextSec: Int?,
-    /** 내 열차가 **필터에 가려** 지도에 없나 — 문구 끝에 한 토막이 붙는다(v1.7.5 ⑥). */
+    /** 내 열차가 **필터에 가려** 지도에 없나 — 뒤 토막 맨 앞에 한 마디가 붙는다(v1.7.5 ⑥). */
     mineHidden: Boolean,
     big: Boolean, pal: MapPalette,
     /** 즉시 갱신(캐시 건너뛰기) — 지선 카드의 그 ↻ 와 **같은 함수**다([RefreshButton]). */
@@ -1278,52 +1264,80 @@ private fun CabHeader(
     val t = remember(nowMillis / 1_000) {
         LocalDateTime.ofInstant(Instant.ofEpochMilli(nowMillis), ZoneId.systemDefault())
     }
-    /** ③ 기준 시각이 60초째 안 바뀌었나 — 그러면 붉은 색 + `멈춤` 낱말이다. */
     val stale = recptnStale(recptnDt, recptnAtMillis, nowMillis)
     val baseSp = if (big) 12f else 9.5f
     // 기준 시각은 노란색 유지(사용자 확정) — 한 줄에서 눈에 걸리라고 2sp 만 크게.
     val clockSp = if (big) 14f else 11.5f
+    /** 내 열차 토막 — 나머지의 약 1.4배(v1.7.20). */
+    val mineSp = if (big) 17f else 13.5f
+    /** 지연 알약 글자 — 내 열차보다 한 단 작게(알약 테·여백이 몸집을 채운다). */
+    val badgeSp = if (big) 14f else 11.5f
     // 크림 바탕에서는 노랑이 안 보인다 — 팔레트가 스타일에 맞는 강조색을 준다.
-    // ④ **많이 늦으면**(≥ [DELAY_ALERT_MIN] 분) 내 열차 토막이 통째로 [MapPalette.fail] 이다.
-    val mineColor = when {
-        bigDelay(delay) -> pal.fail
-        mineMark != null -> pal.mineText
-        else -> pal.dim
+    val mineColor = if (mineMark != null) pal.mineText else pal.dim
+    val title = mineMark?.let { mineTitle(it.trainNo, mineRoute, it.inner, mineDest) }
+    val level = if (mineMark != null) delayLevel(delay) else null
+    val badge = if (mineMark != null) delayBadgeText(delay) else null
+    val (badgeBg, badgeInk) = when (level) {
+        DelayLevel.ALERT -> pal.fail to pal.badgeAlertInk
+        DelayLevel.WARN -> pal.badgeWarnBg to pal.badgeWarnInk
+        else -> pal.badgeCalmBg to pal.badgeCalmInk
     }
-    val head = mineHead(mineMark, mineRoute, mineDest, candidates, delay, nextSec, mineHidden)
     val tm = rememberTextMeasurer()
+    val dens = LocalDensity.current
+    /**
+     * 내 열차 토막·알약의 **마지막 비상 배수** — 사다리 끝 칸(⑧)에서도 폭이 모자랄 때만 1 밑으로
+     * 내려간다(자르는 것보다 조금 작은 것이 낫다). 실측 펼침 × 배율 2.0 에서도 ⑧ 이면 1 이다.
+     */
+    var squeeze = 1f
+    fun mineStyle() = TextStyle(fontSize = (mineSp * squeeze).sp, fontWeight = FontWeight.ExtraBold, color = mineColor)
+    fun badgeStyle() = TextStyle(fontSize = (badgeSp * squeeze).sp, fontWeight = FontWeight.ExtraBold, color = badgeInk)
+    val badgePadH = 7.dp
+    val gap = 6.dp
 
-    fun build(s: HeadSpec): Pair<AnnotatedString, TextStyle> {
-        val txt = buildAnnotatedString {
-            if (s.title) withStyle(
-                SpanStyle(color = pal.title, fontWeight = FontWeight.Bold)
-            ) { append("2호선 실시간") }
-            if (s.title) append(" · ")
-            if (s.date) withStyle(SpanStyle(color = pal.dim)) {
-                append("%02d/%02d".format(t.monthValue, t.dayOfMonth))
-                if (s.weekday) append("(${WEEKDAYS[t.dayOfWeek.value - 1]})")
-                append(" ")
-            }
-            withStyle(
-                SpanStyle(
-                    color = if (stale) pal.fail else pal.clock, fontSize = (clockSp * s.k).sp,
-                    fontWeight = FontWeight.Bold,
-                )
-            ) {
-                // ③ 폰 시계가 아니라 **응답의 기준 시각**이다. 사다리 ③ 이 `초`를 덜어내면
-                //    `20:54` 만 남는다 — 종전 시계와 **같은 규칙**이라 사다리는 안 바뀌었다.
-                val clock = recptnClock(recptnDt)
-                append(if (s.seconds) clock else clock.substringBeforeLast(":"))
-                if (stale) append(" 멈춤")
-            }
-            val info = listOfNotNull(
-                head, mineTail(mineMark, candidates, s.take).ifEmpty { null },
-            ).joinToString(" · ")
-            if (info.isNotEmpty()) withStyle(
-                SpanStyle(color = mineColor, fontWeight = FontWeight.Bold)
-            ) { append(" · $info") }
+    /** 앞 토막(제목·날짜·시계) — 뒤에 무엇이 오면 ` · ` 로 끝난다. 다 덜어 냈으면(⑧) 빈 글자. */
+    fun lead(s: HeadSpec, more: Boolean) = buildAnnotatedString {
+        if (!s.title && !s.date && !s.clock) return@buildAnnotatedString
+        if (s.title) {
+            withStyle(SpanStyle(color = pal.title, fontWeight = FontWeight.Bold)) { append("2호선 실시간") }
+            append(" · ")
         }
-        return txt to TextStyle(fontSize = (baseSp * s.k).sp)
+        if (s.date) withStyle(SpanStyle(color = pal.dim)) {
+            append("%02d/%02d".format(t.monthValue, t.dayOfMonth))
+            append("(${WEEKDAYS[t.dayOfWeek.value - 1]}) ")
+        }
+        if (s.clock) withStyle(
+            SpanStyle(
+                color = if (stale) pal.fail else pal.clock, fontSize = (clockSp * s.k).sp,
+                fontWeight = FontWeight.Bold,
+            )
+        ) {
+            // ③ 폰 시계가 아니라 **응답의 기준 시각**이다. 사다리 ③ 이 `초`를 덜어내면 `20:54` 만 남는다.
+            val clock = recptnClock(recptnDt)
+            append(if (s.seconds) clock else clock.substringBeforeLast(":"))
+            if (stale) append(" 멈춤")
+        }
+        if (more) withStyle(SpanStyle(color = mineColor, fontWeight = FontWeight.Bold)) { append(" · ") }
+    }
+    /** 뒤 토막 — 내 열차가 있으면 [mineRest], 없으면 종전 글줄([noMineText]). */
+    fun rest(s: HeadSpec) =
+        if (mineMark != null) mineRest(mineMark.inner, nextSec, mineMark.statusText, mineHidden, s)
+        else noMineText(candidates, s.take).orEmpty()
+    fun baseStyle(s: HeadSpec) = TextStyle(fontSize = (baseSp * s.k).sp)
+    fun restAnn(s: HeadSpec) = buildAnnotatedString {
+        val r = rest(s)
+        if (r.isNotEmpty()) withStyle(SpanStyle(color = mineColor, fontWeight = FontWeight.Bold)) {
+            // 내 열차가 있으면 알약 뒤라 ` · ` 로 잇고, 없으면 앞 토막이 이미 ` · ` 로 끝났다.
+            append(if (title != null) " · $r" else r)
+        }
+    }
+    /** 이 칸 한 줄의 폭(px) — 조각마다 재서 더한다(알약은 여백·테·양옆 틈 포함). */
+    fun width(s: HeadSpec): Int = with(dens) {
+        val more = title != null || rest(s).isNotEmpty()
+        var w = tm.measure(lead(s, more), baseStyle(s), maxLines = 1).size.width
+        if (title != null) w += tm.measure(title, mineStyle(), maxLines = 1).size.width
+        if (badge != null) w += tm.measure(badge, badgeStyle(), maxLines = 1).size.width +
+            (badgePadH * 2 + 2.dp + gap * 2).roundToPx()
+        w + tm.measure(restAnn(s), baseStyle(s), maxLines = 1).size.width
     }
 
     Row(
@@ -1335,25 +1349,37 @@ private fun CabHeader(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         BoxWithConstraints(Modifier.weight(1f)) {
-            val room = constraints.maxWidth
-            val pick = HEAD_LADDER.asSequence().map(::build).firstOrNull { (txt, style) ->
-                tm.measure(txt, style, maxLines = 1).size.width <= room
-            } ?: build(HEAD_LADDER.last())
-            Text(
-                pick.first, style = pick.second,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            val s = firstFitting(HEAD_LADDER) { width(it) <= constraints.maxWidth }
+            // 끝 칸에서도 넘치면(극단 배율) 내 열차·알약까지 같은 비율로 줄여 **자르지 않는다**.
+            squeeze = 1f
+            width(s).takeIf { it > constraints.maxWidth }?.let { w ->
+                squeeze = (constraints.maxWidth.toFloat() / w).coerceIn(0.6f, 1f)
+            }
+            val more = title != null || rest(s).isNotEmpty()
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(lead(s, more), style = baseStyle(s), maxLines = 1, softWrap = false)
+                if (title != null) Text(title, style = mineStyle(), maxLines = 1, softWrap = false)
+                if (badge != null) Surface(
+                    Modifier.padding(horizontal = gap),
+                    shape = RoundedCornerShape(50), color = badgeBg,
+                    border = BorderStroke(
+                        1.dp, if (level == DelayLevel.CALM) badgeInk.copy(alpha = 0.35f) else pal.fail),
+                ) {
+                    Text(badge, style = badgeStyle(), maxLines = 1, softWrap = false,
+                        modifier = Modifier.padding(horizontal = badgePadH, vertical = 1.dp))
+                }
+                // 마지막 칸에서도 넘치면(극단 배율) 여기만 잘린다 — 내 열차·알약은 앞에서 이미 섰다.
+                Text(restAnn(s), style = baseStyle(s), maxLines = 1, softWrap = false,
+                    overflow = TextOverflow.Ellipsis)
+            }
         }
         // ↻ 는 **닫기 X 왼쪽**이다(v1.7.5 ⑤ 사용자 지정). 무게 없는 자식이라 Row 가 먼저
         // 재고, 위 [BoxWithConstraints] 는 **그 폭을 뺀 나머지**로 사다리를 고른다.
         //
         // ⚠ **높이만 36dp 로 줄여 신고한다**(v1.7.7 A5). [RefreshButton] 은 `Surface(onClick)`
-        // 이라 `minimumInteractiveComponentSize()` 가 레이아웃 크기까지 **48dp** 로 올린다 —
-        // v1.7.5 가 이 단추를 넣으면서 헤더가 36 → 48dp 로 커졌고 그만큼(12dp) 지도가 줄었다.
+        // 이라 `minimumInteractiveComponentSize()` 가 레이아웃 크기까지 **48dp** 로 올린다.
         // 아래 [shrinkHeight] 는 **재기는 48dp 로 재고 부모에게는 36dp 라고 말한 뒤 가운데
-        // 정렬로 얹는다** — Row 는 clip 하지 않으므로 위아래로 6dp 씩 넘친 부분도 그대로
-        // 눌린다(터치 48dp 유지). `requiredSize` 로 자식을 키우면 Row 가 그 크기를 그대로
-        // 받아 헤더가 다시 48dp 가 된다 — 신고 높이를 줄이는 쪽이라야 한다.
+        // 정렬로 얹는다** — Row 는 clip 하지 않으므로 넘친 부분도 그대로 눌린다(터치 48dp 유지).
         Box(Modifier.shrinkHeight(36.dp)) { RefreshButton(pal, onRefresh) }
         IconButton(onClick = onDismiss, modifier = Modifier.size(36.dp)) {
             Icon(Icons.Default.Close, "닫기", Modifier.size(20.dp), tint = pal.title)
@@ -1383,9 +1409,13 @@ private fun CabStatusBar(
     mine: MyTrain?, mineMark: MainTrainMark?, candidates: List<String>,
     empty: String?, failed: Boolean, big: Boolean, pal: MapPalette,
     filter: DirFilter, onFilter: (DirFilter) -> Unit,
+    /** 칩 줄이 시작하는 자리 — 접힘에서는 모서리 역명 뒤다(v1.7.20 · [CabScreen] `statusStart`). */
+    start: Dp = 12.dp,
+    /** `2호선` 알약의 **보이는** 높이(px) — 가운데 맞추기가 역명↔칩 여유를 재는 데 쓴다(v1.7.20). */
+    onPillPx: (Int) -> Unit,
 ) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
+        Modifier.fillMaxWidth().padding(start = start, end = 12.dp, top = 3.dp, bottom = 3.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
@@ -1402,7 +1432,8 @@ private fun CabStatusBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            Chip("2호선", big, pal.rail, pal)
+            Chip("2호선", big, pal.rail, pal,
+                modifier = Modifier.onSizeChanged { onPillPx(it.height) })
             // 정보 칩은 안쪽 Row 가 준 나머지 안에서만 늘어난다 — 넘치면 여기만 `Ellipsis` 다.
             // 잘린 정보는 헤더 줄에 그대로 다시 나오지만, 못 누르는 단추는 없는 단추다.
             val shrink = Modifier.weight(1f, fill = false)
@@ -1425,7 +1456,7 @@ private fun CabStatusBar(
                         big, pal.info, pal, modifier = shrink,
                     )
                 candidates.isNotEmpty() ->
-                    Chip("오늘 열번 " + shortNos(candidates), big, pal.info, pal, modifier = shrink)
+                    Chip("오늘 열번 " + nosBrief(candidates), big, pal.info, pal, modifier = shrink)
                 else -> Chip("오늘 근무 열번: 없음", big, pal.dim, pal, modifier = shrink)
             }
         }
@@ -1609,6 +1640,20 @@ private fun labelStyle(name: String, sizeSp: Float, pal: MapPalette): TextStyle 
 }
 
 /**
+ * 캔버스가 **그린 자리에서** 잰 역명 치수(v1.7.20) — 가운데 맞추기([mapCenterFit])가 쓴다.
+ * 역명은 자리가 고정이라(v1.7.18 ②-b) 열차와 무관하게 늘 같은 값이다.
+ *
+ * @param depth 아랫변 역명(왼쪽 끝 모서리 하나 뺀)이 바깥 선로 중심에서 내려가는 가장 깊은 곳(px)
+ * @param cornerEndX 아랫변 **왼쪽 끝** 역명(`구로디지털단지`)의 오른쪽 끝 x(px) — 칩 줄이 그 뒤에서 시작한다
+ * @param sideNeed 세로 변 이름을 루프 **안**에 적는 데 필요한 띠 높이(px, 여유 30dp 포함) —
+ *   루프를 깎아도 이 밑으로는 안 간다(넘으면 이름이 밖 차선으로 나가 배치가 통째로 바뀐다 · v1.7.7 D1)
+ * @param fails 제자리를 못 찾아 겹친 채 남은 역명 수
+ */
+private data class LabelMetrics(
+    val depth: Float, val cornerEndX: Float, val sideNeed: Float, val fails: Int,
+)
+
+/**
  * 그릴 준비가 끝난 역 이름 한 장. [pivot] 을 중심으로 [deg] 만큼 돌려 그린다.
  *
  * @param leftAnchored true = 글자가 [pivot] 에서 **오른쪽으로** 뻗는다 / false = 왼쪽으로
@@ -1620,6 +1665,9 @@ private class Lab(
     var deg: Float,
     var leftAnchored: Boolean,
 ) {
+    /** 제자리도 비킬 자리도 못 찾아 **겹친 채 남았나**(v1.7.20 — 루프 깎기의 끝을 정한다). */
+    var failed = false
+
     /**
      * 돌려 놓은 글자 상자의 **네 꼭짓점**.
      *
@@ -2119,7 +2167,7 @@ private fun DrawScope.layoutLabels(
             if (!placedOk) { mirror(true); placedOk = search(pivot, Float.MAX_VALUE) }
             if (!placedOk) mirror(false)
         }
-        if (!placedOk) lab.pivot = pivot
+        if (!placedOk) { lab.pivot = pivot; lab.failed = true }
         placed += lab
     }
     return placed
@@ -2157,6 +2205,8 @@ private fun DrawScope.drawCabLoop(
      * **같은 객체**라 v1.7.3 화면이 픽셀 단위로 그대로 나온다.
      */
     dual: Boolean,
+    /** 역명 치수를 알려 준다(v1.7.20 — 가운데 맞추기용, [LabelMetrics]). */
+    onLabelMetrics: (LabelMetrics) -> Unit = {},
 ): List<Pair<Offset, String>> {
     /*
      * ── 루프 크기·자리 (v1.6.98 · v1.7.4 복선) ──────────────────
@@ -2502,12 +2552,23 @@ private fun DrawScope.drawCabLoop(
         val y = lab.pivot.y - lab.layout.size.height / 2f
         drawText(lab.layout, topLeft = Offset(x, y))
     }
-    // 역 이름은 선로 **반대편**이라 열차 밑에 깔릴 일이 없다 — 한 번에 다 그린다(v1.6.98).
-    // (모서리에서만 겹칠 수 있어 [trainRects] 는 여전히 장애물로 넘긴다 — `layoutLabels` KDoc.)
-    // ⚠ 장애물은 **두 선로를 합쳐** 넘긴다 — 계단만 방향별로 도는 것이지, 이름은 어느 쪽
-    // 열차든 물으면 안 된다(복선에서 좌·우변 내선이 루프 안쪽 = 이름 자리로 들어온다).
-    layoutLabels(tm, loop, loopIn, start, nameSp, pal, big, railW, sideLaneX)
-        .forEach { draw(it) }
+    // 역 이름은 **자리를 고정**하고 먼저 그린다 — 열차는 장애물이 아니고 나중에 그려져 지나가며
+    // 이름을 잠깐 덮는다(v1.7.18 ②-b · `layoutLabels` KDoc).
+    val labs = layoutLabels(tm, loop, loopIn, start, nameSp, pal, big, railW, sideLaneX)
+    // 아랫변 역명(바깥 선로 **아래**에 사는 이름)이 가장 깊이 내려간 곳 — 가운데 맞추기가
+    // 역명↔상태바 칩 여유를 재는 값이다(v1.7.20 · [mapPosRoomPx]).
+    run {
+        // 아랫변(바깥 선로 **아래**에 사는 이름) — 왼쪽 끝(모서리) 하나와 나머지로 가른다.
+        val bottom = labs.filter { it.pivot.y > loop.y1 }.sortedBy { it.pivot.x }
+        val corner = bottom.firstOrNull()
+        onLabelMetrics(LabelMetrics(
+            depth = bottom.drop(1).maxOfOrNull { l -> l.quad(0f).maxOf { it.y } - loop.y1 } ?: 0f,
+            cornerEndX = corner?.quad(0f)?.maxOf { it.x } ?: 0f,
+            sideNeed = sideNeed + 30.dp.toPx(),
+            fails = labs.count { it.failed },
+        ))
+    }
+    labs.forEach { draw(it) }
 
     /*
      * ── 계단으로 올라간 열차의 **받침선** (v1.6.98) ────────────

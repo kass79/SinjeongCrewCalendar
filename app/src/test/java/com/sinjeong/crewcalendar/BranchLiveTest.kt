@@ -8,6 +8,9 @@ import com.sinjeong.crewcalendar.presentation.live.RECPTN_STALE_SEC
 import com.sinjeong.crewcalendar.presentation.live.TrainMark
 import com.sinjeong.crewcalendar.presentation.live.bigDelay
 import com.sinjeong.crewcalendar.presentation.live.branchInout
+import com.sinjeong.crewcalendar.presentation.live.DelayLevel
+import com.sinjeong.crewcalendar.presentation.live.delayBadgeText
+import com.sinjeong.crewcalendar.presentation.live.delayLevel
 import com.sinjeong.crewcalendar.presentation.live.delayText
 import com.sinjeong.crewcalendar.presentation.live.isLastCar
 import com.sinjeong.crewcalendar.presentation.live.latestRecptn
@@ -298,6 +301,27 @@ class BranchLiveTest {
         assertEquals("정시", delayText(0))
         assertEquals("+3분", delayText(3))
         assertEquals("3분 빠름", delayText(-3))
+    }
+
+    /**
+     * 본선 헤더 **지연 알약**(v1.7.20) — 자리가 생겨 `지연` 낱말을 되살렸다. 세기는 셋:
+     * 5분 이상 경고(종전 [bigDelay] 기준) · 1~4분 주의 · 정시·빠름 차분.
+     */
+    @Test
+    fun `지연 알약 — 문구와 세기`() {
+        assertNull(delayBadgeText(null)); assertNull(delayLevel(null))   // 모르면 알약이 없다
+        assertEquals("+3분 지연", delayBadgeText(3))
+        assertEquals("+7분 지연", delayBadgeText(7))
+        assertEquals("정시", delayBadgeText(0))
+        assertEquals("2분 빠름", delayBadgeText(-2))
+        assertEquals(DelayLevel.WARN, delayLevel(1))
+        assertEquals(DelayLevel.WARN, delayLevel(4))
+        assertEquals(DelayLevel.ALERT, delayLevel(5))
+        assertEquals(DelayLevel.ALERT, delayLevel(7))
+        assertEquals(DelayLevel.CALM, delayLevel(0))
+        assertEquals(DelayLevel.CALM, delayLevel(-2))
+        // 지선 카드 한 줄은 종전 짧은 말 그대로다.
+        assertEquals("+3분", delayText(3))
     }
 
     @Test
