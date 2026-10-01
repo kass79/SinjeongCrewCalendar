@@ -150,16 +150,34 @@ object BundledTimetable {
     private const val BOARD_EARLY_MIN = 5L
 
     /**
-     * **기지 출고 알람은 출고시각 50분 전** (v1.6.34 사용자 확정).
+     * **기지 출고 알람은 출고시각 50분 전** (v1.6.34 사용자 확정) — **이제 후반·야간 후반·지선 야간 출고만**.
      *
      * v1.6.27에서 "기지 출고는 1시간 전 알림" 안을 만들었다가 사용자가 "알림 없어도 될 듯"이라
-     * 해서 뺐고([Advice.depot]이 없던 시절), 이번에 다시 필요하다며 **50분**으로 확정했다.
-     * 사용자 예시: *"평일 9번 신정기지 출고(전반시작) 8:02 → 알람 7:12"*.
+     * 해서 뺐고([Advice.depot]이 없던 시절), v1.6.34에서 다시 필요하다며 **50분**으로 확정했다.
+     * 그때 사용자 예시 *"평일 9번 신정기지 출고(전반시작) 8:02 → 알람 7:12"* 는
+     * **v1.7.21 에서 전반만 뒤집혔다** — 카스(2026-10-01, 실기기 1.7.20): *"오늘 9다이아 7시2분
+     * 출근인데..1시간전 6시02분에 알람 울려야 하는데..출고 8시2분이니까,,7시 2분에 울리더라?
+     * 수정해 놔라.."*. 전반 출고는 [SIGN_ON_EARLY_MIN] 을 본다(평일 9 → **6:02**).
      *
      * 편승과 달리 탈 열차를 고르는 창이 없다 — 기지에서 바로 열차를 끌고 나오므로
      * **출고시각 하나에서 곧장 뺀다.** 편승 계열의 [BOARD_EARLY_MIN] 5분과는 무관하다.
+     * 후반 출고는 이미 사업소에 있는 사람(주간 후반 · 침실에서 자고 나가는 야간 후반)이라
+     * 출고 기준 50분이 그대로 맞다 — v1.7.21 에서도 **안 바뀐다.**
      */
     private const val DEPOT_EARLY_MIN = 50L
+
+    /**
+     * **전반이 기지 출고인 근무의 알람 = 출근 60분 전** (v1.7.21 카스 확정 — 위 [DEPOT_EARLY_MIN] 인용).
+     *
+     * 대상은 본선 주간에서 "출근 → 전반시작" 간격이 60분인 11건(평일 2·5·6·8·9 / 휴일 4·8·12·13·14·15
+     * — 전부 신정기지)뿐이다. 야간 전반은 전건 45분(신도림 교대)이라 걸리는 것이 없다.
+     * 이 근무는 **집에서 바로 기지로 출근**하므로 깨우는 기준이 출고가 아니라 출근이다.
+     * 간격이 늘 60분이라 결과는 출고 120분 전과 같지만 **출근시각에서 뺀다**(카스가 말한 기준).
+     *
+     * 브리핑 알림([com.sinjeong.crewcalendar.widget.BriefingAlarm] — 출근 1시간 전, 소리 없는
+     * 일반 알림)과 같은 시각에 겹친다. 둘은 다른 기능이다 — 이쪽은 칩으로 켠 **진짜 알람**이다.
+     */
+    private const val SIGN_ON_EARLY_MIN = 60L
 
     /**
      * **본선 후반사업이 기지 출고인 다이아 → 기지 이름** (v1.6.34에서 [SECOND_NOT_SINDORIM_*]에서 갈라냄).
@@ -245,10 +263,17 @@ object BundledTimetable {
             board = board)
     }
 
-    /** 기지 출고 알람 (v1.6.34) — 출고시각 [DEPOT_EARLY_MIN]분 전. 전반·후반이 이 한 곳을 같이 쓴다. */
-    private fun depot(base: String, out: LocalTime): Advice {
-        val alarm = out.minusMinutes(DEPOT_EARLY_MIN)
-        return Advice(alarm, "$base ${hm(out)} 출고 · 알림 ${hm(alarm)}", depot = true)
+    /**
+     * 기지 출고 알람 (v1.6.34) — 출고시각 [DEPOT_EARLY_MIN]분 전. 전반·후반이 이 한 곳을 같이 쓴다.
+     *
+     * [signOn] 을 넘기면(**전반 출고만** — v1.7.21) 출근 [SIGN_ON_EARLY_MIN]분 전이고 문구에 출근시각이
+     * 붙는다: `신정기지 8:02 출고 · 출근 7:02 · 알림 6:02`. 안 넘기는 호출(후반·야간 후반·지선 야간)과
+     * 출근시각을 모르는 경우는 종전 그대로 출고 50분 전이다.
+     */
+    private fun depot(base: String, out: LocalTime, signOn: LocalTime? = null): Advice {
+        val alarm = signOn?.minusMinutes(SIGN_ON_EARLY_MIN) ?: out.minusMinutes(DEPOT_EARLY_MIN)
+        val on = signOn?.let { " · 출근 ${hm(it)}" }.orEmpty()
+        return Advice(alarm, "$base ${hm(out)} 출고$on · 알림 ${hm(alarm)}", depot = true)
     }
 
     /**
@@ -422,8 +447,9 @@ object BundledTimetable {
      *  · **지선** — 양천구청에서 바로 승무를 시작하므로 편승이 없다. 전반시작 **5분 전 도착**.
      *  · **본선 신도림 교대**([SINDORIM_GAP_MIN]) — 양천구청에서 신도림 출발 10~27분 전에
      *    떠나는 편승 열차 중 **가장 늦은 편**, 알람은 **그 5분 전**([BOARD_EARLY_MIN]).
-     *  · **기지 출고** — **출고시각 50분 전**([DEPOT_EARLY_MIN], v1.6.34 사용자 확정).
-     *    v1.6.27~33은 "알람 없음"이었다. 전반 출고는 전부 신정기지다(아래 C 분기 주석).
+     *  · **기지 출고** — **출근 60분 전**([SIGN_ON_EARLY_MIN], v1.7.21 카스 확정 — 평일 9 → 6:02).
+     *    v1.6.27~33은 "알람 없음", v1.6.34~v1.7.20은 출고 50분 전이었다.
+     *    전반 출고는 전부 신정기지다(아래 C 분기 주석).
      *
      * **후반사업**([second] = true)은 지선 주간(v1.6.29)에 더해 **본선 주간 중 신도림 교대인
      * 다이아**(v1.6.30)와 **기지 출고인 다이아**(v1.6.34, [SECOND_DEPOT_WEEKDAY] ·
@@ -500,8 +526,9 @@ object BundledTimetable {
         //    간격 60분인 11건(평일 2·5·6·8·9 / 휴일 4·8·12·13·14·15)의 전반 첫 열번이
         //    전부 5xxx·6xxx(신정 회송)이고 군자 계열(19xx·29xx)은 0건이다. 야간은 전건 45분이라
         //    전반 출고가 아예 없다. `deadhead_gap_matches_depot_train_number`가 이 대응을 잠근다.
+        //    알람은 **출근 60분 전**(v1.7.21 — 카스 *"1시간전 6시02분에 알람 울려야"*).
         if (start.mins() - signOn.mins() != SINDORIM_GAP_MIN)
-            return depot("신정기지", start)
+            return depot("신정기지", start, signOn)
 
         return deadhead(start, holiday)
     }

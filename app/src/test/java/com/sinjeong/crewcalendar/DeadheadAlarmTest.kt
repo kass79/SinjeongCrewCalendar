@@ -60,6 +60,36 @@ class DeadheadAlarmTest {
         assertEquals(emptyList<String>(), DeadheadAlarm.decode("2026-09-06|2|12:36|문구")!!.second.trainNos)
     }
 
+    /**
+     * **업데이트 전에 켜 둔 전반 알람이 새 규칙 시각으로 옮겨진다**(v1.7.21 — [DeadheadAlarm.resync]).
+     *
+     * 평일 9 를 1.7.20 에서 켜 두면 7:12 로 저장돼 있다. 그 날짜 시트를 안 열어도 앱 실행·업데이트 때
+     * 6:02 로 다시 걸려야 한다. 손대면 안 되는 것: 후반 키 · 시각이 그대로인 편승 · 근무를 모르는 날 ·
+     * 지금 계산이 '알람 없음'인 날(지우지 않는다 — 해제는 칩이 한다).
+     */
+    @Test fun `켜 둔 전반 출고 알람은 새 규칙 시각으로 옮긴다`() {
+        val d9 = LocalDate.of(2026, 10, 8)    // 목 — 평일 9 (출고)
+        val d12 = LocalDate.of(2026, 10, 7)   // 수 — 평일 12 (편승, 시각 그대로)
+        val unknown = LocalDate.of(2026, 10, 6)
+        val rest = LocalDate.of(2026, 10, 12) // 월 — 휴무로 바뀐 날
+        val old = DeadheadAlarm.Alarm(LocalTime.of(7, 12), "신정기지 8:02 출고 · 알림 7:12", listOf("6905"))
+        val stored = mapOf(
+            (d9 to DeadheadAlarm.LEG_FIRST) to old,
+            (d9 to DeadheadAlarm.LEG_SECOND) to DeadheadAlarm.Alarm(LocalTime.of(9, 0), "후반은 손대지 않는다"),
+            (d12 to DeadheadAlarm.LEG_FIRST) to DeadheadAlarm.Alarm(LocalTime.of(7, 48), "편승 그대로"),
+            (unknown to DeadheadAlarm.LEG_FIRST) to old,
+            (rest to DeadheadAlarm.LEG_FIRST) to old,
+        )
+        val duties = mapOf(d9 to DutyCode.parse("9"), d12 to DutyCode.parse("12"), rest to DutyCode.parse("휴무"))
+
+        val moved = DeadheadAlarm.retimed(stored, duties)
+        assertEquals(setOf(d9 to DeadheadAlarm.LEG_FIRST), moved.keys)
+        val a = moved.getValue(d9 to DeadheadAlarm.LEG_FIRST)
+        assertEquals(LocalTime.of(6, 2), a.at)
+        assertEquals("신정기지 8:02 출고 · 출근 7:02 · 알림 6:02", a.text)
+        assertEquals("열번 후보는 그대로 둔다", listOf("6905"), a.trainNos)
+    }
+
     /** 깨진 줄은 예외를 던지지 않고 그 줄만 버린다 — 목록 전체가 날아가면 안 된다. */
     @Test fun brokenEntries_areDroppedNotThrown() {
         listOf("", "쓰레기", "2026-09-04", "2026-09-04|2", "날짜아님|2|19:05|문구", "2026-09-04|2|25:99|문구")

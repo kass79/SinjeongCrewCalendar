@@ -41,6 +41,9 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.sinjeong.crewcalendar.R
+import com.sinjeong.crewcalendar.domain.model.BundledTimetable
+import com.sinjeong.crewcalendar.domain.model.DaySchedule
+import com.sinjeong.crewcalendar.domain.model.DutyCode
 import com.sinjeong.crewcalendar.domain.model.Line2Timetable
 import com.sinjeong.crewcalendar.presentation.live.BranchLive
 import com.sinjeong.crewcalendar.presentation.live.Line2TimetableLoader
@@ -52,6 +55,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
+import java.time.YearMonth
 import java.time.ZoneId
 
 /**
@@ -157,6 +161,39 @@ object DeadheadAlarm {
 
     /** 부팅 후 재등록 ([BriefingReceiver]가 BOOT_COMPLETED에서 호출) */
     fun rearmAll(ctx: Context) = entries(ctx).forEach { (k, a) -> arm(ctx, k.first, k.second, a) }
+
+    /**
+     * **계산 규칙이 바뀌면 이미 켜 둔 전반 알람도 새 시각으로 옮긴다**(v1.7.21).
+     *
+     * 칩은 그 날짜 시트를 **열 때만** 다시 맞춘다([DeadheadAlarmChip] 의 `cur != at` 가지) —
+     * 안 열어 보면 업데이트 전에 켜 둔 평일 9 알람이 옛 7:12 로 그대로 울린다.
+     * [BriefingWorker] 가 앱 실행·부팅·앱 업데이트·브리핑 발송 때마다 이걸 부른다.
+     */
+    suspend fun resync(ctx: Context, monthOf: suspend (YearMonth) -> List<DaySchedule>) {
+        val stored = entries(ctx)
+        val months = stored.keys.filter { it.second == LEG_FIRST }.map { YearMonth.from(it.first) }.distinct()
+        if (months.isEmpty()) return
+        val duties = months.flatMap { monthOf(it) }.associate { it.date to it.duty }
+        retimed(stored, duties).forEach { (k, a) -> schedule(ctx, k.first, k.second, a.at, a.text, a.trainNos) }
+    }
+
+    /**
+     * [resync] 의 판단(순수) — 지금 규칙으로 시각이 달라진 **전반** 예약만 새 시각·문구로 돌려준다.
+     *
+     * **전반만** 본다: 전반 키는 늘 근무 날짜 그대로라 그 날 근무 하나로 계산이 끝난다(후반은 야간이면
+     * 하루 뒤에 걸려 날짜가 갈린다). 이번 규칙 변경도 전반뿐이다.
+     * 새 계산이 **알람 없음이면 손대지 않는다** — 근무를 아직 못 읽은 순간(로그인 전 등)에 켜 둔
+     * 알람을 지우면 안 된다. 해제는 지금처럼 칩(시트)이 한다.
+     */
+    internal fun retimed(
+        stored: Map<Pair<LocalDate, Int>, Alarm>,
+        duties: Map<LocalDate, DutyCode>,
+    ): Map<Pair<LocalDate, Int>, Alarm> = stored.mapNotNull { (k, a) ->
+        val duty = duties[k.first]?.takeIf { k.second == LEG_FIRST } ?: return@mapNotNull null
+        val adv = BundledTimetable.advise(duty, k.first)
+        val at = adv.at?.takeIf { it != a.at } ?: return@mapNotNull null
+        k to a.copy(at = at, text = adv.text)
+    }.toMap()
 
     private fun pending(ctx: Context, date: LocalDate, leg: Int, a: Alarm? = null) = PendingIntent.getBroadcast(
         // 전반은 옛 requestCode를 그대로 둔다 — 업데이트 전에 걸어 둔 알람도 계속 취소된다

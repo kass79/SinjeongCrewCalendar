@@ -209,6 +209,9 @@ class BriefingWorker @AssistedInject constructor(
         // 재시도는 안 하지만(아래) **조용히 넘기지도 않는다** — arm 이 죽으면 다음 브리핑이
         // 통째로 안 뜨는데 종전엔 흔적이 하나도 안 남았다(v1.6.86 점검 #7).
         }.onFailure { Log.w("Briefing", "재등록 실패", it) }
+        // 켜 둔 전반 알람을 지금 규칙으로 다시 맞춘다(v1.7.21 — 업데이트 전 7:12 → 6:02). 브리핑과 따로 잡는다.
+        runCatching { DeadheadAlarm.resync(context) { getMonthSchedule(it).first() } }
+            .onFailure { Log.w("Briefing", "편승 알람 재계산 실패", it) }
         return Result.success() // 알림 실패는 재시도할 필요 없음
     }
 }

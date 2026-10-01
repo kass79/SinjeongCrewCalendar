@@ -818,12 +818,13 @@ class PatternTest {
         // 충당 대행도 대신 뛰는 다이아를 그대로 따라간다
         assertEquals(LocalTime.of(19, 36), BundledTimetable.advise(DutyCode.parse("충당 38"), weekday).at)
 
-        // C. 기지 출고(간격 60분) — v1.6.34부터 **출고 50분 전**. 사용자 확정 예시 그대로:
-        //    주간 9번(행로표에서 신정기지 ○출고 확인) 전반시작 8:02 → 알람 7:12
+        // C. 기지 출고(간격 60분) — v1.6.34~v1.7.20 은 출고 50분 전(7:12)이었고
+        //    **v1.7.21 에서 전반만 출근 60분 전**(카스 *"1시간전 6시02분에 알람 울려야"*):
+        //    주간 9번(행로표에서 신정기지 ○출고 확인) 출근 7:02 · 전반시작 8:02 → 알람 6:02
         val depot = BundledTimetable.advise(DutyCode.parse("9"), weekday)
-        assertEquals(LocalTime.of(7, 12), depot.at)
+        assertEquals(LocalTime.of(6, 2), depot.at)
         assertTrue(depot.depot)
-        assertEquals("신정기지 8:02 출고 · 알림 7:12", depot.text)
+        assertEquals("신정기지 8:02 출고 · 출근 7:02 · 알림 6:02", depot.text)
 
         // 기준시각이 없는 근무 — 대기 계열·운휴대기
         assertEquals(null, BundledTimetable.advise(DutyCode.parse("대3"), weekday).at)
@@ -1630,11 +1631,13 @@ class PatternTest {
      *
      * v1.6.27~33은 출고에 알람이 없었다("알람 없음 + 사유 표시"). 사용자가 다시 필요하다며
      * **50분 전**으로 확정했다. 원문 예시: *"평일 9번 신정기지 출고 8:02 → 알람 7:12"*.
+     * ⚠ **v1.7.21 에서 전반만 출근 60분 전으로 뒤집혔다**(평일 9 → 6:02 —
+     * [firstLegDepot_alarm_is_one_hour_before_signOn]). 후반 9건은 여전히 50분이다.
      *
-     * | 구간 | 대상 | 기지 |
-     * |---|---|---|
-     * | 전반 | 11건 (평일 2·5·6·8·9 / 휴일 4·8·12·13·14·15) | 전부 신정기지(첫 열번 5xxx·6xxx) |
-     * | 후반 | 9건 (평일 6·13·14·16·17·21 / 휴일 3·5·20) | 신정 6 · 군자 3 |
+     * | 구간 | 대상 | 기지 | 알람 |
+     * |---|---|---|---|
+     * | 전반 | 11건 (평일 2·5·6·8·9 / 휴일 4·8·12·13·14·15) | 전부 신정기지(첫 열번 5xxx·6xxx) | 출근 60분 전(v1.7.21) |
+     * | 후반 | 9건 (평일 6·13·14·16·17·21 / 휴일 3·5·20) | 신정 6 · 군자 3 | 출고 50분 전 |
      *
      * 출고가 **아닌** 사유로 빠진 셋(평일 1 군자기지 편승 / 휴일 1 군자→성수 편승 / 휴일 21 성수 교대)은
      * 대상이 아니다 — 편승·교대는 어디서 몇 시에 열차를 잡는지 표에 없다.
@@ -1645,19 +1648,19 @@ class PatternTest {
         fun adv(n: Int, date: LocalDate, second: Boolean = false) =
             BundledTimetable.advise(DutyCode.parse("$n"), date, second)
 
-        // ── 전반: 출고시각(= MainLegs 전반시작) − 50분. 손계산 표본 ──
+        // ── 전반: v1.7.21 부터 **출근 − 60분**(종전 출고 − 50분). 손계산 표본 (출고, 출근, 알람) ──
         listOf(
-            Triple(9, weekday, "8:02" to LocalTime.of(7, 12)),   // 사용자 확정 예시
-            Triple(2, weekday, "7:23" to LocalTime.of(6, 33)),
-            Triple(5, weekday, "7:47" to LocalTime.of(6, 57)),
-            Triple(4, holiday, "8:30" to LocalTime.of(7, 40)),
-            Triple(15, holiday, "10:39" to LocalTime.of(9, 49)),
+            Triple(9, weekday, Triple("8:02", "7:02", LocalTime.of(6, 2))),   // 카스 확정 예시(v1.7.21)
+            Triple(2, weekday, Triple("7:23", "6:23", LocalTime.of(5, 23))),
+            Triple(5, weekday, Triple("7:47", "6:47", LocalTime.of(5, 47))),
+            Triple(4, holiday, Triple("8:30", "7:30", LocalTime.of(6, 30))),
+            Triple(15, holiday, Triple("10:39", "9:39", LocalTime.of(8, 39))),
         ).forEach { (n, date, spec) ->
-            val (out, alarm) = spec
+            val (out, on, alarm) = spec
             val a = adv(n, date)
             assertEquals("$n / $date", alarm, a.at)
             assertTrue("$n / $date", a.depot)
-            assertEquals("신정기지 $out 출고 · 알림 ${alarm.hour}:%02d".format(alarm.minute), a.text)
+            assertEquals("신정기지 $out 출고 · 출근 $on · 알림 ${alarm.hour}:%02d".format(alarm.minute), a.text)
         }
 
         // ── 후반: 출고시각(= MainLegs 후반시작, 휴일 15분 보정 없음) − 50분 ──
@@ -1704,6 +1707,73 @@ class PatternTest {
         // 지선·대기는 출고 표시가 붙지 않는다
         assertTrue(!BundledTimetable.advise(DutyCode.parse("지1"), weekday).depot)
         assertTrue(!BundledTimetable.advise(DutyCode.parse("대3"), weekday).depot)
+    }
+
+    /**
+     * **전반이 기지 출고인 근무 = 출근 1시간 전** (v1.7.21 카스 확정).
+     *
+     * 카스(2026-10-01, 실기기 1.7.20): *"오늘 9다이아 7시2분 출근인데..1시간전 6시02분에 알람
+     * 울려야 하는데..출고 8시2분이니까,,7시 2분에 울리더라? 수정해 놔라.."*.
+     * 그날(목·평일) 1.7.20 코드가 낸 값은 전반 칩 **7:12**(출고 8:02 − 50분) · 브리핑 6:02(출근 − 1시간,
+     * 소리 없는 일반 알림) · 후반 칩 15:36 이었다. 7:02 를 내는 알람은 코드에 **평일 6 전반**(출고 7:52 − 50)뿐이다.
+     *
+     * 바뀐 것은 **전반 출고 11건**뿐이고 편승·후반 출고·야간·지선은 그대로다 — 아래 둘째 덩어리가 잠근다.
+     */
+    @Test fun firstLegDepot_alarm_is_one_hour_before_signOn() {
+        val oct1 = LocalDate.of(2026, 10, 1) // 목 — 공휴일 아님(10/3 개천절·10/5 대체·10/9 한글날)
+        val sun = LocalDate.of(2026, 10, 4)  // 일 — 휴일 표
+        assertFalse(Bundled.isHolidayTimetable(oct1))
+        assertTrue(Bundled.isHolidayTimetable(sun))
+        val nine = DutyCode.parse("9")
+        assertEquals("7:02", Bundled.signOn(nine, oct1))
+        BundledTimetable.advise(nine, oct1).let {
+            assertEquals(LocalTime.of(6, 2), it.at)
+            assertEquals("신정기지 8:02 출고 · 출근 7:02 · 알림 6:02", it.text)
+            assertTrue(it.depot)
+        }
+        // 브리핑(출근 1시간 전 알림)과 같은 시각이다 — 다른 기능이라 둘 다 뜬다(브리핑은 소리 없는 알림)
+        assertEquals(oct1.atTime(6, 2), signOnAt(oct1, Bundled.signOn(nine, oct1))?.minusHours(1))
+        // 휴일 4 — 출근 7:30 · 출고 8:30 → 6:30
+        assertEquals("7:30", Bundled.signOn(DutyCode.parse("4"), sun))
+        assertEquals(LocalTime.of(6, 30), BundledTimetable.advise(DutyCode.parse("4"), sun).at)
+
+        // 대상 11건 전수 — 알람 = 출근 − 60분(간격이 늘 60분이라 출고 − 120분과 같다)
+        val got = mutableMapOf<String, String>()
+        listOf(oct1 to MainLegs.WEEKDAY, sun to MainLegs.HOLIDAY).forEach { (d, legs) ->
+            legs.keys.forEach { n ->
+                val a = BundledTimetable.advise(DutyCode.parse("$n"), d)
+                if (a.depot) got[(if (d == sun) "휴" else "평") + n] = "%d:%02d".format(a.at!!.hour, a.at!!.minute)
+            }
+        }
+        assertEquals(
+            mapOf(
+                "평2" to "5:23", "평5" to "5:47", "평6" to "5:52", "평8" to "5:57", "평9" to "6:02",
+                "휴4" to "6:30", "휴8" to "6:58", "휴12" to "7:28", "휴13" to "7:52", "휴14" to "8:17", "휴15" to "8:39",
+            ),
+            got,
+        )
+
+        // ── 안 바뀐 것(종전 값 그대로) ──
+        // 편승: 평일 12 — 신도림 8:07 → 양천구청 7:53 → 7:48 / 9 의 후반도 신도림 교대 편승 15:36
+        assertEquals(LocalTime.of(7, 48), BundledTimetable.advise(DutyCode.parse("12"), oct1).at)
+        assertEquals(LocalTime.of(15, 36), BundledTimetable.advise(nine, oct1, second = true).at)
+        // 후반 출고: 평일 6 — 출고 15:26 − 50 = 14:36 (출근 기준이 아니다)
+        BundledTimetable.advise(DutyCode.parse("6"), oct1, second = true).let {
+            assertEquals(LocalTime.of(14, 36), it.at)
+            assertEquals("신정기지 15:26 출고 · 알림 14:36", it.text)
+        }
+        // 야간: 38 평평 전반(편승) 19:36 / 33 평평 후반 출고(익일) 5:52 − 50 = 5:02
+        val pp = LocalDate.of(2026, 8, 19)
+        assertEquals(LocalTime.of(19, 36), BundledTimetable.advise(DutyCode.parse("38"), pp).at)
+        BundledTimetable.advise(DutyCode.parse("33"), pp, second = true).let {
+            assertEquals("신정기지 5:52 출고 · 알림 5:02", it.text)
+            assertTrue(it.nextDay)
+        }
+        // 지선 출고: 지10 후반(익일) 신정기지 5:10 − 50 = 4:20
+        assertEquals(LocalTime.of(4, 20), BundledTimetable.advise(DutyCode.parse("지10"), oct1, second = true).at)
+        // 출근시각이 없는 날(휴일 운휴 26) — 출고인지조차 못 가려 종전처럼 알람 없음
+        assertNull(Bundled.signOn(DutyCode.parse("26"), sun))
+        assertNull(BundledTimetable.advise(DutyCode.parse("26"), sun).at)
     }
 
     /**
